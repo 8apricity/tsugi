@@ -54,7 +54,7 @@ School-life information that students share inside the school community, such as
 _Avoid_: Official information, school announcement, post
 
 **Active Shared Information**:
-Shared information that has been accepted and is currently reflected in a student's daily plan or reference view. Active shared information may later be changed or removed through another accepted change proposal or a direct change.
+Shared information whose latest applied change makes it currently reflected in a student's daily plan or reference view. Active shared information may come from an accepted change proposal or a direct change, and stops being active when a later shared information change removes it.
 _Avoid_: Master, official information, approved item, canonical item
 
 **Shared Information Change**:

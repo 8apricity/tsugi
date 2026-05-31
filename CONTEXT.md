@@ -1,7 +1,7 @@
 # Jikanwari
 
-Jikanwari is a closed school community app for students at one high school. It exists to share school-life information such as timetables and assignments, and may later support surveys, test-result collection, personalised reports, and discussion threads.
-Its initial core is helping students understand their current timetable and tasks through shared information, confirmations, and trust scores.
+Jikanwari is a closed school community app for students at one high school. It exists to share school-life information such as timetable changes, tasks, and notes, and may later support requests, test-result collection, personalised reports, and discussion threads.
+Its initial core is helping students understand their current timetable and tasks through active shared information, change proposals, direct changes, approvals, and rejections.
 
 ## Language
 
@@ -14,8 +14,8 @@ A person who attends the high school and can participate in the school community
 _Avoid_: User, member, teacher, administrator
 
 **Student Account**:
-The account a student uses to participate in Jikanwari. A student account is tied to the student's school-issued Google account and is eligible by the full school email address pattern, not by domain alone.
-_Avoid_: User account, anonymous account, shared account, domain-only account
+The account a student uses to participate in Jikanwari. A student account is eligible by the full school email address pattern, not by domain alone.
+_Avoid_: User account, anonymous account, shared account, domain-only account, Google account
 
 **School Email**:
 The school-issued email address used to determine whether a student can create a student account. Parts of the school email may identify cohort-like or stable student information, but Jikanwari does not use them to infer affiliation or expose them as student identity.
@@ -28,6 +28,10 @@ _Avoid_: Real name, legal name, account name
 **Real Name**:
 The student's actual name, used only where a named response needs to identify who answered.
 _Avoid_: Display name, nickname
+
+**Named Attribution**:
+Showing a student's display name as the source of ordinary Jikanwari activity. Direct changes use named attribution, while change proposals, approvals, and rejections do not show the individual students behind them.
+_Avoid_: Real-name attribution, anonymous identity, reputation
 
 **Student Affiliation**:
 A student's self-selected grade, class, and track inside the school community. Student affiliation determines which target scopes currently apply to the student and can be changed by the student.
@@ -46,24 +50,40 @@ A student grouping within a grade and school year, such as 2-3. Classes are not 
 _Avoid_: Homeroom, classroom
 
 **Shared Information**:
-School-life information that students share inside the school community, such as timetables, assignments, and announcements. Shared information is not official school information; its trustworthiness is formed through student confirmation.
+School-life information that students share inside the school community, such as timetable changes, tasks, and notes. Shared information is not official school information.
 _Avoid_: Official information, school announcement, post
 
-**Information Candidate**:
-One proposed version of shared information for the same timetable change or task. When candidates conflict, Jikanwari can prefer the candidate with stronger confirmation while keeping alternatives inspectable.
-_Avoid_: Edit, revision, correction
+**Active Shared Information**:
+Shared information that has been accepted and is currently reflected in a student's daily plan or reference view. Active shared information may later be changed or removed through another accepted change proposal.
+_Avoid_: Master, official information, approved item, canonical item
 
-**Preferred Candidate**:
-The information candidate currently shown as the main version in a student's daily plan because it has the strongest trust signal among competing candidates. Other candidates remain inspectable.
-_Avoid_: Correct answer, official version, winner
+**Shared Information Change**:
+An accepted change proposal or direct change that has been applied to shared information. Shared information changes form the history from which active shared information can be understood.
+_Avoid_: Patch, commit, revision, audit log
 
-**Trust Score**:
-A measure of how much confidence the school community has in a piece of shared information. A trust score belongs to the information itself and reflects student confirmation, not school approval or a student's reputation.
-_Avoid_: Approval, moderation status, official status, student score
+**Change Proposal**:
+A proposed addition, update, or removal of shared information. A change proposal is pending until enough approvals accept it or enough rejections reject it.
+_Avoid_: Candidate, edit, revision, correction
 
-**Confirmation**:
-A student's signal that they have independently recognised the same shared information. A confirmation increases trust in the information only when the student is inside the shared information's target scope, and is not a like, read receipt, or official approval.
-_Avoid_: Like, read receipt, approval, vote
+**Base Change**:
+The shared information change that a change proposal uses as the starting point for an update or removal. If active shared information changes after a proposal's base change, the proposal becomes stale before it can be accepted.
+_Avoid_: Parent revision, source version, previous edit
+
+**Stale Change Proposal**:
+A change proposal that can no longer be accepted because the active shared information it was based on has already changed. A stale change proposal is different from a rejected change proposal.
+_Avoid_: Rejected proposal, expired proposal, superseded proposal
+
+**Direct Change**:
+A direct addition, update, or removal of shared information that becomes active without waiting for approvals. A direct change still follows creator scope and has a target scope like a change proposal, and is common when a student relays school-life information to the target scope.
+_Avoid_: Forced edit, admin edit, bypass
+
+**Approval**:
+A target-scope student's signal that a change proposal should be accepted and reflected as active shared information. An approval is about accepting a proposed change, not liking the information or completing a task, and the student who made the proposal does not count toward the required approvals.
+_Avoid_: Like, confirmation, task completion, official approval
+
+**Rejection**:
+A target-scope student's signal that a change proposal should not be accepted. A rejection belongs to the change proposal, not to the student who made the proposal.
+_Avoid_: Downvote, dislike, moderation action
 
 **Collection**:
 A request for students in a target scope to submit structured answers. A collection produces aggregate results and may produce a personalised report for each responding student.
@@ -153,6 +173,10 @@ _Avoid_: Subject name, clock time
 A school-life obligation shared inside the school community with a due date and target scope. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete, and may optionally be related to a lesson. A task can have an individual student as its target scope without becoming a separate personal-task concept.
 _Avoid_: Assignment, homework, todo
 
+**Note**:
+Shared information that records a school-life notice or reminder without being a task or timetable change. A note has a target scope and may have no related context or one related context: a school date, a lesson slot, or a task.
+_Avoid_: Announcement, comment, memo
+
 **Due Reference**:
 A shorthand way to set a task due date from the next or second-next matching lesson in the displayed timetable. A due reference uses a lesson name to decide what counts as the next lesson, and should only be used when it resolves to one due date for the task's target scope.
 _Avoid_: Reminder, recurrence, deadline rule
@@ -165,8 +189,16 @@ _Avoid_: Task status, confirmation, submission
 The group of students a timetable change, task, request, test-result collection, report, or thread applies to. A target scope may be grade, class, track, student, or group.
 _Avoid_: Audience, visibility, permission
 
+**Shared Information Target Scope**:
+The target scope attached to a piece of active shared information. Updating shared information does not change its target scope; changing the target scope means removing the old shared information and adding new shared information.
+_Avoid_: Retargeting, audience edit
+
+**Shared Information Kind**:
+The type of active shared information, such as task, timetable change, or note. Updating shared information does not change its kind; changing the kind means removing the old shared information and adding new shared information.
+_Avoid_: Category edit, type conversion
+
 **Creator Scope**:
-The rule that a student can create shared information, collections, or threads only for a target scope that includes that student.
+The rule that a student can propose or directly make changes to shared information, collections, or threads only for a target scope that includes that student.
 _Avoid_: Admin permission, ownership
 
 **Group**:
@@ -182,14 +214,14 @@ _Avoid_: Chat, board, social media post
 Developer: How does Jikanwari know a student's class and track?
 Domain expert: The student selects their own affiliation when creating their student account.
 
-Developer: If the same student posts several accurate tasks, does that student get a public trust score?
-Domain expert: No. Trust scores belong to shared information, not to students.
+Developer: If the same student proposes several accepted tasks, does that student get a public reputation score?
+Domain expert: No. Approvals and rejections belong to change proposals, not to student reputation.
 
-Developer: Does confirming a task mean the student likes it or has completed it?
-Domain expert: No. A confirmation only means the student has independently recognised the same information.
+Developer: Does approving a task proposal mean the student likes the task or has completed it?
+Domain expert: No. An approval only means the student thinks the proposed change should become active shared information.
 
-Developer: Can a student outside the target scope raise the trust score for a timetable change?
-Domain expert: No. Only confirmations from students inside the target scope contribute to trust.
+Developer: Can a student outside the target scope approve a timetable change proposal?
+Domain expert: No. Only students inside the target scope can approve or reject the change proposal.
 
 Developer: Is a test result collection the school's official grade record?
 Domain expert: No. Students submit their own results for community aggregation and personalised reports.
@@ -209,10 +241,13 @@ Domain expert: No. The standard timetable is owned by the school year; term-like
 Developer: What should a student check first in Jikanwari?
 Domain expert: Their daily plan, because it shows the timetable and tasks that apply to them for the day.
 
+Developer: Is active shared information the source of truth?
+Domain expert: No. Active shared information is the current state students see, while shared information changes explain how that state came to be.
+
 Developer: Can a student inspect another class's timetable?
 Domain expert: Yes, through a reference view. It does not make that other class's entries part of the student's daily plan.
 
-Developer: If a student-level timetable change overrides a class-level change, does the class-level entry disappear?
+Developer: If a student-level timetable change overrides a class-level change, does the class-level active shared information disappear?
 Domain expert: No. The student sees the student-level entry in the displayed timetable, but can still inspect the broader class-level entry.
 
 Developer: Is bringing a calculator tomorrow an assignment?
@@ -224,5 +259,5 @@ Domain expert: No. A task has a target scope and due date; a lesson is only an o
 Developer: Can a class-wide task use "next math" if different tracks have math on different days?
 Domain expert: No. The task should use a narrower target scope or a direct due date so the shared task has one due date.
 
-Developer: If a student marks a task complete, does that confirm the task information is correct?
-Domain expert: No. Task completion is personal progress, while confirmation is about recognising the same shared information.
+Developer: If a student marks a task complete, does that approve the task information?
+Domain expert: No. Task completion is personal progress, while approval is about accepting a proposed change to shared information.

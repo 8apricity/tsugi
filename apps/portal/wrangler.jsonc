@@ -1,9 +1,9 @@
 {
-	"name": "<WORKER_NAME>",
-	"main": "worker/index.ts",
-	"compatibility_date": "<COMPATIBILITY_DATE>",
-	"assets": { "not_found_handling": "single-page-application" },
-	"observability": {
-		"enabled": true
-	}
+  "name": "jikanwari",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-05-31",
+  "assets": { "not_found_handling": "single-page-application" },
+  "observability": {
+    "enabled": true,
+  },
 }

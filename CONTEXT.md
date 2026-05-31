@@ -170,7 +170,7 @@ A shorthand reference to a lesson slot in the standard timetable, such as "Monda
 _Avoid_: Subject name, clock time
 
 **Task**:
-A school-life obligation shared inside the school community with a due date and target scope. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete, and may optionally be related to a lesson. A task can have an individual student as its target scope without becoming a separate personal-task concept.
+A school-life obligation shared inside the school community with a due date or due reference and target scope. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete, and may optionally be related to a lesson. A task can have an individual student as its target scope without becoming a separate personal-task concept.
 _Avoid_: Assignment, homework, todo
 
 **Note**:
@@ -178,7 +178,7 @@ Shared information that records a school-life notice or reminder without being a
 _Avoid_: Announcement, comment, memo
 
 **Due Reference**:
-A shorthand way to set a task due date from the next or second-next matching lesson in the displayed timetable. A due reference uses a lesson name to decide what counts as the next lesson, and should only be used when it resolves to one due date for the task's target scope.
+A shorthand way to describe a task's due timing from the next or second-next matching lesson in the displayed timetable. A due reference uses a lesson name to decide what counts as the next lesson, and should only be used when it identifies one due timing for the task's target scope.
 _Avoid_: Reminder, recurrence, deadline rule
 
 **Task Completion**:

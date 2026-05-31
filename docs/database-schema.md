@@ -199,10 +199,12 @@ create table timetable_change_snapshots (
 
   check (period_number > 0),
   check (replacement_type in ('lesson_name', 'period_reference', 'cancelled')),
-  check (replacement_type != 'lesson_name' or replacement_lesson_name is not null),
+  check (reference_weekday is null or reference_weekday between 1 and 7),
+  check (reference_period_number is null or reference_period_number > 0),
   check (
-    replacement_type != 'period_reference'
-    or (reference_weekday is not null and reference_period_number is not null)
+    (replacement_type = 'lesson_name' and replacement_lesson_name is not null and reference_weekday is null and reference_period_number is null)
+    or (replacement_type = 'period_reference' and replacement_lesson_name is null and reference_weekday is not null and reference_period_number is not null)
+    or (replacement_type = 'cancelled' and replacement_lesson_name is null and reference_weekday is null and reference_period_number is null)
   )
 );
 
@@ -282,6 +284,7 @@ create table shared_information_changes (
 ```
 
 Accepted proposals and direct changes both create a shared information change. A separate direct changes table is intentionally not used.
+`changed_by_student_account_id` is stored for traceability, but ordinary named attribution is shown only for direct changes. Accepted proposals, approvals, and rejections should not expose the individual students behind them in normal product surfaces.
 
 ## Change Proposals
 
@@ -372,4 +375,3 @@ create index usage_events_event_name_occurred_at_idx
 ```
 
 Usage events are for product analytics, not application behavior. They should not contain school email addresses, shared information body text, or other unnecessary personal data. Use small metadata such as `kind`, `change_kind`, or target scope summary when needed.
-

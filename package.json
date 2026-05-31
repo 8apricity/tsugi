@@ -24,5 +24,12 @@
     "globals": "^17.6.0",
     "jiti": "^2.7.0",
     "typescript-eslint": "^8.60.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "workerd"
+    ]
   }
 }

@@ -54,7 +54,7 @@ School-life information that students share inside the school community, such as
 _Avoid_: Official information, school announcement, post
 
 **Active Shared Information**:
-Shared information that has been accepted and is currently reflected in a student's daily plan or reference view. Active shared information may later be changed or removed through another accepted change proposal.
+Shared information that has been accepted and is currently reflected in a student's daily plan or reference view. Active shared information may later be changed or removed through another accepted change proposal or a direct change.
 _Avoid_: Master, official information, approved item, canonical item
 
 **Shared Information Change**:
@@ -186,7 +186,7 @@ A student's personal completion state for a task. Task completion belongs to the
 _Avoid_: Task status, confirmation, submission
 
 **Target Scope**:
-The group of students a timetable change, task, request, test-result collection, report, or thread applies to. A target scope may be grade, class, track, student, or group.
+The set of students a timetable change, task, request, test-result collection, report, or thread applies to. A target scope may be grade, class, track, student, or group.
 _Avoid_: Audience, visibility, permission
 
 **Shared Information Target Scope**:

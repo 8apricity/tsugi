@@ -176,7 +176,6 @@ Snapshots are immutable value records. They do not store creator, target scope, 
 create table task_snapshots (
   task_snapshot_id text primary key,
   title text not null,
-  body text,
   due_date text,
   due_reference_kind text,
   lesson_name text,
@@ -292,6 +291,7 @@ Accepted proposals and direct changes both create a shared information change. A
 create table change_proposals (
   change_proposal_id text primary key,
   shared_information_item_id text references shared_information_items(shared_information_item_id),
+  description text,
   kind text not null,
   change_kind text not null,
   target_scope_id text not null references target_scopes(target_scope_id),

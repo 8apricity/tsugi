@@ -349,9 +349,12 @@ create table task_completions (
   task_completion_id text primary key,
   task_item_id text not null references shared_information_items(shared_information_item_id),
   student_account_id text not null references student_accounts(student_account_id),
-  completed_at text not null,
+  status text not null,
+  completed_at text,
+  updated_at text not null,
 
-  unique (task_item_id, student_account_id)
+  unique (task_item_id, student_account_id),
+  check (status in ('pending', 'completed', 'hidden'))
 );
 ```
 

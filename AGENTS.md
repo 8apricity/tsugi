@@ -12,6 +12,10 @@ Use the default Matt Pocock skill triage labels. See `docs/agents/triage-labels.
 
 This repo uses a single-context domain-doc layout. See `docs/agents/domain.md`.
 
+### UI design guidance
+
+When designing or changing application UI, follow `docs/agents/ui-design.md`.
+
 ## Change reports
 
 When an agent changes files in this repo, include an example commit title in the final response.

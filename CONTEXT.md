@@ -14,12 +14,20 @@ A person who attends the high school and can participate in the school community
 _Avoid_: User, member, teacher, administrator
 
 **Student Account**:
-The account a student uses to participate in Jikanwari. A student account is eligible by the full school email address pattern, not by domain alone.
-_Avoid_: User account, anonymous account, shared account, domain-only account, Google account
+The account a student uses to participate in Jikanwari. A student account is created only after the student proves access to an eligible school email and completes required profile details such as display name and student affiliation.
+_Avoid_: User account, anonymous account, shared account, domain-only account, Google account, verified email alone
 
 **School Email**:
 The school-issued email address used to determine whether a student can create a student account. Parts of the school email may identify cohort-like or stable student information, but Jikanwari does not use them to infer affiliation or expose them as student identity.
 _Avoid_: Personal email, affiliation source, public identifier
+
+**School Email Number**:
+The student-entered numeric part that Jikanwari uses to construct a full school email. The school email number is not treated as a public identifier or as proof of current student affiliation by itself.
+_Avoid_: Student ID, login ID, affiliation code, public identifier
+
+**Verification Code**:
+A short one-time code sent to a school email so a student can prove access to that school email during sign-up or sign-in. Verification codes are stored only as hashes, older unused codes for the same school email are invalidated when a new code is issued, and repeated requests are rate-limited.
+_Avoid_: Magic link, password, invitation code, permanent credential
 
 **Display Name**:
 The name shown for a student in ordinary Jikanwari activity, usually a nickname rather than the student's real name.
@@ -213,6 +221,12 @@ _Avoid_: Chat, board, social media post
 
 Developer: How does Jikanwari know a student's class and track?
 Domain expert: The student selects their own affiliation when creating their student account.
+
+Developer: Does entering a school email number create a student account?
+Domain expert: No. It only requests a verification code. The student account is created after the student proves access to the school email and completes the required account details.
+
+Developer: Is Jikanwari using magic links for authentication?
+Domain expert: No. Jikanwari uses verification codes sent to school email.
 
 Developer: If the same student proposes several accepted tasks, does that student get a public reputation score?
 Domain expert: No. Approvals and rejections belong to change proposals, not to student reputation.

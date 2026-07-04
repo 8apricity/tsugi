@@ -8,7 +8,7 @@ The previous trust-score-based database sketch has been replaced by the current 
 
 Initial schema includes:
 
-- Student accounts and magic link authentication
+- Student accounts and school email verification code authentication
 - School years, classes, tracks, and student affiliations
 - Target scopes
 - Standard timetables
@@ -29,6 +29,8 @@ Initial schema excludes:
 
 ## Student Accounts
 
+Student accounts are created after a student proves access to an eligible school email and completes required account details such as display name and student affiliation.
+
 ```sql
 create table student_accounts (
   student_account_id text primary key,
@@ -40,18 +42,19 @@ create table student_accounts (
   disabled_at text
 );
 
-create table magic_link_tokens (
-  magic_link_token_id text primary key,
+create table email_verification_codes (
+  email_verification_code_id text primary key,
   school_email text not null,
-  student_account_id text references student_accounts(student_account_id),
-  token_hash text not null unique,
-  expires_at text not null,
-  consumed_at text,
-  created_at text not null
+  code_hash text not null,
+  requested_at integer not null,
+  invalidated_at integer
 );
+
+create index email_verification_codes_school_email_requested_at_idx
+  on email_verification_codes(school_email, requested_at);
 ```
 
-Magic link token values are never stored directly. `token_hash` stores only a hash of the token sent by email.
+Verification code values are never stored directly. `code_hash` stores only a hash of the code sent by email. `invalidated_at is null` means the code request may still be used if it is also within the application-enforced expiry window. When a new code is issued for the same school email, older unused codes are invalidated. Request history is retained so resend cooldowns and hourly send limits can be enforced.
 
 ## School Structure
 

@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "cf-typegen": "wrangler types worker-configuration.d.ts",
     "dev": "vite",
-    "build": "tsc -b && tsc -p tsconfig.worker.json --noEmit && vite build",
+    "build": "wrangler types worker-configuration.d.ts --check && tsc -b && tsc -p tsconfig.worker.json --noEmit && vite build",
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview"

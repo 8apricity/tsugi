@@ -9,4 +9,11 @@
   "observability": {
     "enabled": true,
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "jikanwari-d1",
+      "database_id": "8e68b864-969c-4108-b0d9-0aa684da58c7",
+    },
+  ],
 }

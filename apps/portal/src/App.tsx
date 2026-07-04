@@ -1,47 +1,49 @@
-import { useState, type FormEvent } from 'react'
-import './App.css'
+import { useState, type FormEvent } from "react";
+import "./App.css";
 
-type RequestStatus = 'idle' | 'sending' | 'sent' | 'error'
+type RequestStatus = "idle" | "sending" | "sent" | "error";
 
 function App() {
-  const [schoolEmailNumber, setSchoolEmailNumber] = useState('')
-  const [schoolEmail, setSchoolEmail] = useState<string | null>(null)
-  const [status, setStatus] = useState<RequestStatus>('idle')
-  const [message, setMessage] = useState<string | null>(null)
+  const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
+  const [schoolEmail, setSchoolEmail] = useState<string | null>(null);
+  const [status, setStatus] = useState<RequestStatus>("idle");
+  const [message, setMessage] = useState<string | null>(null);
 
   async function requestVerificationCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setStatus('sending')
-    setMessage(null)
-    setSchoolEmail(null)
+    event.preventDefault();
+    setStatus("sending");
+    setMessage(null);
+    setSchoolEmail(null);
 
-    const response = await fetch('/api/auth/verification-code-requests', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+    const response = await fetch("/api/auth/verification-code-requests", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ schoolEmailNumber }),
-    })
+    });
 
     if (response.ok) {
-      const body = (await response.json()) as { schoolEmail: string }
-      setSchoolEmail(body.schoolEmail)
-      setStatus('sent')
-      setMessage('確認コードを送信しました。学校メールを確認してください。')
-      return
+      const body = (await response.json()) as { schoolEmail: string };
+      setSchoolEmail(body.schoolEmail);
+      setStatus("sent");
+      setMessage("認証コードを送信しました。メールを確認してください。");
+      return;
     }
 
-    setStatus('error')
+    setStatus("error");
 
     if (response.status === 400) {
-      setMessage('8桁の半角数字を入力してください。')
-      return
+      setMessage("8桁の半角数字を入力してください。");
+      return;
     }
 
     if (response.status === 429) {
-      setMessage('少し時間をおいてから、もう一度送信してください。')
-      return
+      setMessage("少し時間をおいてから、もう一度送信してください。");
+      return;
     }
 
-    setMessage('確認コードを送信できませんでした。時間をおいて再度お試しください。')
+    setMessage(
+      "認証コードを送信できませんでした。時間をおいて再度お試しください。",
+    );
   }
 
   return (
@@ -51,7 +53,7 @@ function App() {
           <p className="eyebrow">Jikanwari</p>
           <h1 id="signup-title">学校メールで始める</h1>
           <p className="lead">
-            学校メールの8桁の番号を入力すると、確認コードを送信します。
+            学校メールの8桁の番号を入力すると、認証コードを送信します。
           </p>
         </div>
 
@@ -71,13 +73,13 @@ function App() {
             <span aria-hidden="true">mkn@e.osakamanabi.jp</span>
           </div>
 
-          <button type="submit" disabled={status === 'sending'}>
-            {status === 'sending' ? '送信中' : '確認コードを送信'}
+          <button type="submit" disabled={status === "sending"}>
+            {status === "sending" ? "送信中" : "認証コードを送信"}
           </button>
         </form>
 
         {message ? (
-          <div className={`notice ${status === 'error' ? 'error' : 'success'}`}>
+          <div className={`notice ${status === "error" ? "error" : "success"}`}>
             <p>{message}</p>
             {schoolEmail ? (
               <p>
@@ -88,7 +90,7 @@ function App() {
         ) : null}
       </section>
     </main>
-  )
+  );
 }
 
-export default App
+export default App;

@@ -395,7 +395,6 @@ export async function requestVerificationCode({
     return { status: 'rate-limited' }
   }
 
-  await sendEmail({ schoolEmail, code })
   await store.invalidateUnusedRequests(schoolEmail, now)
   await store.saveRequest({
     schoolEmail,
@@ -403,6 +402,12 @@ export async function requestVerificationCode({
     requestedAt: now,
     invalidatedAt: null,
   })
+  try {
+    await sendEmail({ schoolEmail, code })
+  } catch (error) {
+    await store.invalidateUnusedRequests(schoolEmail, now)
+    throw error
+  }
 
   return { status: 'sent', schoolEmail }
 }

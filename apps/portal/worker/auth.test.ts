@@ -56,6 +56,46 @@ describe('requestVerificationCode', () => {
     expect(record.codeHash).not.toBe('123456')
     expect(record.codeHash).toMatch(/^[0-9a-f]{64}$/)
   })
+
+  it('does not send email when saving the verification code fails', async () => {
+    const store = new InMemoryVerificationCodeStore()
+    const sendEmail = vi.fn().mockResolvedValue(undefined)
+    vi.spyOn(store, 'saveRequest').mockRejectedValueOnce(
+      new Error('database unavailable'),
+    )
+
+    await expect(
+      requestVerificationCode({
+        schoolEmailNumber: '12345678',
+        now: 1_000,
+        code: '123456',
+        store,
+        sendEmail,
+      }),
+    ).rejects.toThrow('database unavailable')
+
+    expect(sendEmail).not.toHaveBeenCalled()
+  })
+
+  it('invalidates the saved verification code when email delivery fails', async () => {
+    const store = new InMemoryVerificationCodeStore()
+
+    await expect(
+      requestVerificationCode({
+        schoolEmailNumber: '12345678',
+        now: 1_000,
+        code: '123456',
+        store,
+        sendEmail: vi.fn().mockRejectedValue(new Error('delivery failed')),
+      }),
+    ).rejects.toThrow('delivery failed')
+
+    const records = await store.findRequestsBySchoolEmail(
+      '110-12345678mkn@e.osakamanabi.jp',
+    )
+
+    expect(records).toMatchObject([{ invalidatedAt: 1_000 }])
+  })
 })
 
 describe('verifyCodeForExistingStudent', () => {

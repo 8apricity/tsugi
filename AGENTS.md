@@ -24,6 +24,19 @@ When changing Portal build scripts, Wrangler config, Worker bindings, or generat
 
 When an agent changes files in this repo, include an example commit title in the final response.
 
+## Release-period git workflow
+
+Until the current release is complete, agents should commit and push their own
+file changes without waiting for a separate request. After each completed change:
+
+1. Run the relevant verification commands.
+2. Commit only the files changed for that task.
+3. Push the current branch.
+4. State the commit title, branch, and push status in the final response.
+
+If pushing or applying remote infrastructure changes needs approval, request it
+and continue once approved.
+
 ## Tooling troubleshooting
 
 If shell commands fail with `windows sandbox: spawn setup refresh`, treat it as a Codex Windows sandbox startup failure rather than a project, PowerShell, or command-specific failure.

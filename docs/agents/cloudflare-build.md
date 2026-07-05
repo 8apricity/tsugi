@@ -32,6 +32,36 @@ pnpm run build
 
 Commit any intentional `worker-configuration.d.ts` changes.
 
+## D1 migrations
+
+Agents should own D1 table creation and migration application when a change needs
+new database structure. Do not stop after writing SQL.
+
+When adding or changing D1 migrations:
+
+- Put migration files under `apps/portal/db/migrations/`.
+- Ensure the D1 binding in `apps/portal/wrangler.jsonc` declares
+  `"migrations_dir": "db/migrations"`.
+- Apply migrations to local D1 from `apps/portal`:
+
+```sh
+pnpm exec wrangler d1 migrations apply jikanwari-d1 --local
+```
+
+- Verify the expected tables or indexes exist with `wrangler d1 execute`.
+- Add `.wrangler` to gitignore if local D1 state appears in `git status`.
+- Run tests, lint, and build after applying migrations.
+
+If production or remote D1 must be updated, request approval and then run:
+
+```sh
+pnpm exec wrangler d1 migrations apply jikanwari-d1 --remote
+```
+
+In the final response, state exactly which database locations were updated:
+local only, remote only, or both. If remote migration was not applied, say so
+explicitly and include the command needed to apply it.
+
 ## Debugging production failures
 
 If Cloudflare reports:

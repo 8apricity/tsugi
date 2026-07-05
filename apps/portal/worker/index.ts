@@ -1,6 +1,7 @@
 import {
   D1VerificationCodeStore,
   InMemoryVerificationCodeStore,
+  completeInitialSetup,
   getInitialSetupOptions,
   logoutStudentSession,
   readSetupSession,
@@ -337,6 +338,8 @@ export default {
         trackId?: unknown;
         confirmed?: unknown;
       }>();
+      const sessionToken = generateSessionToken();
+      const store = await getVerificationCodeStore(env);
       const result = await submitInitialSetupDraft({
         setupSessionToken: readCookie(request, setupSessionCookieName),
         displayName: body.displayName,
@@ -344,11 +347,39 @@ export default {
         trackId: body.trackId,
         confirmed: body.confirmed,
         now: Date.now(),
-        store: await getVerificationCodeStore(env),
+        store,
       });
 
       if (result.status === "saved") {
-        return Response.json({ status: "saved" });
+        const completeResult = await completeInitialSetup({
+          setupSessionToken: readCookie(request, setupSessionCookieName),
+          draft: result.draft,
+          now: Date.now(),
+          sessionToken,
+          store,
+        });
+
+        if (completeResult.status === "invalid-setup-session") {
+          return Response.json(completeResult, { status: 400 });
+        }
+
+        const headers = new Headers();
+        headers.append(
+          "set-cookie",
+          sessionCookie(
+            completeResult.sessionToken,
+            30 * 24 * 60 * 60,
+            url.protocol === "https:",
+          ),
+        );
+        headers.append(
+          "set-cookie",
+          setupSessionCookie("", 0, url.protocol === "https:"),
+        );
+
+        return Response.json(sessionResponseBody(completeResult.studentAccount), {
+          headers,
+        });
       }
 
       return Response.json(result, { status: 400 });

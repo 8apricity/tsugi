@@ -389,7 +389,7 @@ describe('initial Student Affiliation setup API', () => {
     vi.useRealTimers()
   })
 
-  it('returns setup choices and saves a confirmed initial setup draft', async () => {
+  it('returns setup choices and completes confirmed initial setup', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
 
@@ -458,8 +458,29 @@ describe('initial Student Affiliation setup API', () => {
     )
 
     expect(submitResponse.status).toBe(200)
-    await expect(submitResponse.json()).resolves.toEqual({
-      status: 'saved',
+    await expect(submitResponse.json()).resolves.toMatchObject({
+      status: 'authenticated',
+      studentAccount: {
+        schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+        displayName: 'Sora',
+      },
+    })
+
+    const sessionCookie = submitResponse.headers.get('set-cookie') ?? ''
+    expect(sessionCookie).toContain('jikanwari_session=')
+
+    const sessionResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/session', {
+        headers: { cookie: sessionCookie },
+      }),
+      env,
+    )
+
+    await expect(sessionResponse.json()).resolves.toMatchObject({
+      status: 'authenticated',
+      studentAccount: {
+        schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+      },
     })
   })
 })

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   InMemoryVerificationCodeStore,
+  completeInitialSetup,
   getInitialSetupOptions,
   submitInitialSetupDraft,
   readStudentSession,
@@ -230,6 +231,162 @@ describe('initial Student Affiliation setup', () => {
         trackId: 'track-2-3-science',
       },
     })
+  })
+
+  it('completes initial setup by creating Student Account, current affiliation, and Student Session', async () => {
+    const store = new InMemoryVerificationCodeStore()
+    await createSetupSession(store)
+    await store.saveSchoolYear({
+      schoolYear: 2026,
+      startsOn: '2026-04-01',
+      endsOn: '2027-03-31',
+      isCurrent: true,
+    })
+    await store.saveSchoolYearClass({
+      classId: 'class-2-3',
+      schoolYear: 2026,
+      grade: 2,
+      classNumber: 3,
+    })
+    await store.saveTrack({
+      trackId: 'track-2-3-science',
+      classId: 'class-2-3',
+      trackName: '理系',
+    })
+    const draftResult = await submitInitialSetupDraft({
+      setupSessionToken: 'setup-session-token',
+      displayName: 'Sora',
+      realName: '空',
+      trackId: 'track-2-3-science',
+      confirmed: true,
+      now: 2_000,
+      store,
+    })
+
+    if (draftResult.status !== 'saved') {
+      throw new Error('expected saved draft')
+    }
+
+    const result = await completeInitialSetup({
+      setupSessionToken: 'setup-session-token',
+      draft: draftResult.draft,
+      now: 3_000,
+      sessionToken: 'created-session-token',
+      store,
+    })
+
+    expect(result).toMatchObject({
+      status: 'authenticated',
+      studentAccount: {
+        schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+        displayName: 'Sora',
+      },
+    })
+    if (result.status !== 'authenticated') {
+      throw new Error('expected authenticated')
+    }
+    await expect(
+      readStudentSession({
+        sessionToken: 'created-session-token',
+        now: 3_000,
+        store,
+      }),
+    ).resolves.toMatchObject({ status: 'authenticated' })
+    await expect(
+      readSetupSession({
+        setupSessionToken: 'setup-session-token',
+        now: 3_000,
+        store,
+      }),
+    ).resolves.toEqual({ status: 'invalid' })
+    await expect(
+      store.findCurrentStudentAffiliation(
+        result.studentAccount.studentAccountId,
+        2026,
+      ),
+    ).resolves.toMatchObject({
+      schoolYear: 2026,
+      grade: 2,
+      classId: 'class-2-3',
+      trackId: 'track-2-3-science',
+      endedAt: null,
+    })
+  })
+
+  it('rolls back Student Account creation when affiliation creation fails', async () => {
+    const store = new InMemoryVerificationCodeStore()
+    await createSetupSession(store)
+    const draft = {
+      displayName: 'Sora',
+      realName: '空',
+      schoolYear: 2026,
+      grade: 2,
+      classId: 'class-2-3',
+      trackId: 'track-2-3-science',
+    }
+    store.failNextStudentAffiliationSaveForTest()
+
+    await expect(
+      completeInitialSetup({
+        setupSessionToken: 'setup-session-token',
+        draft,
+        now: 3_000,
+        sessionToken: 'created-session-token',
+        store,
+      }),
+    ).rejects.toThrow('student affiliation save failed')
+    await expect(
+      store.findStudentAccountBySchoolEmail(
+        '110-12345678mkn@e.osakamanabi.jp',
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      readSetupSession({
+        setupSessionToken: 'setup-session-token',
+        now: 3_000,
+        store,
+      }),
+    ).resolves.toMatchObject({ status: 'valid' })
+  })
+
+  it('recovers a duplicate School Email race by issuing a session for existing Student Account', async () => {
+    const store = new InMemoryVerificationCodeStore()
+    await createSetupSession(store)
+    await store.saveStudentAccount({
+      studentAccountId: 'existing-student-account',
+      schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+      displayName: 'Existing',
+    })
+
+    await expect(
+      completeInitialSetup({
+        setupSessionToken: 'setup-session-token',
+        draft: {
+          displayName: 'Sora',
+          realName: '空',
+          schoolYear: 2026,
+          grade: 2,
+          classId: 'class-2-3',
+          trackId: 'track-2-3-science',
+        },
+        now: 3_000,
+        sessionToken: 'race-session-token',
+        store,
+      }),
+    ).resolves.toMatchObject({
+      status: 'authenticated',
+      studentAccount: {
+        studentAccountId: 'existing-student-account',
+        displayName: 'Existing',
+      },
+    })
+    await expect(
+      readStudentSession({
+        sessionToken: 'race-session-token',
+        now: 3_000,
+        store,
+      }),
+    ).resolves.toMatchObject({ status: 'authenticated' })
   })
 
   it('rejects missing master data, invalid names, missing Track, and unconfirmed submission', async () => {

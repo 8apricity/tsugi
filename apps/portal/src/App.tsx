@@ -63,7 +63,7 @@ function App() {
         return;
       }
 
-      if (body.status === "authenticated") {
+      if ("studentAccount" in body && body.status === "authenticated") {
         setStudentAccount(body.studentAccount);
         setStatus("authenticated");
         return;
@@ -169,7 +169,7 @@ function App() {
         | { status: "authenticated"; studentAccount: StudentAccount }
         | { status: "setup-required"; schoolEmail: string };
 
-      if (body.status === "authenticated") {
+      if ("studentAccount" in body && body.status === "authenticated") {
         setStudentAccount(body.studentAccount);
         setStatus("authenticated");
         setMessage(null);
@@ -222,7 +222,20 @@ function App() {
     });
 
     if (response.ok) {
-      setMessage("初回設定内容を確認しました。次のステップで登録します。");
+      const body = (await response.json()) as
+        | { status: "authenticated"; studentAccount: StudentAccount }
+        | { status: string };
+
+      if ("studentAccount" in body && body.status === "authenticated") {
+        setStudentAccount(body.studentAccount);
+        setStatus("authenticated");
+        setSetupSchoolEmail(null);
+        setSetupOptions(null);
+        setMessage(null);
+        return;
+      }
+
+      setMessage("初回設定を完了できませんでした。時間をおいて再度お試しください。");
       return;
     }
 

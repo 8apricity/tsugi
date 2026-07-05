@@ -21,6 +21,7 @@ export type StudentAccount = {
   studentAccountId: string
   schoolEmail: string
   displayName: string
+  realName?: string
 }
 
 export type StudentSession = {
@@ -68,6 +69,33 @@ export type InitialSetupDraft = {
   trackId: string
 }
 
+export type StudentAffiliation = {
+  studentAffiliationId: string
+  studentAccountId: string
+  schoolYear: number
+  grade: number
+  classId: string
+  trackId: string
+  selectedAt: number
+  endedAt: number | null
+}
+
+export type CompleteInitialSetupTransactionInput = {
+  setupSessionTokenHash: string
+  schoolEmail: string
+  studentAccountId: string
+  studentAffiliationId: string
+  displayName: string
+  realName: string
+  schoolYear: number
+  grade: number
+  classId: string
+  trackId: string
+  sessionTokenHash: string
+  now: number
+  expiresAt: number
+}
+
 export type VerificationCodeStore = {
   findRequestsBySchoolEmail(
     schoolEmail: string,
@@ -109,6 +137,9 @@ export type VerificationCodeStore = {
     setupSessionTokenHash: string,
     draft: InitialSetupDraft,
   ): Promise<void>
+  completeInitialSetupTransaction(
+    input: CompleteInitialSetupTransactionInput,
+  ): Promise<StudentAccount>
 }
 
 export type SendVerificationCodeEmail = (message: {
@@ -186,6 +217,15 @@ export type SubmitInitialSetupDraftResult =
   | { status: 'confirmation-required' }
   | { status: 'setup-unavailable' }
 
+export type CompleteInitialSetupResult =
+  | {
+      status: 'authenticated'
+      studentAccount: StudentAccount
+      sessionToken: string
+      expiresAt: number
+    }
+  | { status: 'invalid-setup-session' }
+
 export class InMemoryVerificationCodeStore implements VerificationCodeStore {
   private records: VerificationCodeRequestRecord[] = []
   private studentAccounts: StudentAccount[] = []
@@ -194,7 +234,9 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
   private schoolYears: SchoolYearRecord[] = []
   private schoolYearClasses: SchoolYearClassRecord[] = []
   private tracks: TrackRecord[] = []
+  private studentAffiliations: StudentAffiliation[] = []
   private initialSetupDrafts = new Map<string, InitialSetupDraft>()
+  private failNextAffiliationSave = false
 
   async findRequestsBySchoolEmail(schoolEmail: string) {
     return this.records.filter((record) => record.schoolEmail === schoolEmail)
@@ -349,6 +391,85 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
   ) {
     this.initialSetupDrafts.set(setupSessionTokenHash, draft)
   }
+
+  failNextStudentAffiliationSaveForTest() {
+    this.failNextAffiliationSave = true
+  }
+
+  async findCurrentStudentAffiliation(studentAccountId: string, schoolYear: number) {
+    return (
+      this.studentAffiliations.find(
+        (affiliation) =>
+          affiliation.studentAccountId === studentAccountId &&
+          affiliation.schoolYear === schoolYear &&
+          affiliation.endedAt === null,
+      ) ?? null
+    )
+  }
+
+  async completeInitialSetupTransaction(
+    input: CompleteInitialSetupTransactionInput,
+  ) {
+    const existingStudentAccount = await this.findStudentAccountBySchoolEmail(
+      input.schoolEmail,
+    )
+    const studentAccount =
+      existingStudentAccount ??
+      {
+        studentAccountId: input.studentAccountId,
+        schoolEmail: input.schoolEmail,
+        displayName: input.displayName,
+        realName: input.realName,
+      }
+
+    const previousStudentAccounts = [...this.studentAccounts]
+    const previousStudentAffiliations = [...this.studentAffiliations]
+    const previousStudentSessions = [...this.studentSessions]
+    const previousSetupSessions = [...this.setupSessions]
+
+    try {
+      if (!existingStudentAccount) {
+        this.studentAccounts.push(studentAccount)
+
+        if (this.failNextAffiliationSave) {
+          this.failNextAffiliationSave = false
+          throw new Error('student affiliation save failed')
+        }
+
+        this.studentAffiliations.push({
+          studentAffiliationId: input.studentAffiliationId,
+          studentAccountId: studentAccount.studentAccountId,
+          schoolYear: input.schoolYear,
+          grade: input.grade,
+          classId: input.classId,
+          trackId: input.trackId,
+          selectedAt: input.now,
+          endedAt: null,
+        })
+      }
+
+      this.studentSessions.push({
+        sessionTokenHash: input.sessionTokenHash,
+        studentAccountId: studentAccount.studentAccountId,
+        createdAt: input.now,
+        expiresAt: input.expiresAt,
+        invalidatedAt: null,
+      })
+      this.setupSessions = this.setupSessions.map((session) =>
+        session.setupSessionTokenHash === input.setupSessionTokenHash
+          ? { ...session, invalidatedAt: input.now }
+          : session,
+      )
+
+      return studentAccount
+    } catch (error) {
+      this.studentAccounts = previousStudentAccounts
+      this.studentAffiliations = previousStudentAffiliations
+      this.studentSessions = previousStudentSessions
+      this.setupSessions = previousSetupSessions
+      throw error
+    }
+  }
 }
 
 type EmailVerificationCodeRow = {
@@ -363,6 +484,7 @@ type StudentAccountRow = {
   student_account_id: string
   school_email: string
   display_name: string
+  real_name: string | null
 }
 
 type StudentSessionRow = {
@@ -463,7 +585,7 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
   async findStudentAccountBySchoolEmail(schoolEmail: string) {
     const row = await this.db
       .prepare(
-        `select student_account_id, school_email, display_name
+        `select student_account_id, school_email, display_name, real_name
          from student_accounts
          where school_email = ?`,
       )
@@ -476,7 +598,7 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
   async findStudentAccountById(studentAccountId: string) {
     const row = await this.db
       .prepare(
-        `select student_account_id, school_email, display_name
+        `select student_account_id, school_email, display_name, real_name
          from student_accounts
          where student_account_id = ?`,
       )
@@ -495,14 +617,16 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
           student_account_id,
           school_email,
           display_name,
+          real_name,
           created_at,
           updated_at
-        ) values (?, ?, ?, ?, ?)`,
+        ) values (?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.studentAccountId,
         record.schoolEmail,
         record.displayName,
+        record.realName ?? null,
         now,
         now,
       )
@@ -762,6 +886,169 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
       )
       .run()
   }
+
+  async completeInitialSetupTransaction(
+    input: CompleteInitialSetupTransactionInput,
+  ) {
+    const existingStudentAccount = await this.findStudentAccountBySchoolEmail(
+      input.schoolEmail,
+    )
+
+    if (existingStudentAccount) {
+      await this.db.batch([
+        this.db
+          .prepare(
+            `insert into student_sessions (
+              student_session_id,
+              session_token_hash,
+              student_account_id,
+              created_at,
+              expires_at,
+              invalidated_at
+            ) values (?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            crypto.randomUUID(),
+            input.sessionTokenHash,
+            existingStudentAccount.studentAccountId,
+            input.now,
+            input.expiresAt,
+            null,
+          ),
+        this.db
+          .prepare(
+            `update student_account_setup_sessions
+             set invalidated_at = ?
+             where setup_session_token_hash = ? and invalidated_at is null`,
+          )
+          .bind(input.now, input.setupSessionTokenHash),
+      ])
+
+      return existingStudentAccount
+    }
+
+    const createdAt = new Date(input.now).toISOString()
+    const studentAccount: StudentAccount = {
+      studentAccountId: input.studentAccountId,
+      schoolEmail: input.schoolEmail,
+      displayName: input.displayName,
+      realName: input.realName,
+    }
+
+    try {
+      await this.db.batch([
+        this.db
+          .prepare(
+            `insert into student_accounts (
+              student_account_id,
+              school_email,
+              display_name,
+              real_name,
+              created_at,
+              updated_at
+            ) values (?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            input.studentAccountId,
+            input.schoolEmail,
+            input.displayName,
+            input.realName,
+            createdAt,
+            createdAt,
+          ),
+        this.db
+          .prepare(
+            `insert into student_affiliations (
+              student_affiliation_id,
+              student_account_id,
+              school_year,
+              grade,
+              class_id,
+              track_id,
+              selected_at,
+              ended_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            input.studentAffiliationId,
+            input.studentAccountId,
+            input.schoolYear,
+            input.grade,
+            input.classId,
+            input.trackId,
+            input.now,
+            null,
+          ),
+        this.db
+          .prepare(
+            `insert into student_sessions (
+              student_session_id,
+              session_token_hash,
+              student_account_id,
+              created_at,
+              expires_at,
+              invalidated_at
+            ) values (?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            crypto.randomUUID(),
+            input.sessionTokenHash,
+            input.studentAccountId,
+            input.now,
+            input.expiresAt,
+            null,
+          ),
+        this.db
+          .prepare(
+            `update student_account_setup_sessions
+             set invalidated_at = ?
+             where setup_session_token_hash = ? and invalidated_at is null`,
+          )
+          .bind(input.now, input.setupSessionTokenHash),
+      ])
+
+      return studentAccount
+    } catch (error) {
+      const recoveredStudentAccount = await this.findStudentAccountBySchoolEmail(
+        input.schoolEmail,
+      )
+
+      if (!recoveredStudentAccount) {
+        throw error
+      }
+
+      await this.db.batch([
+        this.db
+          .prepare(
+            `insert into student_sessions (
+              student_session_id,
+              session_token_hash,
+              student_account_id,
+              created_at,
+              expires_at,
+              invalidated_at
+            ) values (?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            crypto.randomUUID(),
+            input.sessionTokenHash,
+            recoveredStudentAccount.studentAccountId,
+            input.now,
+            input.expiresAt,
+            null,
+          ),
+        this.db
+          .prepare(
+            `update student_account_setup_sessions
+             set invalidated_at = ?
+             where setup_session_token_hash = ? and invalidated_at is null`,
+          )
+          .bind(input.now, input.setupSessionTokenHash),
+      ])
+
+      return recoveredStudentAccount
+    }
+  }
 }
 
 function mapStudentAccountRow(row: StudentAccountRow): StudentAccount {
@@ -769,6 +1056,7 @@ function mapStudentAccountRow(row: StudentAccountRow): StudentAccount {
     studentAccountId: row.student_account_id,
     schoolEmail: row.school_email,
     displayName: row.display_name,
+    realName: row.real_name ?? undefined,
   }
 }
 
@@ -1105,6 +1393,57 @@ export async function submitInitialSetupDraft({
   )
 
   return { status: 'saved', draft }
+}
+
+export async function completeInitialSetup({
+  setupSessionToken,
+  draft,
+  now,
+  sessionToken,
+  store,
+}: {
+  setupSessionToken: string | null
+  draft: InitialSetupDraft
+  now: number
+  sessionToken: string
+  store: VerificationCodeStore
+}): Promise<CompleteInitialSetupResult> {
+  if (!setupSessionToken) {
+    return { status: 'invalid-setup-session' }
+  }
+
+  const setupSessionTokenHash = await hashToken(setupSessionToken)
+  const setupSession = await store.findSetupSessionByTokenHash(
+    setupSessionTokenHash,
+  )
+
+  if (!setupSession || setupSession.invalidatedAt !== null || setupSession.expiresAt <= now) {
+    return { status: 'invalid-setup-session' }
+  }
+
+  const expiresAt = now + studentSessionLifetimeMs
+  const studentAccount = await store.completeInitialSetupTransaction({
+    setupSessionTokenHash,
+    schoolEmail: setupSession.schoolEmail,
+    studentAccountId: crypto.randomUUID(),
+    studentAffiliationId: crypto.randomUUID(),
+    displayName: draft.displayName,
+    realName: draft.realName,
+    schoolYear: draft.schoolYear,
+    grade: draft.grade,
+    classId: draft.classId,
+    trackId: draft.trackId,
+    sessionTokenHash: await hashToken(sessionToken),
+    now,
+    expiresAt,
+  })
+
+  return {
+    status: 'authenticated',
+    studentAccount,
+    sessionToken,
+    expiresAt,
+  }
 }
 
 function trimName(value: unknown) {

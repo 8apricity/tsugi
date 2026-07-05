@@ -1,0 +1,46 @@
+# Cloudflare Build Notes
+
+Use this when changing the Portal app build, Wrangler config, Worker bindings, or generated Cloudflare types.
+
+## Production build rule
+
+The production build must regenerate Wrangler types before TypeScript checks:
+
+```sh
+wrangler types worker-configuration.d.ts
+```
+
+Do not rely on `wrangler types --check` as the production build gate. A stale committed `worker-configuration.d.ts` can make Cloudflare fail before the app typecheck runs.
+
+## When changing bindings
+
+If you change any of these files, regenerate and verify Cloudflare types:
+
+- `apps/portal/wrangler.jsonc`
+- `apps/portal/worker/index.ts`
+- Worker env bindings such as D1, KV, R2, secrets, or vars
+
+Run from `apps/portal`:
+
+```sh
+pnpm run cf-typegen
+pnpm run build
+```
+
+Commit any intentional `worker-configuration.d.ts` changes.
+
+## Debugging production failures
+
+If Cloudflare reports:
+
+```text
+Types at worker-configuration.d.ts are out of date. Run `wrangler types` to regenerate.
+```
+
+Check:
+
+- Cloudflare is building the same commit as `origin/main`.
+- `apps/portal/worker-configuration.d.ts` was regenerated after the latest `wrangler.jsonc` or binding change.
+- `apps/portal/package.json` build script still runs `wrangler types worker-configuration.d.ts` before `tsc`.
+
+Local Windows sandbox may fail with `spawn EPERM` when running npm scripts. Treat that as sandbox/tooling failure, not project build failure; retry with the approved build command outside the sandbox if needed.

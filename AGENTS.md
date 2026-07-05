@@ -16,6 +16,10 @@ This repo uses a single-context domain-doc layout. See `docs/agents/domain.md`.
 
 When designing or changing application UI, follow `docs/agents/ui-design.md`.
 
+### Cloudflare build guidance
+
+When changing Portal build scripts, Wrangler config, Worker bindings, or generated Cloudflare types, follow `docs/agents/cloudflare-build.md`.
+
 ## Change reports
 
 When an agent changes files in this repo, include an example commit title in the final response.

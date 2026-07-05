@@ -57,6 +57,28 @@ function getLastSentCode(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) {
   return code
 }
 
+function requestVerificationCode(env: Env, schoolEmailNumber = '12345678') {
+  return worker.fetch(
+    new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schoolEmailNumber }),
+    }),
+    env,
+  )
+}
+
+function verifyCode(env: Env, code: string, schoolEmailNumber = '12345678') {
+  return worker.fetch(
+    new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schoolEmailNumber, code }),
+    }),
+    env,
+  )
+}
+
 describe('verification code requests', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -320,6 +342,44 @@ describe('existing Student Account login', () => {
       status: 'unauthenticated',
     })
   })
+
+  it('rejects expired, stale, and exhausted verification codes with a retryable error', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = createTestEnv()
+
+    await requestVerificationCode(env)
+    const expiredCode = getLastSentCode(fetchMock)
+    vi.advanceTimersByTime(10 * 60_000 + 1)
+
+    const expiredResponse = await verifyCode(env, expiredCode)
+    expect(expiredResponse.status).toBe(400)
+    await expect(expiredResponse.json()).resolves.toEqual({
+      error: 'invalid_verification_code',
+    })
+
+    await requestVerificationCode(env)
+    const staleCode = getLastSentCode(fetchMock)
+    vi.advanceTimersByTime(61_000)
+    await requestVerificationCode(env)
+    const latestCode = getLastSentCode(fetchMock)
+
+    expect((await verifyCode(env, staleCode)).status).toBe(400)
+    expect((await verifyCode(env, latestCode)).status).toBe(200)
+
+    vi.advanceTimersByTime(61_000)
+    await requestVerificationCode(env)
+    const exhaustedCode = getLastSentCode(fetchMock)
+
+    for (let index = 0; index < 5; index += 1) {
+      expect((await verifyCode(env, '000000')).status).toBe(400)
+    }
+
+    expect((await verifyCode(env, exhaustedCode)).status).toBe(400)
+  })
 })
 
 describe('new Student Account setup session', () => {
@@ -380,6 +440,43 @@ describe('new Student Account setup session', () => {
       status: 'valid',
       schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
     })
+  })
+
+  it('invalidates stale setup sessions when a new verification code is sent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = createNewStudentTestEnv()
+
+    await requestVerificationCode(env)
+    const firstVerifyResponse = await verifyCode(env, getLastSentCode(fetchMock))
+    const staleSetupCookie = firstVerifyResponse.headers.get('set-cookie') ?? ''
+
+    vi.advanceTimersByTime(61_000)
+    await requestVerificationCode(env)
+    const latestVerifyResponse = await verifyCode(env, getLastSentCode(fetchMock))
+    const latestSetupCookie = latestVerifyResponse.headers.get('set-cookie') ?? ''
+
+    const staleOptionsResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/initial-setup', {
+        headers: { cookie: staleSetupCookie },
+      }),
+      env,
+    )
+    const latestOptionsResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/initial-setup', {
+        headers: { cookie: latestSetupCookie },
+      }),
+      env,
+    )
+
+    expect(staleOptionsResponse.status).toBe(400)
+    await expect(staleOptionsResponse.json()).resolves.toEqual({
+      status: 'invalid-setup-session',
+    })
+    expect(latestOptionsResponse.status).toBe(200)
   })
 })
 
@@ -481,6 +578,42 @@ describe('initial Student Affiliation setup API', () => {
       studentAccount: {
         schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
       },
+    })
+  })
+
+  it('does not create duplicate Student Accounts when setup completion is retried', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = createNewStudentTestEnv()
+
+    await requestVerificationCode(env)
+    const verifyResponse = await verifyCode(env, getLastSentCode(fetchMock))
+    const cookie = verifyResponse.headers.get('set-cookie') ?? ''
+    const setupRequest = () =>
+      worker.fetch(
+        new Request('https://jikanwari.test/api/auth/initial-setup', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie },
+          body: JSON.stringify({
+            displayName: 'Sora',
+            realName: '空',
+            trackId: 'track-1-1-a',
+            confirmed: true,
+          }),
+        }),
+        env,
+      )
+
+    const firstResponse = await setupRequest()
+    const secondResponse = await setupRequest()
+
+    expect(firstResponse.status).toBe(200)
+    expect(secondResponse.status).toBe(400)
+    await expect(secondResponse.json()).resolves.toEqual({
+      status: 'invalid-setup-session',
     })
   })
 })

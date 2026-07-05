@@ -3,6 +3,7 @@ const resendCooldownMs = 60_000
 const hourlySendWindowMs = 60 * 60_000
 const hourlySendLimit = 5
 const verificationCodeLifetimeMs = 10 * 60_000
+const maxFailedVerificationAttempts = 5
 const studentSessionLifetimeMs = 30 * 24 * 60 * 60_000
 const setupSessionLifetimeMs = 30 * 60_000
 const verificationCodeRateLimitExemptSchoolEmails = new Set([
@@ -15,6 +16,7 @@ export type VerificationCodeRequestRecord = {
   codeHash: string
   requestedAt: number
   invalidatedAt: number | null
+  failedAttempts: number
 }
 
 export type StudentAccount = {
@@ -102,6 +104,11 @@ export type VerificationCodeStore = {
   ): Promise<VerificationCodeRequestRecord[]>
   saveRequest(record: VerificationCodeRequestRecord): Promise<void>
   invalidateUnusedRequests(schoolEmail: string, invalidatedAt: number): Promise<void>
+  recordFailedVerificationAttempt(
+    emailVerificationCodeId: string,
+    failedAttempts: number,
+    invalidatedAt: number | null,
+  ): Promise<void>
   findStudentAccountBySchoolEmail(
     schoolEmail: string,
   ): Promise<StudentAccount | null>
@@ -258,6 +265,24 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
 
       return {
         ...record,
+        invalidatedAt,
+      }
+    })
+  }
+
+  async recordFailedVerificationAttempt(
+    emailVerificationCodeId: string,
+    failedAttempts: number,
+    invalidatedAt: number | null,
+  ) {
+    this.records = this.records.map((record) => {
+      if (record.emailVerificationCodeId !== emailVerificationCodeId) {
+        return record
+      }
+
+      return {
+        ...record,
+        failedAttempts,
         invalidatedAt,
       }
     })
@@ -478,6 +503,7 @@ type EmailVerificationCodeRow = {
   code_hash: string
   requested_at: number
   invalidated_at: number | null
+  failed_attempts: number
 }
 
 type StudentAccountRow = {
@@ -533,7 +559,7 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
   async findRequestsBySchoolEmail(schoolEmail: string) {
     const { results } = await this.db
       .prepare(
-        `select email_verification_code_id, school_email, code_hash, requested_at, invalidated_at
+        `select email_verification_code_id, school_email, code_hash, requested_at, invalidated_at, failed_attempts
          from email_verification_codes
          where school_email = ?
          order by requested_at asc`,
@@ -547,6 +573,7 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
       codeHash: row.code_hash,
       requestedAt: row.requested_at,
       invalidatedAt: row.invalidated_at,
+      failedAttempts: row.failed_attempts,
     }))
   }
 
@@ -558,8 +585,9 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
           school_email,
           code_hash,
           requested_at,
-          invalidated_at
-        ) values (?, ?, ?, ?, ?)`,
+          invalidated_at,
+          failed_attempts
+        ) values (?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.emailVerificationCodeId ?? crypto.randomUUID(),
@@ -567,6 +595,7 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
         record.codeHash,
         record.requestedAt,
         record.invalidatedAt,
+        record.failedAttempts,
       )
       .run()
   }
@@ -579,6 +608,22 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
          where school_email = ? and invalidated_at is null`,
       )
       .bind(invalidatedAt, schoolEmail)
+      .run()
+  }
+
+  async recordFailedVerificationAttempt(
+    emailVerificationCodeId: string,
+    failedAttempts: number,
+    invalidatedAt: number | null,
+  ) {
+    await this.db
+      .prepare(
+        `update email_verification_codes
+         set failed_attempts = ?,
+             invalidated_at = ?
+         where email_verification_code_id = ?`,
+      )
+      .bind(failedAttempts, invalidatedAt, emailVerificationCodeId)
       .run()
   }
 
@@ -1135,6 +1180,7 @@ export async function requestVerificationCode({
     codeHash: await hashVerificationCode(code),
     requestedAt: now,
     invalidatedAt: null,
+    failedAttempts: 0,
   })
   try {
     await sendEmail({ schoolEmail, code })
@@ -1168,11 +1214,20 @@ export async function verifyCodeForExistingStudent({
     .filter((request) => request.invalidatedAt === null)
     .at(-1)
 
-  if (
-    !latestRequest ||
-    now - latestRequest.requestedAt > verificationCodeLifetimeMs ||
-    latestRequest.codeHash !== (await hashToken(code))
-  ) {
+  if (!latestRequest || now - latestRequest.requestedAt > verificationCodeLifetimeMs) {
+    return { status: 'invalid-verification' }
+  }
+
+  if (latestRequest.codeHash !== (await hashToken(code))) {
+    if (latestRequest.emailVerificationCodeId) {
+      const failedAttempts = latestRequest.failedAttempts + 1
+      await store.recordFailedVerificationAttempt(
+        latestRequest.emailVerificationCodeId,
+        failedAttempts,
+        failedAttempts >= maxFailedVerificationAttempts ? now : null,
+      )
+    }
+
     return { status: 'invalid-verification' }
   }
 

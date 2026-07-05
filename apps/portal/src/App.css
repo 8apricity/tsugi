@@ -1,29 +1,127 @@
-.signup-page {
+.app-shell {
   min-height: 100svh;
-  display: grid;
-  place-items: center;
-  padding: 32px 20px;
+  background: #f5f6f7;
   box-sizing: border-box;
 }
 
-.signup-panel {
-  width: min(100%, 520px);
+.topbar {
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 32px;
+  background: #23324d;
+  color: #ffffff;
+  border-bottom: 1px solid #17243a;
+  box-sizing: border-box;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 15px;
+}
+
+.topbar-badge {
+  color: #d9e3ea;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.content-wrap {
+  width: min(100% - 48px, 1080px);
+  margin: 0 auto;
+  padding: 40px 0;
+  box-sizing: border-box;
+}
+
+.page-heading {
+  margin-bottom: 24px;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 24px;
+  align-items: start;
+}
+
+.content-panel {
   background: #ffffff;
-  border: 1px solid #dedede;
+  border: 1px solid #d9dee3;
   border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
-  padding: 32px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 28px;
   text-align: left;
   box-sizing: border-box;
 }
 
-.panel-header {
-  margin-bottom: 28px;
+.panel-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 20px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #d9dee3;
+}
+
+.panel-title-row h2,
+.side-panel h2 {
+  margin: 0;
+  color: #1f2933;
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.panel-title-row p {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.status-chip {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border: 1px solid #b8dfe2;
+  border-radius: 999px;
+  background: #e8f5f6;
+  color: #217f86;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-chip.sent {
+  border-color: #a9d5b1;
+  background: #eff8f0;
+  color: #1f6f35;
+}
+
+.status-chip.error {
+  border-color: #efc2c2;
+  background: #fff5f5;
+  color: #9f1d1d;
 }
 
 .eyebrow {
   margin: 0 0 8px;
-  color: #5d6675;
+  color: #2a9fa7;
   font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
@@ -31,17 +129,18 @@
 
 .lead {
   margin: 0;
-  color: #5d6675;
+  color: #6b7280;
   font-size: 15px;
 }
 
 .signup-form {
   display: grid;
-  gap: 14px;
+  gap: 12px;
+  max-width: 680px;
 }
 
 .signup-form label {
-  color: #1f2937;
+  color: #1f2933;
   font-size: 14px;
   font-weight: 700;
 }
@@ -50,45 +149,52 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 44px;
-  border: 1px solid #cfd4dc;
+  min-height: 46px;
+  border: 1px solid #d9dee3;
   border-radius: 6px;
   background: #ffffff;
   overflow: hidden;
 }
 
 .input-row span {
-  color: #5d6675;
+  color: #6b7280;
   font-size: 14px;
   padding: 0 12px;
   white-space: nowrap;
+  background: #f8fafb;
 }
 
 .input-row input {
   width: 100%;
   min-width: 0;
   border: 0;
-  border-inline: 1px solid #e5e7eb;
+  border-inline: 1px solid #d9dee3;
   padding: 11px 12px;
   font: inherit;
-  color: #111827;
+  color: #1f2933;
   box-sizing: border-box;
 }
 
 .input-row input:focus {
-  outline: 3px solid rgba(37, 99, 235, 0.18);
+  outline: 3px solid rgba(42, 159, 167, 0.22);
   outline-offset: -3px;
 }
 
 .signup-form button {
+  justify-self: start;
   min-height: 44px;
-  border: 1px solid #2563eb;
+  padding: 0 18px;
+  border: 1px solid #238c93;
   border-radius: 6px;
-  background: #2563eb;
+  background: #2a9fa7;
   color: #ffffff;
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+.signup-form button:hover:not(:disabled) {
+  background: #238c93;
 }
 
 .signup-form button:disabled {
@@ -112,8 +218,8 @@
 }
 
 .notice.success {
-  border: 1px solid #bbd7c0;
-  background: #f0f8f1;
+  border: 1px solid #a9d5b1;
+  background: #eff8f0;
   color: #1f6f35;
 }
 
@@ -123,9 +229,72 @@
   color: #9f1d1d;
 }
 
+.side-panel {
+  position: sticky;
+  top: 84px;
+}
+
+.status-list {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 0;
+}
+
+.status-list div {
+  display: grid;
+  gap: 4px;
+  padding: 14px 0;
+  border-top: 1px solid #d9dee3;
+}
+
+.status-list dt {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-list dd {
+  margin: 0;
+  color: #1f2933;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    padding: 0 20px;
+  }
+
+  .content-wrap {
+    width: min(100% - 32px, 1080px);
+    padding: 28px 0;
+  }
+
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .content-panel {
+    padding: 22px;
+  }
+
+  .side-panel {
+    position: static;
+  }
+}
+
 @media (max-width: 560px) {
-  .signup-panel {
-    padding: 24px;
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 84px;
+    padding-block: 14px;
+  }
+
+  .panel-title-row {
+    flex-direction: column;
+    gap: 12px;
   }
 
   .input-row {
@@ -137,7 +306,11 @@
   }
 
   .input-row input {
-    border-block: 1px solid #e5e7eb;
+    border-block: 1px solid #d9dee3;
     border-inline: 0;
+  }
+
+  .signup-form button {
+    width: 100%;
   }
 }

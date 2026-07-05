@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import worker from './index'
 
+function createTestEnv() {
+  return {
+    RESEND_API_KEY: 'test-resend-key',
+  } as unknown as Env
+}
+
 describe('verification code requests', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -19,9 +25,7 @@ describe('verification code requests', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '12345678' }),
       }),
-      {
-        RESEND_API_KEY: 'test-resend-key',
-      } as Env,
+      createTestEnv(),
     )
 
     await expect(response.json()).resolves.toEqual({
@@ -59,9 +63,7 @@ describe('verification code requests', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '１２３４５６７８' }),
       }),
-      {
-        RESEND_API_KEY: 'test-resend-key',
-      } as Env,
+      createTestEnv(),
     )
 
     expect(response.status).toBe(400)
@@ -74,9 +76,7 @@ describe('verification code requests', () => {
       .mockResolvedValue(new Response('{}', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const env = {
-      RESEND_API_KEY: 'test-resend-key',
-    } as Env
+    const env = createTestEnv()
 
     const request = () =>
       worker.fetch(
@@ -105,9 +105,7 @@ describe('verification code requests', () => {
       .mockResolvedValue(new Response('{}', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const env = {
-      RESEND_API_KEY: 'test-resend-key',
-    } as Env
+    const env = createTestEnv()
 
     const request = () =>
       worker.fetch(

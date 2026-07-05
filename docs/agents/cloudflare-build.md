@@ -4,13 +4,15 @@ Use this when changing the Portal app build, Wrangler config, Worker bindings, o
 
 ## Production build rule
 
-The production build must regenerate Wrangler types before TypeScript checks:
+The production build must regenerate Wrangler runtime types before TypeScript checks:
 
 ```sh
-wrangler types worker-configuration.d.ts
+wrangler types worker-configuration.d.ts --include-env false
 ```
 
 Do not rely on `wrangler types --check` as the production build gate. A stale committed `worker-configuration.d.ts` can make Cloudflare fail before the app typecheck runs.
+
+Do not let Wrangler generate the `Env` interface. Cloudflare production does not have local `.dev.vars`, so generated Env types can differ between local and production builds. Keep app bindings in `apps/portal/worker/env.d.ts`.
 
 ## When changing bindings
 
@@ -18,6 +20,7 @@ If you change any of these files, regenerate and verify Cloudflare types:
 
 - `apps/portal/wrangler.jsonc`
 - `apps/portal/worker/index.ts`
+- `apps/portal/worker/env.d.ts`
 - Worker env bindings such as D1, KV, R2, secrets, or vars
 
 Run from `apps/portal`:
@@ -41,6 +44,7 @@ Check:
 
 - Cloudflare is building the same commit as `origin/main`.
 - `apps/portal/worker-configuration.d.ts` was regenerated after the latest `wrangler.jsonc` or binding change.
-- `apps/portal/package.json` build script still runs `wrangler types worker-configuration.d.ts` before `tsc`.
+- `apps/portal/package.json` build script still runs `wrangler types worker-configuration.d.ts --include-env false` before `tsc`.
+- Secret bindings such as `RESEND_API_KEY` are declared in `apps/portal/worker/env.d.ts`, not inferred from `.dev.vars`.
 
 Local Windows sandbox may fail with `spawn EPERM` when running npm scripts. Treat that as sandbox/tooling failure, not project build failure; retry with the approved build command outside the sandbox if needed.

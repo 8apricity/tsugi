@@ -20,7 +20,8 @@
   --space-page: 32px;
 
   font-family:
-    Inter, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    "Yu Gothic UI", "Yu Gothic", "Hiragino Maru Gothic ProN",
+    "Hiragino Sans", "BIZ UDPGothic", Meiryo, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color: var(--color-text);

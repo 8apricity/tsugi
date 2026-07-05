@@ -177,7 +177,16 @@ function App() {
       }
 
       setSetupSchoolEmail(body.schoolEmail);
-      await loadInitialSetup();
+      const loadedInitialSetup = await loadInitialSetup();
+
+      if (!loadedInitialSetup) {
+        setStatus("error");
+        setMessage(
+          "初回設定データを読み込めませんでした。時間をおいて再度お試しください。",
+        );
+        return;
+      }
+
       setMessage(null);
       return;
     }

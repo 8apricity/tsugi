@@ -3,6 +3,10 @@
 Jikanwari is a closed school community app for students at one high school. It exists to share school-life information such as timetable changes, tasks, and notes, and may later support requests, test-result collection, personalised reports, and discussion threads.
 Its initial core is helping students understand their current timetable and tasks through active shared information, change proposals, direct changes, approvals, and rejections.
 
+## Runtime Assumption
+
+Jikanwari is intended to be usable as a Progressive Web App (PWA), especially on mobile devices. UI, authentication, caching, and deployment decisions should preserve the option for installable, app-like usage and future offline or notification support.
+
 ## Language
 
 **School Community**:

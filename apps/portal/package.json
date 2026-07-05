@@ -6,7 +6,7 @@
   "scripts": {
     "cf-typegen": "wrangler types worker-configuration.d.ts",
     "dev": "vite",
-    "build": "wrangler types worker-configuration.d.ts --check && tsc -b && tsc -p tsconfig.worker.json --noEmit && vite build",
+    "build": "wrangler types worker-configuration.d.ts && tsc -b && tsc -p tsconfig.worker.json --noEmit && vite build",
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview"

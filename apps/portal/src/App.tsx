@@ -86,6 +86,13 @@ function App() {
       return;
     }
 
+    if (response.status === 502) {
+      setMessage(
+        "認証コードを送信できませんでした。メール送信設定を確認してください。",
+      );
+      return;
+    }
+
     setMessage(
       "認証コードを送信できませんでした。時間をおいて再度お試しください。",
     );

@@ -147,6 +147,27 @@ describe('verification code requests', () => {
     expect(rateLimitedResponse.status).toBe(429)
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
+
+  it('returns a recoverable error when the email provider cannot send', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('unauthorized', { status: 401 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schoolEmailNumber: '12345678' }),
+      }),
+      createTestEnv(),
+    )
+
+    expect(response.status).toBe(502)
+    await expect(response.json()).resolves.toEqual({
+      error: 'verification_code_delivery_failed',
+    })
+  })
 })
 
 describe('existing Student Account login', () => {

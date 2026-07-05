@@ -12,6 +12,12 @@ import {
 const verificationCodeStores = new WeakMap<Env, VerificationCodeStore>();
 const sessionCookieName = "jikanwari_session";
 
+class EmailDeliveryError extends Error {
+  constructor() {
+    super("Verification code delivery failed");
+  }
+}
+
 async function getVerificationCodeStore(env: Env) {
   if (env.DB) {
     return new D1VerificationCodeStore(env.DB);
@@ -60,7 +66,7 @@ async function sendVerificationCode(
   schoolEmail: string,
   code: string,
 ) {
-  await fetch("https://api.resend.com/emails", {
+  const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       authorization: `Bearer ${env.RESEND_API_KEY}`,
@@ -73,6 +79,10 @@ async function sendVerificationCode(
       text: `認証コード: ${code}`,
     }),
   });
+
+  if (!response.ok) {
+    throw new EmailDeliveryError();
+  }
 }
 
 function readCookie(request: Request, name: string) {
@@ -129,8 +139,23 @@ export default {
         now: Date.now(),
         code: generateVerificationCode(),
         store: await getVerificationCodeStore(env),
-        sendEmail: ({ schoolEmail, code }) =>
-          sendVerificationCode(env, schoolEmail, code),
+        sendEmail: async ({ schoolEmail, code }) => {
+          try {
+            await sendVerificationCode(env, schoolEmail, code);
+          } catch (error) {
+            if (error instanceof EmailDeliveryError) {
+              throw error;
+            }
+
+            throw new EmailDeliveryError();
+          }
+        },
+      }).catch((error: unknown) => {
+        if (error instanceof EmailDeliveryError) {
+          return { status: "delivery-failed" } as const;
+        }
+
+        throw error;
       });
 
       if (result.status === "invalid-school-email-number") {
@@ -144,6 +169,13 @@ export default {
         return Response.json(
           { error: "verification_code_rate_limited" },
           { status: 429 },
+        );
+      }
+
+      if (result.status === "delivery-failed") {
+        return Response.json(
+          { error: "verification_code_delivery_failed" },
+          { status: 502 },
         );
       }
 

@@ -16,6 +16,20 @@ type StudentAccount = {
   displayName: string;
 };
 
+type InitialSetupOptions = {
+  status: "ready";
+  schoolEmail: string;
+  schoolYear: number;
+  grades: Array<{
+    grade: number;
+    classes: Array<{
+      classId: string;
+      classNumber: number;
+      tracks: Array<{ trackId: string; trackName: string }>;
+    }>;
+  }>;
+};
+
 function App() {
   const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
   const [schoolEmail, setSchoolEmail] = useState<string | null>(null);
@@ -24,6 +38,15 @@ function App() {
   const [studentAccount, setStudentAccount] = useState<StudentAccount | null>(
     null,
   );
+  const [setupOptions, setSetupOptions] = useState<InitialSetupOptions | null>(
+    null,
+  );
+  const [displayName, setDisplayName] = useState("");
+  const [realName, setRealName] = useState("");
+  const [selectedGrade, setSelectedGrade] = useState("");
+  const [selectedClassId, setSelectedClassId] = useState("");
+  const [selectedTrackId, setSelectedTrackId] = useState("");
+  const [confirmedSetup, setConfirmedSetup] = useState(false);
   const [status, setStatus] = useState<RequestStatus>("checking");
   const [message, setMessage] = useState<string | null>(null);
 
@@ -46,6 +69,12 @@ function App() {
         return;
       }
 
+      const hasSetupSession = await loadInitialSetup();
+
+      if (hasSetupSession) {
+        return;
+      }
+
       setStatus("idle");
     }
 
@@ -55,6 +84,30 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  async function loadInitialSetup() {
+    const response = await fetch("/api/auth/initial-setup");
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const body = (await response.json()) as
+      | InitialSetupOptions
+      | { status: "invalid-setup-session" | "setup-unavailable" };
+
+    if (body.status !== "ready") {
+      return false;
+    }
+
+    setSetupOptions(body);
+    setSetupSchoolEmail(body.schoolEmail);
+    setSelectedGrade(String(body.grades[0]?.grade ?? ""));
+    setSelectedClassId(body.grades[0]?.classes[0]?.classId ?? "");
+    setSelectedTrackId(body.grades[0]?.classes[0]?.tracks[0]?.trackId ?? "");
+    setStatus("setup");
+    return true;
+  }
 
   async function requestVerificationCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -124,7 +177,7 @@ function App() {
       }
 
       setSetupSchoolEmail(body.schoolEmail);
-      setStatus("setup");
+      await loadInitialSetup();
       setMessage(null);
       return;
     }
@@ -139,8 +192,37 @@ function App() {
     setSchoolEmail(null);
     setSetupSchoolEmail(null);
     setVerificationCode("");
+    setSetupOptions(null);
     setStatus("idle");
     setMessage("ログアウトしました。");
+  }
+
+  async function submitInitialSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+
+    const response = await fetch("/api/auth/initial-setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        displayName,
+        realName,
+        trackId: selectedTrackId,
+        confirmed: confirmedSetup,
+      }),
+    });
+
+    if (response.ok) {
+      setMessage("初回設定内容を確認しました。次のステップで登録します。");
+      return;
+    }
+
+    if (response.status === 400) {
+      setMessage("入力内容を確認してください。");
+      return;
+    }
+
+    setMessage("初回設定を保存できませんでした。時間をおいて再度お試しください。");
   }
 
   if (status === "checking") {
@@ -178,7 +260,16 @@ function App() {
     );
   }
 
-  if (status === "setup") {
+  if (status === "setup" && setupOptions) {
+    const currentGrade = setupOptions.grades.find(
+      (gradeOption) => String(gradeOption.grade) === selectedGrade,
+    );
+    const classOptions = currentGrade?.classes ?? [];
+    const currentClass = classOptions.find(
+      (classOption) => classOption.classId === selectedClassId,
+    );
+    const trackOptions = currentClass?.tracks ?? [];
+
     return (
       <main className="app-page signup-page">
         <section className="panel signup-panel" aria-labelledby="setup-title">
@@ -189,11 +280,123 @@ function App() {
               認証済みです。次に表示名、実名、Student Affiliation を設定します。
             </p>
           </div>
-          {setupSchoolEmail ? (
-            <div className="notice notice-success">
-              <p>
-                認証済み: <strong>{setupSchoolEmail}</strong>
-              </p>
+          <form className="form-grid" onSubmit={submitInitialSetup}>
+            <label className="field-label" htmlFor="display-name">
+              Display Name
+            </label>
+            <input
+              id="display-name"
+              className="text-input"
+              maxLength={24}
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+            />
+
+            <label className="field-label" htmlFor="real-name">
+              Real Name
+            </label>
+            <input
+              id="real-name"
+              className="text-input"
+              maxLength={40}
+              value={realName}
+              onChange={(event) => setRealName(event.target.value)}
+            />
+
+            <label className="field-label" htmlFor="grade">
+              Grade
+            </label>
+            <select
+              id="grade"
+              className="text-input"
+              value={selectedGrade}
+              onChange={(event) => {
+                const nextGrade = event.target.value;
+                const nextGradeOption = setupOptions.grades.find(
+                  (gradeOption) => String(gradeOption.grade) === nextGrade,
+                );
+                const nextClass = nextGradeOption?.classes[0];
+
+                setSelectedGrade(nextGrade);
+                setSelectedClassId(nextClass?.classId ?? "");
+                setSelectedTrackId(nextClass?.tracks[0]?.trackId ?? "");
+              }}
+            >
+              {setupOptions.grades.map((gradeOption) => (
+                <option key={gradeOption.grade} value={gradeOption.grade}>
+                  {gradeOption.grade}
+                </option>
+              ))}
+            </select>
+
+            <label className="field-label" htmlFor="class-id">
+              Class
+            </label>
+            <select
+              id="class-id"
+              className="text-input"
+              value={selectedClassId}
+              onChange={(event) => {
+                const nextClassId = event.target.value;
+                const nextClass = classOptions.find(
+                  (classOption) => classOption.classId === nextClassId,
+                );
+
+                setSelectedClassId(nextClassId);
+                setSelectedTrackId(nextClass?.tracks[0]?.trackId ?? "");
+              }}
+            >
+              {classOptions.map((classOption) => (
+                <option key={classOption.classId} value={classOption.classId}>
+                  {classOption.classNumber}
+                </option>
+              ))}
+            </select>
+
+            <label className="field-label" htmlFor="track-id">
+              Track
+            </label>
+            <select
+              id="track-id"
+              className="text-input"
+              value={selectedTrackId}
+              onChange={(event) => setSelectedTrackId(event.target.value)}
+            >
+              {trackOptions.map((trackOption) => (
+                <option key={trackOption.trackId} value={trackOption.trackId}>
+                  {trackOption.trackName}
+                </option>
+              ))}
+            </select>
+
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={confirmedSetup}
+                onChange={(event) => setConfirmedSetup(event.target.checked)}
+              />
+              選択内容を確認しました
+            </label>
+
+            <button className="button-primary" type="submit">
+              初回設定を確認
+            </button>
+          </form>
+
+          {message ? (
+            <div
+              className={`notice ${
+                message.includes("確認しました")
+                  ? "notice-success"
+                  : "notice-error"
+              }`}
+            >
+              <p>{message}</p>
+              {setupSchoolEmail ? (
+                <p>
+                  認証済み: <strong>{setupSchoolEmail}</strong>
+                </p>
+              ) : null}
             </div>
           ) : null}
         </section>

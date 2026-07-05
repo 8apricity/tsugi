@@ -1,12 +1,32 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   InMemoryVerificationCodeStore,
+  getInitialSetupOptions,
+  submitInitialSetupDraft,
   readStudentSession,
   logoutStudentSession,
   readSetupSession,
   requestVerificationCode,
   verifyCodeForExistingStudent,
 } from './auth'
+
+async function createSetupSession(store: InMemoryVerificationCodeStore) {
+  await requestVerificationCode({
+    schoolEmailNumber: '12345678',
+    now: 1_000,
+    code: '123456',
+    store,
+    sendEmail: vi.fn().mockResolvedValue(undefined),
+  })
+  await verifyCodeForExistingStudent({
+    schoolEmailNumber: '12345678',
+    code: '123456',
+    now: 2_000,
+    sessionToken: 'student-session-token',
+    setupSessionToken: 'setup-session-token',
+    store,
+  })
+}
 
 describe('requestVerificationCode', () => {
   it('invalidates earlier unused verification codes when a new code is sent', async () => {
@@ -96,6 +116,154 @@ describe('requestVerificationCode', () => {
     )
 
     expect(records).toMatchObject([{ invalidatedAt: 1_000 }])
+  })
+})
+
+describe('initial Student Affiliation setup', () => {
+  it('returns current School Year Grade/Class/Track choices for a valid setup session', async () => {
+    const store = new InMemoryVerificationCodeStore()
+    await createSetupSession(store)
+    await store.saveSchoolYear({
+      schoolYear: 2026,
+      startsOn: '2026-04-01',
+      endsOn: '2027-03-31',
+      isCurrent: true,
+    })
+    await store.saveSchoolYearClass({
+      classId: 'class-1-1',
+      schoolYear: 2026,
+      grade: 1,
+      classNumber: 1,
+    })
+    await store.saveTrack({
+      trackId: 'track-1-1-a',
+      classId: 'class-1-1',
+      trackName: 'A',
+    })
+
+    await expect(
+      getInitialSetupOptions({
+        setupSessionToken: 'setup-session-token',
+        now: 2_000,
+        store,
+      }),
+    ).resolves.toEqual({
+      status: 'ready',
+      schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+      schoolYear: 2026,
+      grades: [
+        {
+          grade: 1,
+          classes: [
+            {
+              classId: 'class-1-1',
+              classNumber: 1,
+              tracks: [{ trackId: 'track-1-1-a', trackName: 'A' }],
+            },
+          ],
+        },
+      ],
+    })
+  })
+
+  it('validates trimmed names and selected Track before saving initial setup draft', async () => {
+    const store = new InMemoryVerificationCodeStore()
+    await createSetupSession(store)
+    await store.saveSchoolYear({
+      schoolYear: 2026,
+      startsOn: '2026-04-01',
+      endsOn: '2027-03-31',
+      isCurrent: true,
+    })
+    await store.saveSchoolYearClass({
+      classId: 'class-2-3',
+      schoolYear: 2026,
+      grade: 2,
+      classNumber: 3,
+    })
+    await store.saveTrack({
+      trackId: 'track-2-3-science',
+      classId: 'class-2-3',
+      trackName: '理系',
+    })
+
+    await expect(
+      submitInitialSetupDraft({
+        setupSessionToken: 'setup-session-token',
+        displayName: '  Sora  ',
+        realName: '  空  ',
+        trackId: 'track-2-3-science',
+        confirmed: true,
+        now: 2_000,
+        store,
+      }),
+    ).resolves.toEqual({
+      status: 'saved',
+      draft: {
+        displayName: 'Sora',
+        realName: '空',
+        schoolYear: 2026,
+        grade: 2,
+        classId: 'class-2-3',
+        trackId: 'track-2-3-science',
+      },
+    })
+  })
+
+  it('rejects missing master data, invalid names, missing Track, and unconfirmed submission', async () => {
+    const store = new InMemoryVerificationCodeStore()
+    await createSetupSession(store)
+
+    await expect(
+      getInitialSetupOptions({
+        setupSessionToken: 'setup-session-token',
+        now: 2_000,
+        store,
+      }),
+    ).resolves.toEqual({ status: 'setup-unavailable' })
+
+    await store.saveSchoolYear({
+      schoolYear: 2026,
+      startsOn: '2026-04-01',
+      endsOn: '2027-03-31',
+      isCurrent: true,
+    })
+
+    await expect(
+      submitInitialSetupDraft({
+        setupSessionToken: 'setup-session-token',
+        displayName: '   ',
+        realName: 'Name',
+        trackId: 'track-missing',
+        confirmed: true,
+        now: 2_000,
+        store,
+      }),
+    ).resolves.toEqual({ status: 'invalid-name' })
+
+    await expect(
+      submitInitialSetupDraft({
+        setupSessionToken: 'setup-session-token',
+        displayName: 'Sora',
+        realName: 'Name',
+        trackId: null,
+        confirmed: true,
+        now: 2_000,
+        store,
+      }),
+    ).resolves.toEqual({ status: 'invalid-affiliation' })
+
+    await expect(
+      submitInitialSetupDraft({
+        setupSessionToken: 'setup-session-token',
+        displayName: 'Sora',
+        realName: 'Name',
+        trackId: 'track-missing',
+        confirmed: false,
+        now: 2_000,
+        store,
+      }),
+    ).resolves.toEqual({ status: 'confirmation-required' })
   })
 })
 

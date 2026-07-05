@@ -17,6 +17,31 @@ function createTestEnv() {
 function createNewStudentTestEnv() {
   return {
     RESEND_API_KEY: 'test-resend-key',
+    TEST_SCHOOL_STRUCTURE: {
+      schoolYears: [
+        {
+          schoolYear: 2026,
+          startsOn: '2026-04-01',
+          endsOn: '2027-03-31',
+          isCurrent: true,
+        },
+      ],
+      classes: [
+        {
+          classId: 'class-1-1',
+          schoolYear: 2026,
+          grade: 1,
+          classNumber: 1,
+        },
+      ],
+      tracks: [
+        {
+          trackId: 'track-1-1-a',
+          classId: 'class-1-1',
+          trackName: 'A',
+        },
+      ],
+    },
   } as unknown as Env
 }
 
@@ -354,6 +379,87 @@ describe('new Student Account setup session', () => {
     await expect(setupSessionResponse.json()).resolves.toEqual({
       status: 'valid',
       schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+    })
+  })
+})
+
+describe('initial Student Affiliation setup API', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('returns setup choices and saves a confirmed initial setup draft', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = createNewStudentTestEnv()
+
+    await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schoolEmailNumber: '12345678' }),
+      }),
+      env,
+    )
+    const verifyResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          schoolEmailNumber: '12345678',
+          code: getLastSentCode(fetchMock),
+        }),
+      }),
+      env,
+    )
+    const cookie = verifyResponse.headers.get('set-cookie') ?? ''
+
+    const optionsResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/initial-setup', {
+        headers: { cookie },
+      }),
+      env,
+    )
+
+    expect(optionsResponse.status).toBe(200)
+    await expect(optionsResponse.json()).resolves.toMatchObject({
+      status: 'ready',
+      schoolYear: 2026,
+      grades: [
+        {
+          grade: 1,
+          classes: [
+            {
+              classId: 'class-1-1',
+              classNumber: 1,
+              tracks: [{ trackId: 'track-1-1-a', trackName: 'A' }],
+            },
+          ],
+        },
+      ],
+    })
+
+    const submitResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/initial-setup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({
+          displayName: '  Sora  ',
+          realName: '  空  ',
+          trackId: 'track-1-1-a',
+          confirmed: true,
+        }),
+      }),
+      env,
+    )
+
+    expect(submitResponse.status).toBe(200)
+    await expect(submitResponse.json()).resolves.toEqual({
+      status: 'saved',
     })
   })
 })

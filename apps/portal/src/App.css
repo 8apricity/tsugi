@@ -69,6 +69,21 @@
   overflow-wrap: anywhere;
 }
 
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.checkbox-field input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+}
+
 .button-secondary {
   justify-self: start;
   min-height: 44px;

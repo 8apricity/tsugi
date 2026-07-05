@@ -36,6 +36,35 @@ export type SetupSession = {
   invalidatedAt: number | null
 }
 
+export type SchoolYearRecord = {
+  schoolYear: number
+  startsOn: string
+  endsOn: string
+  isCurrent: boolean
+}
+
+export type SchoolYearClassRecord = {
+  classId: string
+  schoolYear: number
+  grade: number
+  classNumber: number
+}
+
+export type TrackRecord = {
+  trackId: string
+  classId: string
+  trackName: string
+}
+
+export type InitialSetupDraft = {
+  displayName: string
+  realName: string
+  schoolYear: number
+  grade: number
+  classId: string
+  trackId: string
+}
+
 export type VerificationCodeStore = {
   findRequestsBySchoolEmail(
     schoolEmail: string,
@@ -62,6 +91,20 @@ export type VerificationCodeStore = {
   invalidateSetupSessionsBySchoolEmail(
     schoolEmail: string,
     invalidatedAt: number,
+  ): Promise<void>
+  saveSchoolYear(record: SchoolYearRecord): Promise<void>
+  saveSchoolYearClass(record: SchoolYearClassRecord): Promise<void>
+  saveTrack(record: TrackRecord): Promise<void>
+  findCurrentSchoolYear(): Promise<SchoolYearRecord | null>
+  listClassesForSchoolYear(schoolYear: number): Promise<SchoolYearClassRecord[]>
+  listTracksForSchoolYear(schoolYear: number): Promise<TrackRecord[]>
+  findTrackWithClass(
+    trackId: string,
+    schoolYear: number,
+  ): Promise<{ track: TrackRecord; schoolClass: SchoolYearClassRecord } | null>
+  saveInitialSetupDraft(
+    setupSessionTokenHash: string,
+    draft: InitialSetupDraft,
   ): Promise<void>
 }
 
@@ -115,11 +158,40 @@ export type ReadSetupSessionResult =
   | { status: 'valid'; schoolEmail: string }
   | { status: 'invalid' }
 
+export type InitialSetupOptionsResult =
+  | {
+      status: 'ready'
+      schoolEmail: string
+      schoolYear: number
+      grades: Array<{
+        grade: number
+        classes: Array<{
+          classId: string
+          classNumber: number
+          tracks: Array<{ trackId: string; trackName: string }>
+        }>
+      }>
+    }
+  | { status: 'invalid-setup-session' }
+  | { status: 'setup-unavailable' }
+
+export type SubmitInitialSetupDraftResult =
+  | { status: 'saved'; draft: InitialSetupDraft }
+  | { status: 'invalid-setup-session' }
+  | { status: 'invalid-name' }
+  | { status: 'invalid-affiliation' }
+  | { status: 'confirmation-required' }
+  | { status: 'setup-unavailable' }
+
 export class InMemoryVerificationCodeStore implements VerificationCodeStore {
   private records: VerificationCodeRequestRecord[] = []
   private studentAccounts: StudentAccount[] = []
   private studentSessions: StudentSession[] = []
   private setupSessions: SetupSession[] = []
+  private schoolYears: SchoolYearRecord[] = []
+  private schoolYearClasses: SchoolYearClassRecord[] = []
+  private tracks: TrackRecord[] = []
+  private initialSetupDrafts = new Map<string, InitialSetupDraft>()
 
   async findRequestsBySchoolEmail(schoolEmail: string) {
     return this.records.filter((record) => record.schoolEmail === schoolEmail)
@@ -219,6 +291,61 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
       }
     })
   }
+
+  async saveSchoolYear(record: SchoolYearRecord) {
+    this.schoolYears.push(record)
+  }
+
+  async saveSchoolYearClass(record: SchoolYearClassRecord) {
+    this.schoolYearClasses.push(record)
+  }
+
+  async saveTrack(record: TrackRecord) {
+    this.tracks.push(record)
+  }
+
+  async findCurrentSchoolYear() {
+    return this.schoolYears.find((schoolYear) => schoolYear.isCurrent) ?? null
+  }
+
+  async listClassesForSchoolYear(schoolYear: number) {
+    return this.schoolYearClasses.filter(
+      (schoolClass) => schoolClass.schoolYear === schoolYear,
+    )
+  }
+
+  async listTracksForSchoolYear(schoolYear: number) {
+    const classIds = new Set(
+      this.schoolYearClasses
+        .filter((schoolClass) => schoolClass.schoolYear === schoolYear)
+        .map((schoolClass) => schoolClass.classId),
+    )
+
+    return this.tracks.filter((track) => classIds.has(track.classId))
+  }
+
+  async findTrackWithClass(trackId: string, schoolYear: number) {
+    const track = this.tracks.find((candidate) => candidate.trackId === trackId)
+
+    if (!track) {
+      return null
+    }
+
+    const schoolClass = this.schoolYearClasses.find(
+      (candidate) =>
+        candidate.classId === track.classId &&
+        candidate.schoolYear === schoolYear,
+    )
+
+    return schoolClass ? { track, schoolClass } : null
+  }
+
+  async saveInitialSetupDraft(
+    setupSessionTokenHash: string,
+    draft: InitialSetupDraft,
+  ) {
+    this.initialSetupDrafts.set(setupSessionTokenHash, draft)
+  }
 }
 
 type EmailVerificationCodeRow = {
@@ -249,6 +376,26 @@ type SetupSessionRow = {
   created_at: number
   expires_at: number
   invalidated_at: number | null
+}
+
+type SchoolYearRow = {
+  school_year: number
+  starts_on: string
+  ends_on: string
+  is_current: number
+}
+
+type SchoolYearClassRow = {
+  class_id: string
+  school_year: number
+  grade: number
+  class_number: number
+}
+
+type TrackRow = {
+  track_id: string
+  class_id: string
+  track_name: string
 }
 
 export class D1VerificationCodeStore implements VerificationCodeStore {
@@ -471,6 +618,147 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
       .bind(invalidatedAt, schoolEmail)
       .run()
   }
+
+  async saveSchoolYear(record: SchoolYearRecord) {
+    await this.db
+      .prepare(
+        `insert into school_years (school_year, starts_on, ends_on, is_current)
+         values (?, ?, ?, ?)`,
+      )
+      .bind(
+        record.schoolYear,
+        record.startsOn,
+        record.endsOn,
+        record.isCurrent ? 1 : 0,
+      )
+      .run()
+  }
+
+  async saveSchoolYearClass(record: SchoolYearClassRecord) {
+    await this.db
+      .prepare(
+        `insert into school_year_classes (class_id, school_year, grade, class_number)
+         values (?, ?, ?, ?)`,
+      )
+      .bind(record.classId, record.schoolYear, record.grade, record.classNumber)
+      .run()
+  }
+
+  async saveTrack(record: TrackRecord) {
+    await this.db
+      .prepare(
+        `insert into tracks (track_id, class_id, track_name)
+         values (?, ?, ?)`,
+      )
+      .bind(record.trackId, record.classId, record.trackName)
+      .run()
+  }
+
+  async findCurrentSchoolYear() {
+    const row = await this.db
+      .prepare(
+        `select school_year, starts_on, ends_on, is_current
+         from school_years
+         where is_current = 1
+         order by school_year desc
+         limit 1`,
+      )
+      .first<SchoolYearRow>()
+
+    return row ? mapSchoolYearRow(row) : null
+  }
+
+  async listClassesForSchoolYear(schoolYear: number) {
+    const { results } = await this.db
+      .prepare(
+        `select class_id, school_year, grade, class_number
+         from school_year_classes
+         where school_year = ?
+         order by grade asc, class_number asc`,
+      )
+      .bind(schoolYear)
+      .all<SchoolYearClassRow>()
+
+    return results.map(mapSchoolYearClassRow)
+  }
+
+  async listTracksForSchoolYear(schoolYear: number) {
+    const { results } = await this.db
+      .prepare(
+        `select tracks.track_id, tracks.class_id, tracks.track_name
+         from tracks
+         join school_year_classes on school_year_classes.class_id = tracks.class_id
+         where school_year_classes.school_year = ?
+         order by tracks.track_name asc`,
+      )
+      .bind(schoolYear)
+      .all<TrackRow>()
+
+    return results.map(mapTrackRow)
+  }
+
+  async findTrackWithClass(trackId: string, schoolYear: number) {
+    const row = await this.db
+      .prepare(
+        `select
+          tracks.track_id,
+          tracks.class_id,
+          tracks.track_name,
+          school_year_classes.school_year,
+          school_year_classes.grade,
+          school_year_classes.class_number
+         from tracks
+         join school_year_classes on school_year_classes.class_id = tracks.class_id
+         where tracks.track_id = ? and school_year_classes.school_year = ?`,
+      )
+      .bind(trackId, schoolYear)
+      .first<
+        TrackRow & {
+          school_year: number
+          grade: number
+          class_number: number
+        }
+      >()
+
+    return row
+      ? {
+          track: mapTrackRow(row),
+          schoolClass: mapSchoolYearClassRow({
+            class_id: row.class_id,
+            school_year: row.school_year,
+            grade: row.grade,
+            class_number: row.class_number,
+          }),
+        }
+      : null
+  }
+
+  async saveInitialSetupDraft(
+    setupSessionTokenHash: string,
+    draft: InitialSetupDraft,
+  ) {
+    await this.db
+      .prepare(
+        `update student_account_setup_sessions
+         set display_name = ?,
+             real_name = ?,
+             school_year = ?,
+             grade = ?,
+             class_id = ?,
+             track_id = ?
+         where setup_session_token_hash = ?`,
+      )
+      .bind(
+        draft.displayName,
+        draft.realName,
+        draft.schoolYear,
+        draft.grade,
+        draft.classId,
+        draft.trackId,
+        setupSessionTokenHash,
+      )
+      .run()
+  }
 }
 
 function mapStudentAccountRow(row: StudentAccountRow): StudentAccount {
@@ -478,6 +766,32 @@ function mapStudentAccountRow(row: StudentAccountRow): StudentAccount {
     studentAccountId: row.student_account_id,
     schoolEmail: row.school_email,
     displayName: row.display_name,
+  }
+}
+
+function mapSchoolYearRow(row: SchoolYearRow): SchoolYearRecord {
+  return {
+    schoolYear: row.school_year,
+    startsOn: row.starts_on,
+    endsOn: row.ends_on,
+    isCurrent: row.is_current === 1,
+  }
+}
+
+function mapSchoolYearClassRow(row: SchoolYearClassRow): SchoolYearClassRecord {
+  return {
+    classId: row.class_id,
+    schoolYear: row.school_year,
+    grade: row.grade,
+    classNumber: row.class_number,
+  }
+}
+
+function mapTrackRow(row: TrackRow): TrackRecord {
+  return {
+    trackId: row.track_id,
+    classId: row.class_id,
+    trackName: row.track_name,
   }
 }
 
@@ -629,6 +943,163 @@ export async function readSetupSession({
   }
 
   return { status: 'valid', schoolEmail: session.schoolEmail }
+}
+
+export async function getInitialSetupOptions({
+  setupSessionToken,
+  now,
+  store,
+}: {
+  setupSessionToken: string | null
+  now: number
+  store: VerificationCodeStore
+}): Promise<InitialSetupOptionsResult> {
+  const setupSession = await readSetupSession({ setupSessionToken, now, store })
+
+  if (setupSession.status === 'invalid') {
+    return { status: 'invalid-setup-session' }
+  }
+
+  const currentSchoolYear = await store.findCurrentSchoolYear()
+
+  if (!currentSchoolYear) {
+    return { status: 'setup-unavailable' }
+  }
+
+  const classes = await store.listClassesForSchoolYear(
+    currentSchoolYear.schoolYear,
+  )
+  const tracks = await store.listTracksForSchoolYear(currentSchoolYear.schoolYear)
+
+  if (classes.length === 0 || tracks.length === 0) {
+    return { status: 'setup-unavailable' }
+  }
+
+  const tracksByClassId = new Map<string, TrackRecord[]>()
+
+  for (const track of tracks) {
+    tracksByClassId.set(track.classId, [
+      ...(tracksByClassId.get(track.classId) ?? []),
+      track,
+    ])
+  }
+
+  const classesByGrade = new Map<number, SchoolYearClassRecord[]>()
+
+  for (const schoolClass of classes) {
+    const classTracks = tracksByClassId.get(schoolClass.classId) ?? []
+
+    if (classTracks.length === 0) {
+      return { status: 'setup-unavailable' }
+    }
+
+    classesByGrade.set(schoolClass.grade, [
+      ...(classesByGrade.get(schoolClass.grade) ?? []),
+      schoolClass,
+    ])
+  }
+
+  return {
+    status: 'ready',
+    schoolEmail: setupSession.schoolEmail,
+    schoolYear: currentSchoolYear.schoolYear,
+    grades: [...classesByGrade.entries()]
+      .sort(([leftGrade], [rightGrade]) => leftGrade - rightGrade)
+      .map(([grade, gradeClasses]) => ({
+        grade,
+        classes: gradeClasses
+          .sort((left, right) => left.classNumber - right.classNumber)
+          .map((schoolClass) => ({
+            classId: schoolClass.classId,
+            classNumber: schoolClass.classNumber,
+            tracks: (tracksByClassId.get(schoolClass.classId) ?? [])
+              .sort((left, right) => left.trackName.localeCompare(right.trackName))
+              .map((track) => ({
+                trackId: track.trackId,
+                trackName: track.trackName,
+              })),
+          })),
+      })),
+  }
+}
+
+export async function submitInitialSetupDraft({
+  setupSessionToken,
+  displayName,
+  realName,
+  trackId,
+  confirmed,
+  now,
+  store,
+}: {
+  setupSessionToken: string | null
+  displayName: unknown
+  realName: unknown
+  trackId: unknown
+  confirmed: unknown
+  now: number
+  store: VerificationCodeStore
+}): Promise<SubmitInitialSetupDraftResult> {
+  if (confirmed !== true) {
+    return { status: 'confirmation-required' }
+  }
+
+  const trimmedDisplayName = trimName(displayName)
+  const trimmedRealName = trimName(realName)
+
+  if (
+    !trimmedDisplayName ||
+    trimmedDisplayName.length > 24 ||
+    !trimmedRealName ||
+    trimmedRealName.length > 40
+  ) {
+    return { status: 'invalid-name' }
+  }
+
+  if (typeof trackId !== 'string') {
+    return { status: 'invalid-affiliation' }
+  }
+
+  const setupSession = await readSetupSession({ setupSessionToken, now, store })
+
+  if (setupSession.status === 'invalid') {
+    return { status: 'invalid-setup-session' }
+  }
+
+  const currentSchoolYear = await store.findCurrentSchoolYear()
+
+  if (!currentSchoolYear) {
+    return { status: 'setup-unavailable' }
+  }
+
+  const resolvedTrack = await store.findTrackWithClass(
+    trackId,
+    currentSchoolYear.schoolYear,
+  )
+
+  if (!resolvedTrack) {
+    return { status: 'invalid-affiliation' }
+  }
+
+  const draft = {
+    displayName: trimmedDisplayName,
+    realName: trimmedRealName,
+    schoolYear: currentSchoolYear.schoolYear,
+    grade: resolvedTrack.schoolClass.grade,
+    classId: resolvedTrack.schoolClass.classId,
+    trackId: resolvedTrack.track.trackId,
+  }
+
+  await store.saveInitialSetupDraft(
+    await hashToken(setupSessionToken ?? ''),
+    draft,
+  )
+
+  return { status: 'saved', draft }
+}
+
+function trimName(value: unknown) {
+  return typeof value === 'string' ? value.trim() : null
 }
 
 export async function readStudentSession({

@@ -1,12 +1,17 @@
 import {
   D1VerificationCodeStore,
   InMemoryVerificationCodeStore,
+  getInitialSetupOptions,
   logoutStudentSession,
   readSetupSession,
   readStudentSession,
   requestVerificationCode,
+  submitInitialSetupDraft,
+  type SchoolYearClassRecord,
+  type SchoolYearRecord,
   verifyCodeForExistingStudent,
   type StudentAccount,
+  type TrackRecord,
   type VerificationCodeStore,
 } from "./auth";
 
@@ -35,12 +40,37 @@ async function getVerificationCodeStore(env: Env) {
   const testStudentAccounts = (
     env as Env & { TEST_STUDENT_ACCOUNTS?: StudentAccount[] }
   ).TEST_STUDENT_ACCOUNTS;
+  const testSchoolStructure = (
+    env as Env & {
+      TEST_SCHOOL_STRUCTURE?: {
+        schoolYears: SchoolYearRecord[];
+        classes: SchoolYearClassRecord[];
+        tracks: TrackRecord[];
+      };
+    }
+  ).TEST_SCHOOL_STRUCTURE;
 
   if (testStudentAccounts) {
     await Promise.all(
       testStudentAccounts.map((studentAccount) =>
         store.saveStudentAccount(studentAccount),
       ),
+    );
+  }
+
+  if (testSchoolStructure) {
+    await Promise.all(
+      testSchoolStructure.schoolYears.map((schoolYear) =>
+        store.saveSchoolYear(schoolYear),
+      ),
+    );
+    await Promise.all(
+      testSchoolStructure.classes.map((schoolClass) =>
+        store.saveSchoolYearClass(schoolClass),
+      ),
+    );
+    await Promise.all(
+      testSchoolStructure.tracks.map((track) => store.saveTrack(track)),
     );
   }
 
@@ -283,6 +313,45 @@ export default {
       });
 
       return Response.json(result);
+    }
+
+    if (url.pathname === "/api/auth/initial-setup" && request.method === "GET") {
+      const result = await getInitialSetupOptions({
+        setupSessionToken: readCookie(request, setupSessionCookieName),
+        now: Date.now(),
+        store: await getVerificationCodeStore(env),
+      });
+
+      return Response.json(result, {
+        status: result.status === "ready" ? 200 : 400,
+      });
+    }
+
+    if (
+      url.pathname === "/api/auth/initial-setup" &&
+      request.method === "POST"
+    ) {
+      const body = await request.json<{
+        displayName?: unknown;
+        realName?: unknown;
+        trackId?: unknown;
+        confirmed?: unknown;
+      }>();
+      const result = await submitInitialSetupDraft({
+        setupSessionToken: readCookie(request, setupSessionCookieName),
+        displayName: body.displayName,
+        realName: body.realName,
+        trackId: body.trackId,
+        confirmed: body.confirmed,
+        now: Date.now(),
+        store: await getVerificationCodeStore(env),
+      });
+
+      if (result.status === "saved") {
+        return Response.json({ status: "saved" });
+      }
+
+      return Response.json(result, { status: 400 });
     }
 
     if (url.pathname === "/api/auth/session" && request.method === "DELETE") {

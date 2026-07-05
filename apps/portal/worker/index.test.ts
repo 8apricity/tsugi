@@ -4,7 +4,26 @@ import worker from './index'
 function createTestEnv() {
   return {
     RESEND_API_KEY: 'test-resend-key',
+    TEST_STUDENT_ACCOUNTS: [
+      {
+        studentAccountId: 'student-account-1',
+        schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+        displayName: 'Sora',
+      },
+    ],
   } as unknown as Env
+}
+
+function getLastSentCode(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) {
+  const [, resendRequest] = fetchMock.mock.calls.at(-1) ?? []
+  const resendBody = JSON.parse(String(resendRequest?.body)) as { text: string }
+  const code = resendBody.text.match(/[0-9]{6}/)?.[0]
+
+  if (!code) {
+    throw new Error('expected verification code')
+  }
+
+  return code
 }
 
 describe('verification code requests', () => {
@@ -127,5 +146,126 @@ describe('verification code requests', () => {
 
     expect(rateLimitedResponse.status).toBe(429)
     expect(fetchMock).toHaveBeenCalledTimes(5)
+  })
+})
+
+describe('existing Student Account login', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('verifies a code, creates a session cookie, and exposes current session state', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = createTestEnv()
+
+    const sendResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schoolEmailNumber: '12345678' }),
+      }),
+      env,
+    )
+    expect(sendResponse.status).toBe(200)
+
+    const loginResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          schoolEmailNumber: '12345678',
+          code: getLastSentCode(fetchMock),
+        }),
+      }),
+      env,
+    )
+
+    expect(loginResponse.status).toBe(200)
+    await expect(loginResponse.json()).resolves.toMatchObject({
+      status: 'authenticated',
+      studentAccount: {
+        schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+      },
+    })
+
+    const cookie = loginResponse.headers.get('set-cookie')
+    expect(cookie).toContain('jikanwari_session=')
+    expect(cookie).toContain('HttpOnly')
+    expect(cookie).toContain('SameSite=Lax')
+
+    const sessionResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/session', {
+        headers: { cookie: cookie ?? '' },
+      }),
+      env,
+    )
+
+    expect(sessionResponse.status).toBe(200)
+    await expect(sessionResponse.json()).resolves.toMatchObject({
+      status: 'authenticated',
+      studentAccount: {
+        schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+      },
+    })
+  })
+
+  it('returns unauthenticated after logout invalidates the server session', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = createTestEnv()
+
+    await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schoolEmailNumber: '12345678' }),
+      }),
+      env,
+    )
+
+    const loginResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          schoolEmailNumber: '12345678',
+          code: getLastSentCode(fetchMock),
+        }),
+      }),
+      env,
+    )
+    const cookie = loginResponse.headers.get('set-cookie') ?? ''
+
+    const logoutResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/session', {
+        method: 'DELETE',
+        headers: { cookie },
+      }),
+      env,
+    )
+
+    expect(logoutResponse.status).toBe(204)
+    expect(logoutResponse.headers.get('set-cookie')).toContain(
+      'jikanwari_session=; Max-Age=0',
+    )
+
+    const sessionResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/session', {
+        headers: { cookie },
+      }),
+      env,
+    )
+
+    await expect(sessionResponse.json()).resolves.toEqual({
+      status: 'unauthenticated',
+    })
   })
 })

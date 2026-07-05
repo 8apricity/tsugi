@@ -51,16 +51,13 @@ function App() {
       <section className="panel signup-panel" aria-labelledby="signup-title">
         <div className="signup-header">
           <p className="eyebrow">アカウント認証</p>
-          <h1 id="signup-title">学校メールで始める</h1>
+          <h1 id="signup-title">メールで始める</h1>
           <p className="lead">
-            学校メールの8桁の番号を入力すると、認証コードを送信します。
+            メールアドレスの8桁の番号を入力して、認証コードを送信します。
           </p>
         </div>
 
         <form className="form-grid" onSubmit={requestVerificationCode}>
-          <label className="field-label" htmlFor="school-email-number">
-            学校メールの8桁番号
-          </label>
           <div className="input-group">
             <span aria-hidden="true">110-</span>
             <input
@@ -68,7 +65,7 @@ function App() {
               inputMode="numeric"
               maxLength={8}
               pattern="[0-9]{8}"
-              placeholder="12345678"
+              placeholder="00000000"
               value={schoolEmailNumber}
               onChange={(event) => setSchoolEmailNumber(event.target.value)}
             />

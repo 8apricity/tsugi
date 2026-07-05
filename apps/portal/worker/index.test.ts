@@ -14,6 +14,12 @@ function createTestEnv() {
   } as unknown as Env
 }
 
+function createNewStudentTestEnv() {
+  return {
+    RESEND_API_KEY: 'test-resend-key',
+  } as unknown as Env
+}
+
 function getLastSentCode(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) {
   const [, resendRequest] = fetchMock.mock.calls.at(-1) ?? []
   const resendBody = JSON.parse(String(resendRequest?.body)) as { text: string }
@@ -287,6 +293,67 @@ describe('existing Student Account login', () => {
 
     await expect(sessionResponse.json()).resolves.toEqual({
       status: 'unauthenticated',
+    })
+  })
+})
+
+describe('new Student Account setup session', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('verifies a code for a new Student and creates a setup session cookie', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = createNewStudentTestEnv()
+
+    await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schoolEmailNumber: '12345678' }),
+      }),
+      env,
+    )
+
+    const verifyResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          schoolEmailNumber: '12345678',
+          code: getLastSentCode(fetchMock),
+        }),
+      }),
+      env,
+    )
+
+    expect(verifyResponse.status).toBe(200)
+    await expect(verifyResponse.json()).resolves.toEqual({
+      status: 'setup-required',
+      schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+    })
+
+    const cookie = verifyResponse.headers.get('set-cookie')
+    expect(cookie).toContain('jikanwari_setup=')
+    expect(cookie).toContain('HttpOnly')
+    expect(cookie).toContain('SameSite=Lax')
+
+    const setupSessionResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/setup-session', {
+        headers: { cookie: cookie ?? '' },
+      }),
+      env,
+    )
+
+    expect(setupSessionResponse.status).toBe(200)
+    await expect(setupSessionResponse.json()).resolves.toEqual({
+      status: 'valid',
+      schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
     })
   })
 })

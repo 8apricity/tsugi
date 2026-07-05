@@ -7,6 +7,7 @@ type RequestStatus =
   | "sending"
   | "sent"
   | "verifying"
+  | "setup"
   | "authenticated"
   | "error";
 
@@ -18,6 +19,7 @@ type StudentAccount = {
 function App() {
   const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
   const [schoolEmail, setSchoolEmail] = useState<string | null>(null);
+  const [setupSchoolEmail, setSetupSchoolEmail] = useState<string | null>(null);
   const [verificationCode, setVerificationCode] = useState("");
   const [studentAccount, setStudentAccount] = useState<StudentAccount | null>(
     null,
@@ -112,7 +114,7 @@ function App() {
     if (response.ok) {
       const body = (await response.json()) as
         | { status: "authenticated"; studentAccount: StudentAccount }
-        | { status: "setup-required" };
+        | { status: "setup-required"; schoolEmail: string };
 
       if (body.status === "authenticated") {
         setStudentAccount(body.studentAccount);
@@ -121,8 +123,9 @@ function App() {
         return;
       }
 
-      setStatus("sent");
-      setMessage("初回設定が必要です。次の画面でプロフィールを設定します。");
+      setSetupSchoolEmail(body.schoolEmail);
+      setStatus("setup");
+      setMessage(null);
       return;
     }
 
@@ -134,6 +137,7 @@ function App() {
     await fetch("/api/auth/session", { method: "DELETE" });
     setStudentAccount(null);
     setSchoolEmail(null);
+    setSetupSchoolEmail(null);
     setVerificationCode("");
     setStatus("idle");
     setMessage("ログアウトしました。");
@@ -169,6 +173,29 @@ function App() {
           <button className="button-secondary" type="button" onClick={logout}>
             ログアウト
           </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (status === "setup") {
+    return (
+      <main className="app-page signup-page">
+        <section className="panel signup-panel" aria-labelledby="setup-title">
+          <div className="signup-header">
+            <p className="eyebrow">初回設定</p>
+            <h1 id="setup-title">プロフィール設定へ進む</h1>
+            <p className="lead">
+              認証済みです。次に表示名、実名、Student Affiliation を設定します。
+            </p>
+          </div>
+          {setupSchoolEmail ? (
+            <div className="notice notice-success">
+              <p>
+                認証済み: <strong>{setupSchoolEmail}</strong>
+              </p>
+            </div>
+          ) : null}
         </section>
       </main>
     );

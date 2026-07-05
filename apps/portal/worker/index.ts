@@ -2,6 +2,7 @@ import {
   D1VerificationCodeStore,
   InMemoryVerificationCodeStore,
   logoutStudentSession,
+  readSetupSession,
   readStudentSession,
   requestVerificationCode,
   verifyCodeForExistingStudent,
@@ -11,6 +12,7 @@ import {
 
 const verificationCodeStores = new WeakMap<Env, VerificationCodeStore>();
 const sessionCookieName = "jikanwari_session";
+const setupSessionCookieName = "jikanwari_setup";
 
 class EmailDeliveryError extends Error {
   constructor() {
@@ -61,6 +63,10 @@ function generateSessionToken() {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function generateSetupSessionToken() {
+  return generateSessionToken();
+}
+
 async function sendVerificationCode(
   env: Env,
   schoolEmail: string,
@@ -98,16 +104,34 @@ function readCookie(request: Request, name: string) {
   return cookie ? decodeURIComponent(cookie.slice(name.length + 1)) : null;
 }
 
-function sessionCookie(
+function httpOnlyCookie(
+  name: string,
   sessionToken: string,
   maxAgeSeconds: number,
   secure: boolean,
 ) {
   const secureAttribute = secure ? " Secure;" : "";
 
-  return `${sessionCookieName}=${encodeURIComponent(
+  return `${name}=${encodeURIComponent(
     sessionToken,
   )}; Max-Age=${maxAgeSeconds}; Path=/; HttpOnly;${secureAttribute} SameSite=Lax`;
+}
+
+function sessionCookie(sessionToken: string, maxAgeSeconds: number, secure: boolean) {
+  return httpOnlyCookie(sessionCookieName, sessionToken, maxAgeSeconds, secure);
+}
+
+function setupSessionCookie(
+  setupSessionToken: string,
+  maxAgeSeconds: number,
+  secure: boolean,
+) {
+  return httpOnlyCookie(
+    setupSessionCookieName,
+    setupSessionToken,
+    maxAgeSeconds,
+    secure,
+  );
 }
 
 function sessionResponseBody(studentAccount: {
@@ -191,11 +215,13 @@ export default {
         code?: unknown;
       }>();
       const sessionToken = generateSessionToken();
+      const setupSessionToken = generateSetupSessionToken();
       const result = await verifyCodeForExistingStudent({
         schoolEmailNumber: body.schoolEmailNumber,
         code: body.code,
         now: Date.now(),
         sessionToken,
+        setupSessionToken,
         store: await getVerificationCodeStore(env),
       });
 
@@ -207,7 +233,21 @@ export default {
       }
 
       if (result.status === "new-student") {
-        return Response.json({ status: "setup-required" });
+        return Response.json(
+          {
+            status: "setup-required",
+            schoolEmail: result.schoolEmail,
+          },
+          {
+            headers: {
+              "set-cookie": setupSessionCookie(
+                result.setupSessionToken,
+                30 * 60,
+                url.protocol === "https:",
+              ),
+            },
+          },
+        );
       }
 
       return Response.json(sessionResponseBody(result.studentAccount), {
@@ -233,6 +273,16 @@ export default {
       }
 
       return Response.json(sessionResponseBody(result.studentAccount));
+    }
+
+    if (url.pathname === "/api/auth/setup-session" && request.method === "GET") {
+      const result = await readSetupSession({
+        setupSessionToken: readCookie(request, setupSessionCookieName),
+        now: Date.now(),
+        store: await getVerificationCodeStore(env),
+      });
+
+      return Response.json(result);
     }
 
     if (url.pathname === "/api/auth/session" && request.method === "DELETE") {

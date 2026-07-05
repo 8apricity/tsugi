@@ -4,6 +4,7 @@ const hourlySendWindowMs = 60 * 60_000
 const hourlySendLimit = 5
 const verificationCodeLifetimeMs = 10 * 60_000
 const studentSessionLifetimeMs = 30 * 24 * 60 * 60_000
+const setupSessionLifetimeMs = 30 * 60_000
 
 export type VerificationCodeRequestRecord = {
   emailVerificationCodeId?: string
@@ -27,6 +28,14 @@ export type StudentSession = {
   invalidatedAt: number | null
 }
 
+export type SetupSession = {
+  setupSessionTokenHash: string
+  schoolEmail: string
+  createdAt: number
+  expiresAt: number
+  invalidatedAt: number | null
+}
+
 export type VerificationCodeStore = {
   findRequestsBySchoolEmail(
     schoolEmail: string,
@@ -44,6 +53,14 @@ export type VerificationCodeStore = {
   ): Promise<StudentSession | null>
   invalidateStudentSession(
     sessionTokenHash: string,
+    invalidatedAt: number,
+  ): Promise<void>
+  saveSetupSession(record: SetupSession): Promise<void>
+  findSetupSessionByTokenHash(
+    setupSessionTokenHash: string,
+  ): Promise<SetupSession | null>
+  invalidateSetupSessionsBySchoolEmail(
+    schoolEmail: string,
     invalidatedAt: number,
   ): Promise<void>
 }
@@ -71,6 +88,7 @@ export type VerifyCodeForExistingStudentInput = {
   code: unknown
   now: number
   sessionToken: string
+  setupSessionToken: string
   store: VerificationCodeStore
 }
 
@@ -81,17 +99,27 @@ export type VerifyCodeForExistingStudentResult =
       sessionToken: string
       expiresAt: number
     }
-  | { status: 'new-student' }
+  | {
+      status: 'new-student'
+      schoolEmail: string
+      setupSessionToken: string
+      expiresAt: number
+    }
   | { status: 'invalid-verification' }
 
 export type ReadStudentSessionResult =
   | { status: 'authenticated'; studentAccount: StudentAccount }
   | { status: 'unauthenticated' }
 
+export type ReadSetupSessionResult =
+  | { status: 'valid'; schoolEmail: string }
+  | { status: 'invalid' }
+
 export class InMemoryVerificationCodeStore implements VerificationCodeStore {
   private records: VerificationCodeRequestRecord[] = []
   private studentAccounts: StudentAccount[] = []
   private studentSessions: StudentSession[] = []
+  private setupSessions: SetupSession[] = []
 
   async findRequestsBySchoolEmail(schoolEmail: string) {
     return this.records.filter((record) => record.schoolEmail === schoolEmail)
@@ -163,6 +191,34 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
       }
     })
   }
+
+  async saveSetupSession(record: SetupSession) {
+    this.setupSessions.push(record)
+  }
+
+  async findSetupSessionByTokenHash(setupSessionTokenHash: string) {
+    return (
+      this.setupSessions.find(
+        (session) => session.setupSessionTokenHash === setupSessionTokenHash,
+      ) ?? null
+    )
+  }
+
+  async invalidateSetupSessionsBySchoolEmail(
+    schoolEmail: string,
+    invalidatedAt: number,
+  ) {
+    this.setupSessions = this.setupSessions.map((session) => {
+      if (session.schoolEmail !== schoolEmail || session.invalidatedAt !== null) {
+        return session
+      }
+
+      return {
+        ...session,
+        invalidatedAt,
+      }
+    })
+  }
 }
 
 type EmailVerificationCodeRow = {
@@ -182,6 +238,14 @@ type StudentAccountRow = {
 type StudentSessionRow = {
   session_token_hash: string
   student_account_id: string
+  created_at: number
+  expires_at: number
+  invalidated_at: number | null
+}
+
+type SetupSessionRow = {
+  setup_session_token_hash: string
+  school_email: string
   created_at: number
   expires_at: number
   invalidated_at: number | null
@@ -349,6 +413,64 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
       .bind(invalidatedAt, sessionTokenHash)
       .run()
   }
+
+  async saveSetupSession(record: SetupSession) {
+    await this.db
+      .prepare(
+        `insert into student_account_setup_sessions (
+          student_account_setup_session_id,
+          setup_session_token_hash,
+          school_email,
+          created_at,
+          expires_at,
+          invalidated_at
+        ) values (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        record.setupSessionTokenHash,
+        record.schoolEmail,
+        record.createdAt,
+        record.expiresAt,
+        record.invalidatedAt,
+      )
+      .run()
+  }
+
+  async findSetupSessionByTokenHash(setupSessionTokenHash: string) {
+    const row = await this.db
+      .prepare(
+        `select setup_session_token_hash, school_email, created_at, expires_at, invalidated_at
+         from student_account_setup_sessions
+         where setup_session_token_hash = ?`,
+      )
+      .bind(setupSessionTokenHash)
+      .first<SetupSessionRow>()
+
+    return row
+      ? {
+          setupSessionTokenHash: row.setup_session_token_hash,
+          schoolEmail: row.school_email,
+          createdAt: row.created_at,
+          expiresAt: row.expires_at,
+          invalidatedAt: row.invalidated_at,
+        }
+      : null
+  }
+
+  async invalidateSetupSessionsBySchoolEmail(
+    schoolEmail: string,
+    invalidatedAt: number,
+  ) {
+    await this.db
+      .prepare(
+        `update student_account_setup_sessions
+         set invalidated_at = ?
+         where school_email = ? and invalidated_at is null`,
+      )
+      .bind(invalidatedAt, schoolEmail)
+      .run()
+  }
 }
 
 function mapStudentAccountRow(row: StudentAccountRow): StudentAccount {
@@ -396,6 +518,7 @@ export async function requestVerificationCode({
   }
 
   await store.invalidateUnusedRequests(schoolEmail, now)
+  await store.invalidateSetupSessionsBySchoolEmail(schoolEmail, now)
   await store.saveRequest({
     schoolEmail,
     codeHash: await hashVerificationCode(code),
@@ -417,6 +540,7 @@ export async function verifyCodeForExistingStudent({
   code,
   now,
   sessionToken,
+  setupSessionToken,
   store,
 }: VerifyCodeForExistingStudentInput): Promise<VerifyCodeForExistingStudentResult> {
   if (
@@ -444,7 +568,24 @@ export async function verifyCodeForExistingStudent({
   const studentAccount = await store.findStudentAccountBySchoolEmail(schoolEmail)
 
   if (!studentAccount) {
-    return { status: 'new-student' }
+    await store.invalidateUnusedRequests(schoolEmail, now)
+    await store.invalidateSetupSessionsBySchoolEmail(schoolEmail, now)
+
+    const expiresAt = now + setupSessionLifetimeMs
+    await store.saveSetupSession({
+      setupSessionTokenHash: await hashToken(setupSessionToken),
+      schoolEmail,
+      createdAt: now,
+      expiresAt,
+      invalidatedAt: null,
+    })
+
+    return {
+      status: 'new-student',
+      schoolEmail,
+      setupSessionToken,
+      expiresAt,
+    }
   }
 
   await store.invalidateUnusedRequests(schoolEmail, now)
@@ -464,6 +605,30 @@ export async function verifyCodeForExistingStudent({
     sessionToken,
     expiresAt,
   }
+}
+
+export async function readSetupSession({
+  setupSessionToken,
+  now,
+  store,
+}: {
+  setupSessionToken: string | null
+  now: number
+  store: VerificationCodeStore
+}): Promise<ReadSetupSessionResult> {
+  if (!setupSessionToken) {
+    return { status: 'invalid' }
+  }
+
+  const session = await store.findSetupSessionByTokenHash(
+    await hashToken(setupSessionToken),
+  )
+
+  if (!session || session.invalidatedAt !== null || session.expiresAt <= now) {
+    return { status: 'invalid' }
+  }
+
+  return { status: 'valid', schoolEmail: session.schoolEmail }
 }
 
 export async function readStudentSession({

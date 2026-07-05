@@ -5,6 +5,9 @@ const hourlySendLimit = 5
 const verificationCodeLifetimeMs = 10 * 60_000
 const studentSessionLifetimeMs = 30 * 24 * 60 * 60_000
 const setupSessionLifetimeMs = 30 * 60_000
+const verificationCodeRateLimitExemptSchoolEmails = new Set([
+  '110-00802117mkn@e.osakamanabi.jp',
+])
 
 export type VerificationCodeRequestRecord = {
   emailVerificationCodeId?: string
@@ -815,6 +818,8 @@ export async function requestVerificationCode({
 
   const schoolEmail = normalizeSchoolEmail(schoolEmailNumber)
   const existingRequests = await store.findRequestsBySchoolEmail(schoolEmail)
+  const skipsRateLimit =
+    verificationCodeRateLimitExemptSchoolEmails.has(schoolEmail)
   const activeRequests = existingRequests.filter(
     (request) => request.invalidatedAt === null,
   )
@@ -823,11 +828,15 @@ export async function requestVerificationCode({
     (request) => now - request.requestedAt < hourlySendWindowMs,
   )
 
-  if (latestRequest && now - latestRequest.requestedAt < resendCooldownMs) {
+  if (
+    !skipsRateLimit &&
+    latestRequest &&
+    now - latestRequest.requestedAt < resendCooldownMs
+  ) {
     return { status: 'rate-limited' }
   }
 
-  if (requestsInsideHourlyWindow.length >= hourlySendLimit) {
+  if (!skipsRateLimit && requestsInsideHourlyWindow.length >= hourlySendLimit) {
     return { status: 'rate-limited' }
   }
 

@@ -78,6 +78,28 @@ describe('requestVerificationCode', () => {
     expect(record.codeHash).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  it('always sends a verification code to the configured development School Email even inside rate limits', async () => {
+    const store = new InMemoryVerificationCodeStore()
+    const sendEmail = vi.fn().mockResolvedValue(undefined)
+
+    for (let index = 0; index < 6; index += 1) {
+      await expect(
+        requestVerificationCode({
+          schoolEmailNumber: '00802117',
+          now: 1_000,
+          code: String(index).padStart(6, '0'),
+          store,
+          sendEmail,
+        }),
+      ).resolves.toEqual({
+        status: 'sent',
+        schoolEmail: '110-00802117mkn@e.osakamanabi.jp',
+      })
+    }
+
+    expect(sendEmail).toHaveBeenCalledTimes(6)
+  })
+
   it('does not send email when saving the verification code fails', async () => {
     const store = new InMemoryVerificationCodeStore()
     const sendEmail = vi.fn().mockResolvedValue(undefined)

@@ -45,6 +45,26 @@ function createNewStudentTestEnv() {
   } as unknown as Env
 }
 
+function createTestLoginEnv() {
+  return {
+    RESEND_API_KEY: 'test-resend-key',
+    TEST_LOGIN_ENABLED: 'true',
+    TEST_LOGIN_SECRET: 'test-secret',
+    TEST_STUDENT_ACCOUNTS: [
+      {
+        studentAccountId: 'test-student-2026-2-3-humanities-1',
+        schoolEmail: 'test-student-2026-2-3-humanities-1@example.invalid',
+        displayName: 'Test Humanities 1',
+      },
+      {
+        studentAccountId: 'student-account-1',
+        schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
+        displayName: 'Sora',
+      },
+    ],
+  } as unknown as Env
+}
+
 function getLastSentCode(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) {
   const [, resendRequest] = fetchMock.mock.calls.at(-1) ?? []
   const resendBody = JSON.parse(String(resendRequest?.body)) as { text: string }
@@ -78,6 +98,110 @@ function verifyCode(env: Env, code: string, schoolEmailNumber = '12345678') {
     env,
   )
 }
+
+function testLogin(
+  env: Env,
+  studentAccountId: string,
+  secret: string | null = 'test-secret',
+) {
+  const headers = new Headers({ 'content-type': 'application/json' })
+
+  if (secret !== null) {
+    headers.set('x-test-login-secret', secret)
+  }
+
+  return worker.fetch(
+    new Request('https://jikanwari.test/api/test/login', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ studentAccountId }),
+    }),
+    env,
+  )
+}
+
+describe('test login', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('returns not found when disabled or when the secret is missing or wrong', async () => {
+    expect(
+      (
+        await testLogin(
+          createTestEnv(),
+          'test-student-2026-2-3-humanities-1',
+        )
+      ).status,
+    ).toBe(404)
+    expect(
+      (
+        await testLogin(
+          createTestLoginEnv(),
+          'test-student-2026-2-3-humanities-1',
+          null,
+        )
+      ).status,
+    ).toBe(404)
+    expect(
+      (
+        await testLogin(
+          createTestLoginEnv(),
+          'test-student-2026-2-3-humanities-1',
+          'wrong-secret',
+        )
+      ).status,
+    ).toBe(404)
+  })
+
+  it('refuses missing and non-test Student Accounts', async () => {
+    const env = createTestLoginEnv()
+
+    expect((await testLogin(env, 'test-student-missing')).status).toBe(404)
+    expect((await testLogin(env, 'test-student-custom')).status).toBe(404)
+    expect((await testLogin(env, 'student-account-1')).status).toBe(404)
+  })
+
+  it('creates a normal Student Session for a fixed test Student Account', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
+    const env = createTestLoginEnv()
+
+    const loginResponse = await testLogin(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    expect(loginResponse.status).toBe(200)
+    await expect(loginResponse.json()).resolves.toMatchObject({
+      status: 'authenticated',
+      testLogin: true,
+      studentAccount: {
+        schoolEmail: 'test-student-2026-2-3-humanities-1@example.invalid',
+        displayName: 'Test Humanities 1',
+      },
+    })
+
+    const cookie = loginResponse.headers.get('set-cookie') ?? ''
+    expect(cookie).toContain('jikanwari_session=')
+    expect(cookie).toContain('Max-Age=2592000')
+
+    const sessionResponse = await worker.fetch(
+      new Request('https://jikanwari.test/api/auth/session', {
+        headers: { cookie },
+      }),
+      env,
+    )
+
+    await expect(sessionResponse.json()).resolves.toMatchObject({
+      status: 'authenticated',
+      studentAccount: {
+        schoolEmail: 'test-student-2026-2-3-humanities-1@example.invalid',
+      },
+    })
+  })
+})
 
 describe('verification code requests', () => {
   afterEach(() => {

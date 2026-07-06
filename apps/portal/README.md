@@ -1,73 +1,47 @@
-# React + TypeScript + Vite
+# Jikanwari Portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Test Login For Local/Staging QA
 
-Currently, two official plugins are available:
+Test login is an API-only QA helper for local and staging multi-account checks. It must stay disabled in production.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Enable it only in local/staging:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```sh
+TEST_LOGIN_ENABLED=true
+TEST_LOGIN_SECRET=<secret>
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Seed local D1:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```sh
+pnpm exec wrangler d1 execute jikanwari-d1 --local --file db/seeds/test-students.sql
 ```
+
+Seed staging D1 after configuring a staging D1 binding:
+
+```sh
+pnpm exec wrangler d1 execute jikanwari-d1 --env staging --remote --file db/seeds/test-students.sql
+```
+
+Create a session:
+
+```sh
+curl -i -X POST http://localhost:5173/api/test/login \
+  -H "content-type: application/json" \
+  -H "x-test-login-secret: <secret>" \
+  --data "{\"studentAccountId\":\"test-student-2026-2-3-humanities-1\"}"
+```
+
+Available seeded accounts:
+
+- `test-student-2026-2-3-humanities-1`
+- `test-student-2026-2-3-humanities-2`
+- `test-student-2026-2-3-humanities-3`
+- `test-student-2026-2-3-science-1`
+- `test-student-2026-2-3-science-2`
+- `test-student-2026-2-3-science-3`
+- `test-student-2026-2-4-humanities-1`
+- `test-student-2026-2-4-humanities-2`
+- `test-student-2025-2-3-humanities-1`
+
+The endpoint returns `404` when disabled, when the secret is missing/wrong, when the account does not exist, or when the id is not one of the fixed seeded ids above. The seed script upserts only fixed `test-student-*` rows and does not delete or alter non-test data.

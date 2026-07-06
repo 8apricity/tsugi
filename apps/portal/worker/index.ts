@@ -2,6 +2,7 @@ import {
   D1VerificationCodeStore,
   InMemoryVerificationCodeStore,
   completeInitialSetup,
+  createTestLoginSession,
   getInitialSetupOptions,
   logoutStudentSession,
   readSetupSession,
@@ -181,6 +182,44 @@ function sessionResponseBody(studentAccount: {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/test/login" && request.method === "POST") {
+      if (
+        env.TEST_LOGIN_ENABLED !== "true" ||
+        !env.TEST_LOGIN_SECRET ||
+        request.headers.get("x-test-login-secret") !== env.TEST_LOGIN_SECRET
+      ) {
+        return new Response(null, { status: 404 });
+      }
+
+      const body = await request.json<{ studentAccountId?: unknown }>();
+      const result = await createTestLoginSession({
+        studentAccountId: body.studentAccountId,
+        now: Date.now(),
+        sessionToken: generateSessionToken(),
+        store: await getVerificationCodeStore(env),
+      });
+
+      if (result.status === "not-found") {
+        return new Response(null, { status: 404 });
+      }
+
+      return Response.json(
+        {
+          ...sessionResponseBody(result.studentAccount),
+          testLogin: true,
+        },
+        {
+          headers: {
+            "set-cookie": sessionCookie(
+              result.sessionToken,
+              30 * 24 * 60 * 60,
+              url.protocol === "https:",
+            ),
+          },
+        },
+      );
+    }
 
     if (
       url.pathname === "/api/auth/verification-code-requests" &&

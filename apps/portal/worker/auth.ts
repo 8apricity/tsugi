@@ -9,6 +9,17 @@ const setupSessionLifetimeMs = 30 * 60_000
 const verificationCodeRateLimitExemptSchoolEmails = new Set([
   '110-00802117mkn@e.osakamanabi.jp',
 ])
+const seededTestStudentAccountIds = new Set([
+  'test-student-2026-2-3-humanities-1',
+  'test-student-2026-2-3-humanities-2',
+  'test-student-2026-2-3-humanities-3',
+  'test-student-2026-2-3-science-1',
+  'test-student-2026-2-3-science-2',
+  'test-student-2026-2-3-science-3',
+  'test-student-2026-2-4-humanities-1',
+  'test-student-2026-2-4-humanities-2',
+  'test-student-2025-2-3-humanities-1',
+])
 
 export type VerificationCodeRequestRecord = {
   emailVerificationCodeId?: string
@@ -232,6 +243,15 @@ export type CompleteInitialSetupResult =
       expiresAt: number
     }
   | { status: 'invalid-setup-session' }
+
+export type CreateTestLoginSessionResult =
+  | {
+      status: 'authenticated'
+      studentAccount: StudentAccount
+      sessionToken: string
+      expiresAt: number
+    }
+  | { status: 'not-found' }
 
 export class InMemoryVerificationCodeStore implements VerificationCodeStore {
   private records: VerificationCodeRequestRecord[] = []
@@ -1491,6 +1511,47 @@ export async function completeInitialSetup({
     sessionTokenHash: await hashToken(sessionToken),
     now,
     expiresAt,
+  })
+
+  return {
+    status: 'authenticated',
+    studentAccount,
+    sessionToken,
+    expiresAt,
+  }
+}
+
+export async function createTestLoginSession({
+  studentAccountId,
+  now,
+  sessionToken,
+  store,
+}: {
+  studentAccountId: unknown
+  now: number
+  sessionToken: string
+  store: VerificationCodeStore
+}): Promise<CreateTestLoginSessionResult> {
+  if (
+    typeof studentAccountId !== 'string' ||
+    !seededTestStudentAccountIds.has(studentAccountId)
+  ) {
+    return { status: 'not-found' }
+  }
+
+  const studentAccount = await store.findStudentAccountById(studentAccountId)
+
+  if (!studentAccount) {
+    return { status: 'not-found' }
+  }
+
+  const expiresAt = now + studentSessionLifetimeMs
+  await store.saveStudentSession({
+    sessionTokenHash: await hashToken(sessionToken),
+    studentAccountId: studentAccount.studentAccountId,
+    createdAt: now,
+    expiresAt,
+    invalidatedAt: null,
   })
 
   return {

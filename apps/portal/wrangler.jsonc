@@ -17,4 +17,20 @@
       "migrations_dir": "db/migrations",
     },
   ],
+  "env": {
+    "staging": {
+      "name": "jikanwari-staging",
+      "vars": {
+        "TEST_LOGIN_ENABLED": "true",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "jikanwari-staging-d1",
+          "database_id": "ec291755-aaf9-4ef1-bc72-847e9c3a769f",
+          "migrations_dir": "db/migrations",
+        },
+      ],
+    },
+  },
 }

@@ -62,6 +62,15 @@ In the final response, state exactly which database locations were updated:
 local only, remote only, or both. If remote migration was not applied, say so
 explicitly and include the command needed to apply it.
 
+For the staging environment, use the separate staging database:
+
+```sh
+pnpm exec wrangler d1 migrations apply jikanwari-staging-d1 --env staging --remote
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --file db/seeds/test-students.sql
+```
+
+Never apply the test-students seed file to the production database.
+
 ## Debugging production failures
 
 If Cloudflare reports:

@@ -69,6 +69,13 @@ pnpm exec wrangler d1 migrations apply jikanwari-staging-d1 --env staging --remo
 pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --file db/seeds/test-students.sql
 ```
 
+Verify the staging seed with the real table id columns:
+
+```sh
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_accounts WHERE student_account_id LIKE 'test-student-%';"
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_affiliations WHERE student_affiliation_id LIKE 'test-affiliation-%';"
+```
+
 Never apply the test-students seed file to the production database.
 
 ## Debugging production failures

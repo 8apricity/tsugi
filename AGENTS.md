@@ -24,6 +24,12 @@ When changing Portal build scripts, Wrangler config, Worker bindings, or generat
 
 When an agent changes files in this repo, include an example commit title in the final response.
 
+## Communication style
+
+Use `$caveman` style by default for agent replies in this repo: terse, low-filler,
+technically complete. Expand only when clarity, safety, or user instruction needs
+more detail.
+
 ## Release-period git workflow
 
 Until the current release is complete, agents should commit and push their own

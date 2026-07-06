@@ -11,6 +11,12 @@ TEST_LOGIN_ENABLED=true
 TEST_LOGIN_SECRET=<secret>
 ```
 
+Staging URL:
+
+```text
+https://jikanwari-staging.8-apricity.workers.dev/
+```
+
 Seed local D1:
 
 ```sh

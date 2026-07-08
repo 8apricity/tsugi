@@ -1,4 +1,4 @@
-# Jikanwari Portal
+# Tsugi Portal
 
 ## Test Login For Local/Staging QA
 

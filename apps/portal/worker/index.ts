@@ -111,9 +111,9 @@ async function sendVerificationCode(
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      from: "Jikanwari <no-reply@jikanwari.is-a.dev>",
+      from: "Tsugi <no-reply@jikanwari.is-a.dev>",
       to: [schoolEmail],
-      subject: "Jikanwari 認証コード",
+      subject: "Tsugi 認証コード",
       text: `認証コード: ${code}`,
     }),
   });

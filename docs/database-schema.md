@@ -1,6 +1,6 @@
 # Database Schema
 
-This document records the current initial database design for Jikanwari. It is intended as an implementation guide for Cloudflare D1 / SQLite.
+This document records the current initial database design for Tsugi. It is intended as an implementation guide for Cloudflare D1 / SQLite.
 
 The previous trust-score-based database sketch has been replaced by the current shared information change model: active shared information, shared information changes, change proposals, direct changes, approvals, and rejections.
 

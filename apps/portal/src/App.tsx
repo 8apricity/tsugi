@@ -262,7 +262,7 @@ function App() {
       <main className="app-page home-page">
         <section className="panel home-panel" aria-labelledby="home-title">
           <div>
-            <p className="eyebrow">Jikanwari</p>
+            <p className="eyebrow">Tsugi</p>
             <h1 id="home-title">受信画面</h1>
             <p className="lead">
               {studentAccount.displayName} としてログインしています。

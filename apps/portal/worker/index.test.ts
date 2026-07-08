@@ -242,9 +242,9 @@ describe('verification code requests', () => {
       text: string
     }
     expect(resendBody).toMatchObject({
-      from: 'Jikanwari <no-reply@jikanwari.is-a.dev>',
+      from: 'Tsugi <no-reply@jikanwari.is-a.dev>',
       to: ['110-12345678mkn@e.osakamanabi.jp'],
-      subject: 'Jikanwari 認証コード',
+      subject: 'Tsugi 認証コード',
     })
     expect(resendBody.text).toMatch(/[0-9]{6}/)
   })

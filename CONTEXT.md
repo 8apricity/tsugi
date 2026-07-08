@@ -1,11 +1,11 @@
-# Jikanwari
+# Tsugi
 
-Jikanwari is a closed school community app for students at one high school. It exists to share school-life information such as timetable changes, tasks, and notes, and may later support requests, test-result collection, personalised reports, and discussion threads.
+Tsugi is a closed school community app for students at one high school. It exists to share school-life information such as timetable changes, tasks, and notes, and may later support requests, test-result collection, personalised reports, and discussion threads.
 Its initial core is helping students understand their current timetable and tasks through active shared information, change proposals, direct changes, approvals, and rejections.
 
 ## Runtime Assumption
 
-Jikanwari is intended to be usable as a Progressive Web App (PWA), especially on mobile devices. UI, authentication, caching, and deployment decisions should preserve the option for installable, app-like usage and future offline or notification support.
+Tsugi is intended to be usable as a Progressive Web App (PWA), especially on mobile devices. UI, authentication, caching, and deployment decisions should preserve the option for installable, app-like usage and future offline or notification support.
 
 ## Language
 
@@ -14,19 +14,19 @@ A closed usage boundary for students who belong to one high school. Timetables, 
 _Avoid_: Multi-school platform, social network, bulletin board app
 
 **Student**:
-A person who attends the high school and can participate in the school community. Students are the only members of Jikanwari.
+A person who attends the high school and can participate in the school community. Students are the only members of Tsugi.
 _Avoid_: User, member, teacher, administrator
 
 **Student Account**:
-The account a student uses to participate in Jikanwari. A student account is created only after the student proves access to an eligible school email and completes required profile details such as display name and student affiliation.
+The account a student uses to participate in Tsugi. A student account is created only after the student proves access to an eligible school email and completes required profile details such as display name and student affiliation.
 _Avoid_: User account, anonymous account, shared account, domain-only account, Google account, verified email alone
 
 **School Email**:
-The school-issued email address used to determine whether a student can create a student account. Parts of the school email may identify cohort-like or stable student information, but Jikanwari does not use them to infer affiliation or expose them as student identity.
+The school-issued email address used to determine whether a student can create a student account. Parts of the school email may identify cohort-like or stable student information, but Tsugi does not use them to infer affiliation or expose them as student identity.
 _Avoid_: Personal email, affiliation source, public identifier
 
 **School Email Number**:
-The student-entered numeric part that Jikanwari uses to construct a full school email. The school email number is not treated as a public identifier or as proof of current student affiliation by itself.
+The student-entered numeric part that Tsugi uses to construct a full school email. The school email number is not treated as a public identifier or as proof of current student affiliation by itself.
 _Avoid_: Student ID, login ID, affiliation code, public identifier
 
 **Verification Code**:
@@ -34,7 +34,7 @@ A short one-time code sent to a school email so a student can prove access to th
 _Avoid_: Magic link, password, invitation code, permanent credential
 
 **Display Name**:
-The name shown for a student in ordinary Jikanwari activity, usually a nickname rather than the student's real name.
+The name shown for a student in ordinary Tsugi activity, usually a nickname rather than the student's real name.
 _Avoid_: Real name, legal name, account name
 
 **Real Name**:
@@ -42,7 +42,7 @@ The student's actual name, used only where a named response needs to identify wh
 _Avoid_: Display name, nickname
 
 **Named Attribution**:
-Showing a student's display name as the source of ordinary Jikanwari activity. Direct changes use named attribution, while change proposals, approvals, and rejections do not show the individual students behind them.
+Showing a student's display name as the source of ordinary Tsugi activity. Direct changes use named attribution, while change proposals, approvals, and rejections do not show the individual students behind them.
 _Avoid_: Real-name attribution, anonymous identity, reputation
 
 **Student Affiliation**:
@@ -50,7 +50,7 @@ A student's self-selected grade, class, and track inside the school community. S
 _Avoid_: Profile, role, permission
 
 **Affiliation Renewal**:
-The student's self-selection of their grade, class, and track for a new school year. Jikanwari does not automatically promote affiliations across school years; before renewal, prior-year information may be reference-only rather than part of the current daily plan.
+The student's self-selection of their grade, class, and track for a new school year. Tsugi does not automatically promote affiliations across school years; before renewal, prior-year information may be reference-only rather than part of the current daily plan.
 _Avoid_: Auto-promotion, roster sync
 
 **Grade**:
@@ -162,7 +162,7 @@ A scope-specific source of timetable changes, ordered from broader to narrower s
 _Avoid_: Calendar layer, priority, category
 
 **Track**:
-A curriculum grouping under a class that can split the standard timetable. Track names may appear across multiple classes, but Jikanwari currently treats track as subordinate to class for target scopes.
+A curriculum grouping under a class that can split the standard timetable. Track names may appear across multiple classes, but Tsugi currently treats track as subordinate to class for target scopes.
 _Avoid_: Course, subject, class
 
 **Lesson Slot**:
@@ -223,14 +223,14 @@ _Avoid_: Chat, board, social media post
 
 ## Example Dialogue
 
-Developer: How does Jikanwari know a student's class and track?
+Developer: How does Tsugi know a student's class and track?
 Domain expert: The student selects their own affiliation when creating their student account.
 
 Developer: Does entering a school email number create a student account?
 Domain expert: No. It only requests a verification code. The student account is created after the student proves access to the school email and completes the required account details.
 
-Developer: Is Jikanwari using magic links for authentication?
-Domain expert: No. Jikanwari uses verification codes sent to school email.
+Developer: Is Tsugi using magic links for authentication?
+Domain expert: No. Tsugi uses verification codes sent to school email.
 
 Developer: If the same student proposes several accepted tasks, does that student get a public reputation score?
 Domain expert: No. Approvals and rejections belong to change proposals, not to student reputation.
@@ -256,7 +256,7 @@ Domain expert: It means the subject or lesson from period 1 on Monday in the sta
 Developer: Does the standard timetable change each term?
 Domain expert: No. The standard timetable is owned by the school year; term-like differences are timetable changes from that baseline.
 
-Developer: What should a student check first in Jikanwari?
+Developer: What should a student check first in Tsugi?
 Domain expert: Their daily plan, because it shows the timetable and tasks that apply to them for the day.
 
 Developer: Is active shared information the source of truth?
@@ -269,7 +269,7 @@ Developer: If a student-level timetable change overrides a class-level change, d
 Domain expert: No. The student sees the student-level entry in the displayed timetable, but can still inspect the broader class-level entry.
 
 Developer: Is bringing a calculator tomorrow an assignment?
-Domain expert: No. In Jikanwari it is a task, because tasks include more than homework.
+Domain expert: No. In Tsugi it is a task, because tasks include more than homework.
 
 Developer: Does every task need to be tied to a lesson?
 Domain expert: No. A task has a target scope and due date; a lesson is only an optional relation, though it can help fill due dates such as "next time".

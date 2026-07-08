@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/:path*",
-      "destination": "https://jikanwari.8-apricity.workers.dev/:path*"
+      "destination": "https://tsugi.8-apricity.workers.dev/:path*"
     }
   ]
 }

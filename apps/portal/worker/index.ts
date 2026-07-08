@@ -18,8 +18,8 @@ import {
 } from "./auth";
 
 const verificationCodeStores = new WeakMap<Env, VerificationCodeStore>();
-const sessionCookieName = "jikanwari_session";
-const setupSessionCookieName = "jikanwari_setup";
+const sessionCookieName = "tsugi_session";
+const setupSessionCookieName = "tsugi_setup";
 
 class EmailDeliveryError extends Error {
   constructor() {

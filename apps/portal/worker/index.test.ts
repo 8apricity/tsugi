@@ -79,7 +79,7 @@ function getLastSentCode(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) {
 
 function requestVerificationCode(env: Env, schoolEmailNumber = '12345678') {
   return worker.fetch(
-    new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+    new Request('https://tsugi.test/api/auth/verification-code-requests', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ schoolEmailNumber }),
@@ -90,7 +90,7 @@ function requestVerificationCode(env: Env, schoolEmailNumber = '12345678') {
 
 function verifyCode(env: Env, code: string, schoolEmailNumber = '12345678') {
   return worker.fetch(
-    new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+    new Request('https://tsugi.test/api/auth/verification-code-verifications', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ schoolEmailNumber, code }),
@@ -111,7 +111,7 @@ function testLogin(
   }
 
   return worker.fetch(
-    new Request('https://jikanwari.test/api/test/login', {
+    new Request('https://tsugi.test/api/test/login', {
       method: 'POST',
       headers,
       body: JSON.stringify({ studentAccountId }),
@@ -184,11 +184,11 @@ describe('test login', () => {
     })
 
     const cookie = loginResponse.headers.get('set-cookie') ?? ''
-    expect(cookie).toContain('jikanwari_session=')
+    expect(cookie).toContain('tsugi_session=')
     expect(cookie).toContain('Max-Age=2592000')
 
     const sessionResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/session', {
+      new Request('https://tsugi.test/api/auth/session', {
         headers: { cookie },
       }),
       env,
@@ -216,7 +216,7 @@ describe('verification code requests', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const response = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+      new Request('https://tsugi.test/api/auth/verification-code-requests', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '12345678' }),
@@ -254,7 +254,7 @@ describe('verification code requests', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const response = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+      new Request('https://tsugi.test/api/auth/verification-code-requests', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '１２３４５６７８' }),
@@ -276,7 +276,7 @@ describe('verification code requests', () => {
 
     const request = () =>
       worker.fetch(
-        new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+        new Request('https://tsugi.test/api/auth/verification-code-requests', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ schoolEmailNumber: '12345678' }),
@@ -305,7 +305,7 @@ describe('verification code requests', () => {
 
     const request = () =>
       worker.fetch(
-        new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+        new Request('https://tsugi.test/api/auth/verification-code-requests', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ schoolEmailNumber: '12345678' }),
@@ -332,7 +332,7 @@ describe('verification code requests', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const response = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+      new Request('https://tsugi.test/api/auth/verification-code-requests', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '12345678' }),
@@ -362,7 +362,7 @@ describe('existing Student Account login', () => {
     const env = createTestEnv()
 
     const sendResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+      new Request('https://tsugi.test/api/auth/verification-code-requests', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '12345678' }),
@@ -372,7 +372,7 @@ describe('existing Student Account login', () => {
     expect(sendResponse.status).toBe(200)
 
     const loginResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+      new Request('https://tsugi.test/api/auth/verification-code-verifications', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -392,12 +392,12 @@ describe('existing Student Account login', () => {
     })
 
     const cookie = loginResponse.headers.get('set-cookie')
-    expect(cookie).toContain('jikanwari_session=')
+    expect(cookie).toContain('tsugi_session=')
     expect(cookie).toContain('HttpOnly')
     expect(cookie).toContain('SameSite=Lax')
 
     const sessionResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/session', {
+      new Request('https://tsugi.test/api/auth/session', {
         headers: { cookie: cookie ?? '' },
       }),
       env,
@@ -421,7 +421,7 @@ describe('existing Student Account login', () => {
     const env = createTestEnv()
 
     await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+      new Request('https://tsugi.test/api/auth/verification-code-requests', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '12345678' }),
@@ -430,7 +430,7 @@ describe('existing Student Account login', () => {
     )
 
     const loginResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+      new Request('https://tsugi.test/api/auth/verification-code-verifications', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -443,7 +443,7 @@ describe('existing Student Account login', () => {
     const cookie = loginResponse.headers.get('set-cookie') ?? ''
 
     const logoutResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/session', {
+      new Request('https://tsugi.test/api/auth/session', {
         method: 'DELETE',
         headers: { cookie },
       }),
@@ -452,11 +452,11 @@ describe('existing Student Account login', () => {
 
     expect(logoutResponse.status).toBe(204)
     expect(logoutResponse.headers.get('set-cookie')).toContain(
-      'jikanwari_session=; Max-Age=0',
+      'tsugi_session=; Max-Age=0',
     )
 
     const sessionResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/session', {
+      new Request('https://tsugi.test/api/auth/session', {
         headers: { cookie },
       }),
       env,
@@ -521,7 +521,7 @@ describe('new Student Account setup session', () => {
     const env = createNewStudentTestEnv()
 
     await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+      new Request('https://tsugi.test/api/auth/verification-code-requests', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '12345678' }),
@@ -530,7 +530,7 @@ describe('new Student Account setup session', () => {
     )
 
     const verifyResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+      new Request('https://tsugi.test/api/auth/verification-code-verifications', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -548,12 +548,12 @@ describe('new Student Account setup session', () => {
     })
 
     const cookie = verifyResponse.headers.get('set-cookie')
-    expect(cookie).toContain('jikanwari_setup=')
+    expect(cookie).toContain('tsugi_setup=')
     expect(cookie).toContain('HttpOnly')
     expect(cookie).toContain('SameSite=Lax')
 
     const setupSessionResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/setup-session', {
+      new Request('https://tsugi.test/api/auth/setup-session', {
         headers: { cookie: cookie ?? '' },
       }),
       env,
@@ -584,13 +584,13 @@ describe('new Student Account setup session', () => {
     const latestSetupCookie = latestVerifyResponse.headers.get('set-cookie') ?? ''
 
     const staleOptionsResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/initial-setup', {
+      new Request('https://tsugi.test/api/auth/initial-setup', {
         headers: { cookie: staleSetupCookie },
       }),
       env,
     )
     const latestOptionsResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/initial-setup', {
+      new Request('https://tsugi.test/api/auth/initial-setup', {
         headers: { cookie: latestSetupCookie },
       }),
       env,
@@ -619,7 +619,7 @@ describe('initial Student Affiliation setup API', () => {
     const env = createNewStudentTestEnv()
 
     await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-requests', {
+      new Request('https://tsugi.test/api/auth/verification-code-requests', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ schoolEmailNumber: '12345678' }),
@@ -627,7 +627,7 @@ describe('initial Student Affiliation setup API', () => {
       env,
     )
     const verifyResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/verification-code-verifications', {
+      new Request('https://tsugi.test/api/auth/verification-code-verifications', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -640,7 +640,7 @@ describe('initial Student Affiliation setup API', () => {
     const cookie = verifyResponse.headers.get('set-cookie') ?? ''
 
     const optionsResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/initial-setup', {
+      new Request('https://tsugi.test/api/auth/initial-setup', {
         headers: { cookie },
       }),
       env,
@@ -665,7 +665,7 @@ describe('initial Student Affiliation setup API', () => {
     })
 
     const submitResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/initial-setup', {
+      new Request('https://tsugi.test/api/auth/initial-setup', {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie },
         body: JSON.stringify({
@@ -688,10 +688,10 @@ describe('initial Student Affiliation setup API', () => {
     })
 
     const sessionCookie = submitResponse.headers.get('set-cookie') ?? ''
-    expect(sessionCookie).toContain('jikanwari_session=')
+    expect(sessionCookie).toContain('tsugi_session=')
 
     const sessionResponse = await worker.fetch(
-      new Request('https://jikanwari.test/api/auth/session', {
+      new Request('https://tsugi.test/api/auth/session', {
         headers: { cookie: sessionCookie },
       }),
       env,
@@ -718,7 +718,7 @@ describe('initial Student Affiliation setup API', () => {
     const cookie = verifyResponse.headers.get('set-cookie') ?? ''
     const setupRequest = () =>
       worker.fetch(
-        new Request('https://jikanwari.test/api/auth/initial-setup', {
+        new Request('https://tsugi.test/api/auth/initial-setup', {
           method: 'POST',
           headers: { 'content-type': 'application/json', cookie },
           body: JSON.stringify({

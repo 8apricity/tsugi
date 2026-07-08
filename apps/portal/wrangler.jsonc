@@ -1,5 +1,5 @@
 {
-  "name": "jikanwari",
+  "name": "tsugi",
   "main": "worker/index.ts",
   "compatibility_date": "2026-05-31",
   "assets": {
@@ -12,21 +12,21 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "jikanwari-d1",
+      "database_name": "tsugi-d1",
       "database_id": "8e68b864-969c-4108-b0d9-0aa684da58c7",
       "migrations_dir": "db/migrations",
     },
   ],
   "env": {
     "staging": {
-      "name": "jikanwari-staging",
+      "name": "tsugi-staging",
       "vars": {
         "TEST_LOGIN_ENABLED": "true",
       },
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "jikanwari-staging-d1",
+          "database_name": "tsugi-staging-d1",
           "database_id": "ec291755-aaf9-4ef1-bc72-847e9c3a769f",
           "migrations_dir": "db/migrations",
         },

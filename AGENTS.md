@@ -20,10 +20,6 @@ When designing or changing application UI, follow `docs/agents/ui-design.md`.
 
 When changing Portal build scripts, Wrangler config, Worker bindings, or generated Cloudflare types, follow `docs/agents/cloudflare-build.md`.
 
-## Change reports
-
-When an agent changes files in this repo, include an example commit title in the final response.
-
 ## Communication style
 
 Use `$caveman` style by default for agent replies in this repo: terse, low-filler,

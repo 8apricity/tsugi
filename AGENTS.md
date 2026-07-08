@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `8apricity/jikanwari`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues for `8apricity/tsugi`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

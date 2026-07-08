@@ -45,7 +45,7 @@ When adding or changing D1 migrations:
 - Apply migrations to local D1 from `apps/portal`:
 
 ```sh
-pnpm exec wrangler d1 migrations apply tsugi-d1 --local
+pnpm exec wrangler d1 migrations apply jikanwari-d1 --local
 ```
 
 - Verify the expected tables or indexes exist with `wrangler d1 execute`.
@@ -55,7 +55,7 @@ pnpm exec wrangler d1 migrations apply tsugi-d1 --local
 If production or remote D1 must be updated, request approval and then run:
 
 ```sh
-pnpm exec wrangler d1 migrations apply tsugi-d1 --remote
+pnpm exec wrangler d1 migrations apply jikanwari-d1 --remote
 ```
 
 In the final response, state exactly which database locations were updated:
@@ -69,15 +69,15 @@ https://tsugi-staging.8-apricity.workers.dev/
 ```
 
 ```sh
-pnpm exec wrangler d1 migrations apply tsugi-staging-d1 --env staging --remote
-pnpm exec wrangler d1 execute tsugi-staging-d1 --env staging --remote --file db/seeds/test-students.sql
+pnpm exec wrangler d1 migrations apply jikanwari-staging-d1 --env staging --remote
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --file db/seeds/test-students.sql
 ```
 
 Verify the staging seed with the real table id columns:
 
 ```sh
-pnpm exec wrangler d1 execute tsugi-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_accounts WHERE student_account_id LIKE 'test-student-%';"
-pnpm exec wrangler d1 execute tsugi-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_affiliations WHERE student_affiliation_id LIKE 'test-affiliation-%';"
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_accounts WHERE student_account_id LIKE 'test-student-%';"
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_affiliations WHERE student_affiliation_id LIKE 'test-affiliation-%';"
 ```
 
 Never apply the test-students seed file to the production database.

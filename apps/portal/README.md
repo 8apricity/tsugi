@@ -20,26 +20,26 @@ https://tsugi-staging.8-apricity.workers.dev/
 Seed local D1:
 
 ```sh
-pnpm exec wrangler d1 execute tsugi-d1 --local --file db/seeds/test-students.sql
+pnpm exec wrangler d1 execute jikanwari-d1 --local --file db/seeds/test-students.sql
 ```
 
 Seed staging D1 after configuring a staging D1 binding:
 
 ```sh
-pnpm exec wrangler d1 execute tsugi-staging-d1 --env staging --remote --file db/seeds/test-students.sql
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --file db/seeds/test-students.sql
 ```
 
 Apply migrations to staging D1:
 
 ```sh
-pnpm exec wrangler d1 migrations apply tsugi-staging-d1 --env staging --remote
+pnpm exec wrangler d1 migrations apply jikanwari-staging-d1 --env staging --remote
 ```
 
 Verify staging seeded account counts:
 
 ```sh
-pnpm exec wrangler d1 execute tsugi-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_accounts WHERE student_account_id LIKE 'test-student-%';"
-pnpm exec wrangler d1 execute tsugi-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_affiliations WHERE student_affiliation_id LIKE 'test-affiliation-%';"
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_accounts WHERE student_account_id LIKE 'test-student-%';"
+pnpm exec wrangler d1 execute jikanwari-staging-d1 --env staging --remote --command "SELECT COUNT(*) AS cnt FROM student_affiliations WHERE student_affiliation_id LIKE 'test-affiliation-%';"
 ```
 
 Create a session:

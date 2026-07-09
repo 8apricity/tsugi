@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import "./App.css";
 import {
+  buildDateHeader,
   buildDateStrip,
   formatCurrentJstSchoolDate,
-  formatDateHeader,
 } from "./dailyPlanView";
 
 type RequestStatus =
@@ -408,6 +408,7 @@ function App() {
 
   if (status === "authenticated" && studentAccount) {
     const dateStrip = buildDateStrip(selectedSchoolDate);
+    const dateHeader = buildDateHeader(selectedSchoolDate, currentSchoolDate);
 
     return (
       <main className="app-page daily-plan-page">
@@ -449,7 +450,20 @@ function App() {
               ) : null}
             </div>
             <h1 id="daily-plan-title" className="daily-plan-title">
-              {formatDateHeader(selectedSchoolDate, currentSchoolDate)}
+              <span className="date-heading-main">
+                <span className="date-heading-small">{dateHeader.year}年</span>
+                <span className="date-heading-large">{dateHeader.month}</span>
+                <span className="date-heading-small">月</span>
+                <span className="date-heading-large">{dateHeader.day}</span>
+                <span className="date-heading-small">
+                  日 ({dateHeader.weekdayLabel})
+                </span>
+              </span>
+              {dateHeader.relativeLabel ? (
+                <span className="date-heading-relative">
+                  {dateHeader.relativeLabel}
+                </span>
+              ) : null}
             </h1>
             <div className="topbar-spacer" aria-hidden="true" />
           </header>
@@ -495,7 +509,7 @@ function App() {
                         <div className="lesson-line">
                           <span className="lesson-name">{period.lessonName}</span>
                           {period.hasTasks ? (
-                            <span className="task-pill">Task</span>
+                            <span className="task-pill">タスク</span>
                           ) : null}
                         </div>
                         {period.notes.length > 0 ? (
@@ -512,7 +526,7 @@ function App() {
               </section>
 
               <section className="panel daily-section" aria-labelledby="tasks-title">
-                <h2 id="tasks-title">Tasks</h2>
+                <h2 id="tasks-title">タスク</h2>
                 <div className="task-list">
                   {dailyPlanState.dailyPlan.tasks.map((task) => {
                     const completed = completedPlaceholderTaskIds.has(
@@ -545,7 +559,7 @@ function App() {
               </section>
 
               <section className="panel daily-section" aria-labelledby="notes-title">
-                <h2 id="notes-title">Notes</h2>
+                <h2 id="notes-title">ノート</h2>
                 <div className="note-list">
                   {dailyPlanState.dailyPlan.notes.map((note) => (
                     <article className="note-item" key={note.noteId}>
@@ -573,7 +587,8 @@ function App() {
                   setCurrentSchoolDate(formatCurrentJstSchoolDate());
                 }}
               >
-                {date.label}
+                <span className="date-cell-day">{date.day}</span>
+                <span className="date-cell-weekday">{date.weekdayLabel}</span>
               </button>
             ))}
           </nav>

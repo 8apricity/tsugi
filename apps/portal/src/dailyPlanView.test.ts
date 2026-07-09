@@ -22,17 +22,17 @@ describe("Daily Plan date display", () => {
 
   it("builds a selectable 11-day bottom date strip around the selected School Date", () => {
     expect(buildDateStrip("2026-07-09")).toEqual([
-      { schoolDate: "2026-07-04", label: "4 土" },
-      { schoolDate: "2026-07-05", label: "5 日" },
-      { schoolDate: "2026-07-06", label: "6 月" },
-      { schoolDate: "2026-07-07", label: "7 火" },
-      { schoolDate: "2026-07-08", label: "8 水" },
-      { schoolDate: "2026-07-09", label: "9 木" },
-      { schoolDate: "2026-07-10", label: "10 金" },
-      { schoolDate: "2026-07-11", label: "11 土" },
-      { schoolDate: "2026-07-12", label: "12 日" },
-      { schoolDate: "2026-07-13", label: "13 月" },
-      { schoolDate: "2026-07-14", label: "14 火" },
+      { schoolDate: "2026-07-04", label: "4 土", day: 4, weekdayLabel: "土" },
+      { schoolDate: "2026-07-05", label: "5 日", day: 5, weekdayLabel: "日" },
+      { schoolDate: "2026-07-06", label: "6 月", day: 6, weekdayLabel: "月" },
+      { schoolDate: "2026-07-07", label: "7 火", day: 7, weekdayLabel: "火" },
+      { schoolDate: "2026-07-08", label: "8 水", day: 8, weekdayLabel: "水" },
+      { schoolDate: "2026-07-09", label: "9 木", day: 9, weekdayLabel: "木" },
+      { schoolDate: "2026-07-10", label: "10 金", day: 10, weekdayLabel: "金" },
+      { schoolDate: "2026-07-11", label: "11 土", day: 11, weekdayLabel: "土" },
+      { schoolDate: "2026-07-12", label: "12 日", day: 12, weekdayLabel: "日" },
+      { schoolDate: "2026-07-13", label: "13 月", day: 13, weekdayLabel: "月" },
+      { schoolDate: "2026-07-14", label: "14 火", day: 14, weekdayLabel: "火" },
     ]);
   });
 });

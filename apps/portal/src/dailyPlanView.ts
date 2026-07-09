@@ -8,17 +8,27 @@ const relativeDateLabels = new Map([
 ]);
 
 export function formatDateHeader(schoolDate: string, currentSchoolDate: string) {
+  const dateHeader = buildDateHeader(schoolDate, currentSchoolDate);
+
+  return dateHeader.relativeLabel
+    ? `${dateHeader.year}年${dateHeader.month}月 ${dateHeader.day}日 (${dateHeader.weekdayLabel}) ${dateHeader.relativeLabel}`
+    : `${dateHeader.year}年${dateHeader.month}月 ${dateHeader.day}日 (${dateHeader.weekdayLabel})`;
+}
+
+export function buildDateHeader(schoolDate: string, currentSchoolDate: string) {
   const date = parseSchoolDate(schoolDate);
   const currentDate = parseSchoolDate(currentSchoolDate);
   const relativeDay = Math.round(
     (date.getTime() - currentDate.getTime()) / 86_400_000,
   );
-  const relativeLabel = relativeDateLabels.get(relativeDay);
-  const baseLabel = `${date.getUTCFullYear()}年${
-    date.getUTCMonth() + 1
-  }月 ${date.getUTCDate()}日 (${weekdayLabels[date.getUTCDay()]})`;
 
-  return relativeLabel ? `${baseLabel} ${relativeLabel}` : baseLabel;
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+    weekdayLabel: weekdayLabels[date.getUTCDay()],
+    relativeLabel: relativeDateLabels.get(relativeDay) ?? null,
+  };
 }
 
 export function buildDateStrip(selectedSchoolDate: string) {
@@ -30,6 +40,8 @@ export function buildDateStrip(selectedSchoolDate: string) {
     return {
       schoolDate: formatSchoolDate(date),
       label: `${date.getUTCDate()} ${weekdayLabels[date.getUTCDay()]}`,
+      day: date.getUTCDate(),
+      weekdayLabel: weekdayLabels[date.getUTCDay()],
     };
   });
 }

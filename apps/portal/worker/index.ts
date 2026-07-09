@@ -6,6 +6,7 @@ import {
   getInitialSetupOptions,
   logoutStudentSession,
   readDailyPlan,
+  readDailyPlansRange,
   readSetupSession,
   readStudentSession,
   requestVerificationCode,
@@ -383,6 +384,38 @@ export default {
       }
 
       if (result.status === "invalid-date") {
+        return Response.json(result, { status: 400 });
+      }
+
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+
+      if (result.status === "daily-plan-unavailable") {
+        return Response.json(result, { status: 503 });
+      }
+
+      return Response.json(result);
+    }
+
+    if (url.pathname === "/api/daily-plans" && request.method === "GET") {
+      const result = await readDailyPlansRange({
+        sessionToken: readCookie(request, sessionCookieName),
+        start: url.searchParams.get("start"),
+        end: url.searchParams.get("end"),
+        now: Date.now(),
+        store: await getVerificationCodeStore(env),
+      });
+
+      if (result.status === "unauthenticated") {
+        return Response.json({ status: "unauthenticated" }, { status: 401 });
+      }
+
+      if (result.status === "invalid-date") {
+        return Response.json(result, { status: 400 });
+      }
+
+      if (result.status === "date-range-too-large") {
         return Response.json(result, { status: 400 });
       }
 

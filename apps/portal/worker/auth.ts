@@ -159,6 +159,19 @@ export type DailyPlanResult =
   | { status: 'daily-plan-unavailable' }
   | { status: 'affiliation-renewal-needed'; schoolYear: number }
 
+export type DailyPlansRangeResult =
+  | {
+      status: 'ready'
+      start: string
+      end: string
+      dailyPlans: Record<string, Extract<DailyPlanResult, { status: 'ready' }>>
+    }
+  | { status: 'unauthenticated' }
+  | { status: 'invalid-date' }
+  | { status: 'date-range-too-large' }
+  | { status: 'daily-plan-unavailable' }
+  | { status: 'affiliation-renewal-needed'; schoolYear: number }
+
 export type CompleteInitialSetupTransactionInput = {
   setupSessionTokenHash: string
   schoolEmail: string
@@ -1894,6 +1907,147 @@ export async function readDailyPlan({
     return { status: 'invalid-date' }
   }
 
+  return readDailyPlanForAuthenticatedStudent({
+    studentAccountId: session.studentAccount.studentAccountId,
+    schoolDate: resolvedSchoolDate,
+    store,
+  })
+}
+
+export async function readDailyPlansRange({
+  sessionToken,
+  start,
+  end,
+  now,
+  store,
+}: {
+  sessionToken: string | null
+  start: string | null
+  end: string | null
+  now: number
+  store: VerificationCodeStore
+}): Promise<DailyPlansRangeResult> {
+  const session = await readStudentSession({ sessionToken, now, store })
+
+  if (session.status === 'unauthenticated') {
+    return { status: 'unauthenticated' }
+  }
+
+  const resolvedStart = start ?? formatJstSchoolDate(now)
+  const resolvedEnd = end ?? resolvedStart
+
+  if (!isValidSchoolDate(resolvedStart) || !isValidSchoolDate(resolvedEnd)) {
+    return { status: 'invalid-date' }
+  }
+
+  const schoolDates = listSchoolDatesInRange(resolvedStart, resolvedEnd)
+
+  if (!schoolDates || schoolDates.length > 31) {
+    return {
+      status: schoolDates ? 'date-range-too-large' : 'invalid-date',
+    }
+  }
+
+  const sharedContext = await resolveDailyPlanSharedContext({
+    studentAccountId: session.studentAccount.studentAccountId,
+    store,
+  })
+
+  if (sharedContext.status !== 'ready') {
+    return sharedContext
+  }
+
+  const entriesByWeekday = new Map<number, Map<number, StandardTimetableEntry>>()
+  const uniqueWeekdays = new Set(schoolDates.map(weekdayForSchoolDate))
+
+  await Promise.all(
+    [...uniqueWeekdays].map(async (weekday) => {
+      const entries = await store.listStandardTimetableEntriesForWeekday(
+        sharedContext.studentAffiliation.classId,
+        sharedContext.studentAffiliation.trackId,
+        weekday,
+      )
+      entriesByWeekday.set(
+        weekday,
+        buildEntriesByPeriod(entries, sharedContext.studentAffiliation.trackId),
+      )
+    }),
+  )
+
+  const dailyPlans: Record<
+    string,
+    Extract<DailyPlanResult, { status: 'ready' }>
+  > = {}
+
+  for (const date of schoolDates) {
+    dailyPlans[date] = buildReadyDailyPlan({
+      schoolDate: date,
+      sharedContext,
+      entriesByPeriod: entriesByWeekday.get(weekdayForSchoolDate(date)) ?? new Map(),
+    })
+  }
+
+  return {
+    status: 'ready',
+    start: resolvedStart,
+    end: resolvedEnd,
+    dailyPlans,
+  }
+}
+
+async function readDailyPlanForAuthenticatedStudent({
+  studentAccountId,
+  schoolDate,
+  store,
+}: {
+  studentAccountId: string
+  schoolDate: string
+  store: VerificationCodeStore
+}): Promise<DailyPlanResult> {
+  const sharedContext = await resolveDailyPlanSharedContext({
+    studentAccountId,
+    store,
+  })
+
+  if (sharedContext.status !== 'ready') {
+    return sharedContext
+  }
+
+  const weekday = weekdayForSchoolDate(schoolDate)
+  const standardTimetableEntries =
+    await store.listStandardTimetableEntriesForWeekday(
+      sharedContext.studentAffiliation.classId,
+      sharedContext.studentAffiliation.trackId,
+      weekday,
+    )
+
+  return buildReadyDailyPlan({
+    schoolDate,
+    sharedContext,
+    entriesByPeriod: buildEntriesByPeriod(
+      standardTimetableEntries,
+      sharedContext.studentAffiliation.trackId,
+    ),
+  })
+}
+
+async function resolveDailyPlanSharedContext({
+  studentAccountId,
+  store,
+}: {
+  studentAccountId: string
+  store: VerificationCodeStore
+}): Promise<
+  | {
+      status: 'ready'
+      currentSchoolYear: SchoolYearRecord
+      studentAffiliation: StudentAffiliation
+      schoolClass: SchoolYearClassRecord
+      track: TrackRecord
+    }
+  | { status: 'daily-plan-unavailable' }
+  | { status: 'affiliation-renewal-needed'; schoolYear: number }
+> {
   const currentSchoolYear = await store.findCurrentSchoolYear()
 
   if (!currentSchoolYear) {
@@ -1901,7 +2055,7 @@ export async function readDailyPlan({
   }
 
   const studentAffiliation = await store.findCurrentStudentAffiliation(
-    session.studentAccount.studentAccountId,
+    studentAccountId,
     currentSchoolYear.schoolYear,
   )
 
@@ -1924,24 +2078,47 @@ export async function readDailyPlan({
     return { status: 'daily-plan-unavailable' }
   }
 
-  const weekday = weekdayForSchoolDate(resolvedSchoolDate)
-  const standardTimetableEntries =
-    await store.listStandardTimetableEntriesForWeekday(
-      studentAffiliation.classId,
-      studentAffiliation.trackId,
-      weekday,
-    )
+  return {
+    status: 'ready',
+    currentSchoolYear,
+    studentAffiliation,
+    schoolClass,
+    track,
+  }
+}
+
+function buildEntriesByPeriod(
+  standardTimetableEntries: StandardTimetableEntry[],
+  trackId: string,
+) {
   const entriesByPeriod = new Map<number, StandardTimetableEntry>()
 
   for (const entry of standardTimetableEntries) {
     const existing = entriesByPeriod.get(entry.periodNumber)
 
-    if (!existing || entry.trackId === studentAffiliation.trackId) {
+    if (!existing || entry.trackId === trackId) {
       entriesByPeriod.set(entry.periodNumber, entry)
     }
   }
-  const placeholderTasks = listPlaceholderDailyPlanTasks(resolvedSchoolDate)
-  const placeholderNotes = listPlaceholderDailyPlanNotes(resolvedSchoolDate)
+
+  return entriesByPeriod
+}
+
+function buildReadyDailyPlan({
+  schoolDate,
+  sharedContext,
+  entriesByPeriod,
+}: {
+  schoolDate: string
+  sharedContext: Extract<
+    Awaited<ReturnType<typeof resolveDailyPlanSharedContext>>,
+    { status: 'ready' }
+  >
+  entriesByPeriod: Map<number, StandardTimetableEntry>
+}): Extract<DailyPlanResult, { status: 'ready' }> {
+  const weekday = weekdayForSchoolDate(schoolDate)
+  const placeholderTasks = listPlaceholderDailyPlanTasks(schoolDate)
+  const placeholderNotes = listPlaceholderDailyPlanNotes(schoolDate)
   const placeholderLessonSlotNotes = placeholderNotes.filter(
     (note) => note.relatedContext?.type === 'lesson-slot',
   )
@@ -1951,15 +2128,15 @@ export async function readDailyPlan({
 
   return {
     status: 'ready',
-    schoolDate: resolvedSchoolDate,
+    schoolDate,
     weekday,
     studentAffiliation: {
-      schoolYear: currentSchoolYear.schoolYear,
-      grade: studentAffiliation.grade,
-      classId: studentAffiliation.classId,
-      classNumber: schoolClass.classNumber,
-      trackId: studentAffiliation.trackId,
-      trackName: track.trackName,
+      schoolYear: sharedContext.currentSchoolYear.schoolYear,
+      grade: sharedContext.studentAffiliation.grade,
+      classId: sharedContext.studentAffiliation.classId,
+      classNumber: sharedContext.schoolClass.classNumber,
+      trackId: sharedContext.studentAffiliation.trackId,
+      trackName: sharedContext.track.trackName,
     },
     periods: Array.from({ length: 7 }, (_, index) => {
       const periodNumber = index + 1
@@ -1970,7 +2147,7 @@ export async function readDailyPlan({
         lessonName,
         hasTasks: placeholderTasks.some((task) =>
           isPlaceholderTaskRelatedToLesson(task, {
-            schoolDate: resolvedSchoolDate,
+            schoolDate,
             periodNumber,
             lessonName,
           }),
@@ -2136,6 +2313,45 @@ function weekdayForSchoolDate(value: string) {
   const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay()
 
   return weekday === 0 ? 7 : weekday
+}
+
+function listSchoolDatesInRange(start: string, end: string) {
+  const startDate = parseSchoolDate(start)
+  const endDate = parseSchoolDate(end)
+
+  if (endDate.getTime() < startDate.getTime()) {
+    return null
+  }
+
+  const schoolDates: string[] = []
+
+  for (
+    let cursor = startDate;
+    cursor.getTime() <= endDate.getTime();
+    cursor = addDays(cursor, 1)
+  ) {
+    schoolDates.push(formatSchoolDate(cursor))
+  }
+
+  return schoolDates
+}
+
+function parseSchoolDate(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+
+  return new Date(Date.UTC(year, month - 1, day))
+}
+
+function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * 86_400_000)
+}
+
+function formatSchoolDate(date: Date) {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, '0'),
+    String(date.getUTCDate()).padStart(2, '0'),
+  ].join('-')
 }
 
 async function hashVerificationCode(code: string) {

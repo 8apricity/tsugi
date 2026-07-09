@@ -333,6 +333,25 @@ function readDailyPlan(env: Env, cookie = '', date?: string) {
   )
 }
 
+function readDailyPlans(env: Env, cookie = '', start?: string, end?: string) {
+  const url = new URL('https://tsugi.test/api/daily-plans')
+
+  if (start !== undefined) {
+    url.searchParams.set('start', start)
+  }
+
+  if (end !== undefined) {
+    url.searchParams.set('end', end)
+  }
+
+  return worker.fetch(
+    new Request(url, {
+      headers: cookie ? { cookie } : {},
+    }),
+    env,
+  )
+}
+
 describe('Daily Plan read API', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -643,6 +662,35 @@ describe('Daily Plan read API', () => {
         relatedContext: null,
       },
     ])
+  })
+
+  it('returns a School Date keyed range of Daily Plans for prefetching', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlans(
+      env,
+      cookie,
+      '2026-07-09',
+      '2026-07-11',
+    )
+    const body = (await response.json()) as {
+      dailyPlans: Record<string, { schoolDate: string; weekday: number }>
+    }
+
+    expect(response.status).toBe(200)
+    expect(Object.keys(body.dailyPlans)).toEqual([
+      '2026-07-09',
+      '2026-07-10',
+      '2026-07-11',
+    ])
+    expect(body.dailyPlans['2026-07-10']).toMatchObject({
+      schoolDate: '2026-07-10',
+      weekday: 5,
+    })
   })
 })
 

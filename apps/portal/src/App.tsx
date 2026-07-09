@@ -7,6 +7,10 @@ import {
 } from "react";
 import "./App.css";
 import {
+  createDailyPlanCache,
+  type DailyPlanForCache as DailyPlan,
+} from "./dailyPlanCache";
+import {
   buildDateHeader,
   buildDateStrip,
   formatCurrentJstSchoolDate,
@@ -16,6 +20,7 @@ import {
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
 const DATE_PICKER_SCALE_DISTANCE_PX = 78;
+const DAILY_PLAN_PREFETCH_RADIUS = 7;
 
 type RequestStatus =
   | "checking"
@@ -44,58 +49,6 @@ type InitialSetupOptions = {
       tracks: Array<{ trackId: string; trackName: string }>;
     }>;
   }>;
-};
-
-type DailyPlanTask = {
-  taskId: string;
-  title: string;
-  dueDate?: string;
-  dueLabel?: string;
-  relatedLesson?: {
-    schoolDate: string;
-    periodNumber: number;
-    lessonName: string;
-  };
-  relatedLessonName?: string;
-  completed: false;
-};
-
-type DailyPlanNote = {
-  noteId: string;
-  body: string;
-  relatedContext:
-    | {
-        type: "lesson-slot";
-        schoolDate: string;
-        periodNumber: number;
-      }
-    | {
-        type: "school-date";
-        schoolDate: string;
-      }
-    | null;
-};
-
-type DailyPlan = {
-  status: "ready";
-  schoolDate: string;
-  weekday: number;
-  studentAffiliation: {
-    schoolYear: number;
-    grade: number;
-    classId: string;
-    classNumber: number;
-    trackId: string;
-    trackName: string;
-  };
-  periods: Array<{
-    periodNumber: number;
-    lessonName: string;
-    hasTasks: boolean;
-    notes: DailyPlanNote[];
-  }>;
-  tasks: DailyPlanTask[];
-  notes: DailyPlanNote[];
 };
 
 type DailyPlanState =
@@ -138,6 +91,10 @@ function App() {
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAreaRef = useRef<HTMLDivElement | null>(null);
+  const dailyPlanCacheRef = useRef<ReturnType<
+    typeof createDailyPlanCache
+  > | null>(null);
+  const dailyPlanCacheReloadTokenRef = useRef(dailyPlanReloadToken);
   const datePickerRef = useRef<HTMLElement | null>(null);
   const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const datePickerScrollFrameRef = useRef<number | null>(null);
@@ -191,21 +148,27 @@ function App() {
     let cancelled = false;
 
     async function loadDailyPlan() {
-      setDailyPlanState({ status: "loading" });
+      if (dailyPlanCacheReloadTokenRef.current !== dailyPlanReloadToken) {
+        dailyPlanCacheRef.current = null;
+        dailyPlanCacheReloadTokenRef.current = dailyPlanReloadToken;
+      }
 
-      const response = await fetch(
-        `/api/daily-plan?date=${encodeURIComponent(selectedSchoolDate)}`,
-      );
-      const body = (await response.json()) as
-        | DailyPlan
-        | { status: "affiliation-renewal-needed"; schoolYear: number }
-        | { status: "unauthenticated" | "invalid-date" | "daily-plan-unavailable" };
+      const cache = getDailyPlanCache();
+      const cachedDailyPlan = cache.getCachedDailyPlan(selectedSchoolDate);
+
+      if (cachedDailyPlan) {
+        setDailyPlanState({ status: "ready", dailyPlan: cachedDailyPlan });
+      } else {
+        setDailyPlanState({ status: "loading" });
+      }
+
+      const body = await cache.getDailyPlan(selectedSchoolDate);
 
       if (cancelled) {
         return;
       }
 
-      if (response.status === 401 || body.status === "unauthenticated") {
+      if (body.status === "unauthenticated") {
         setStudentAccount(null);
         setStatus("idle");
         return;
@@ -219,12 +182,13 @@ function App() {
         return;
       }
 
-      if (!response.ok || body.status !== "ready") {
+      if (body.status !== "ready") {
         setDailyPlanState({ status: "error" });
         return;
       }
 
       setDailyPlanState({ status: "ready", dailyPlan: body });
+      void cache.prefetchNearLoadedEdge(selectedSchoolDate);
     }
 
     loadDailyPlan().catch(() => {
@@ -237,6 +201,25 @@ function App() {
       cancelled = true;
     };
   }, [selectedSchoolDate, status, studentAccount, dailyPlanReloadToken]);
+
+  function getDailyPlanCache() {
+    if (!dailyPlanCacheRef.current) {
+      dailyPlanCacheRef.current = createDailyPlanCache({
+        radius: DAILY_PLAN_PREFETCH_RADIUS,
+        fetchDailyPlans: async (start, end) => {
+          const response = await fetch(
+            `/api/daily-plans?start=${encodeURIComponent(
+              start,
+            )}&end=${encodeURIComponent(end)}`,
+          );
+
+          return response.json();
+        },
+      });
+    }
+
+    return dailyPlanCacheRef.current;
+  }
 
   useEffect(() => {
     if (!menuOpen) {
@@ -546,6 +529,7 @@ function App() {
     setVerificationCode("");
     setSetupOptions(null);
     setDailyPlanState({ status: "loading" });
+    dailyPlanCacheRef.current = null;
     setMenuOpen(false);
     setCurrentSchoolDate(formatCurrentJstSchoolDate());
     setCompletedPlaceholderTaskIds(new Set());

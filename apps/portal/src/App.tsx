@@ -15,6 +15,7 @@ import {
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
+const DATE_PICKER_SCALE_DISTANCE_PX = 128;
 
 type RequestStatus =
   | "checking"
@@ -283,6 +284,7 @@ function App() {
     });
     window.setTimeout(() => {
       suppressDatePickerScrollRef.current = false;
+      datePickerRef.current?.dispatchEvent(new Event("scroll"));
     }, 120);
   }, [selectedSchoolDate, dateStrip, status]);
 
@@ -308,7 +310,7 @@ function App() {
     setCurrentSchoolDate(formatCurrentJstSchoolDate());
   }
 
-  function updateSelectedDateFromPickerCenter() {
+  function updateDatePickerCenterState(shouldSelectDate: boolean) {
     const picker = datePickerRef.current;
 
     if (!picker) {
@@ -324,6 +326,20 @@ function App() {
       const buttonRect = button.getBoundingClientRect();
       const buttonCenter = buttonRect.left + buttonRect.width / 2;
       const distance = Math.abs(buttonCenter - pickerCenter);
+      const centerStrength = Math.max(
+        0,
+        1 - distance / DATE_PICKER_SCALE_DISTANCE_PX,
+      );
+      const easedStrength = 1 - (1 - centerStrength) ** 2;
+
+      button.style.setProperty(
+        "--date-cell-scale",
+        String(0.82 + easedStrength * 0.36),
+      );
+      button.style.setProperty(
+        "--date-cell-opacity",
+        String(0.54 + easedStrength * 0.46),
+      );
 
       if (distance < closestDistance) {
         closestDistance = distance;
@@ -331,23 +347,23 @@ function App() {
       }
     }
 
-    if (closestSchoolDate && closestSchoolDate !== selectedSchoolDate) {
+    if (
+      shouldSelectDate &&
+      closestSchoolDate &&
+      closestSchoolDate !== selectedSchoolDate
+    ) {
       selectSchoolDate(closestSchoolDate, false);
     }
   }
 
   function handleDatePickerScroll() {
-    if (suppressDatePickerScrollRef.current) {
-      return;
-    }
-
     if (datePickerScrollFrameRef.current !== null) {
       return;
     }
 
     datePickerScrollFrameRef.current = window.requestAnimationFrame(() => {
       datePickerScrollFrameRef.current = null;
-      updateSelectedDateFromPickerCenter();
+      updateDatePickerCenterState(!suppressDatePickerScrollRef.current);
     });
   }
 
@@ -375,7 +391,7 @@ function App() {
 
     datePickerScrollEndTimerRef.current = window.setTimeout(() => {
       suppressDatePickerScrollRef.current = false;
-      updateSelectedDateFromPickerCenter();
+      updateDatePickerCenterState(true);
     }, 420);
   }
 
@@ -779,7 +795,6 @@ function App() {
           </div>
 
           <footer className="date-strip-footer">
-            <div className="date-strip-marker" aria-hidden="true" />
             <nav
               className="date-strip"
               aria-label="Date selection"

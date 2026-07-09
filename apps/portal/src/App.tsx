@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import "./App.css";
 import {
   buildDateHeader,
@@ -123,6 +123,7 @@ function App() {
     status: "loading",
   });
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuAreaRef = useRef<HTMLDivElement | null>(null);
   const [completedPlaceholderTaskIds, setCompletedPlaceholderTaskIds] =
     useState<Set<string>>(() => new Set());
 
@@ -215,6 +216,31 @@ function App() {
       cancelled = true;
     };
   }, [selectedSchoolDate, status, studentAccount, dailyPlanReloadToken]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    function closeMenuWhenOutside(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Node &&
+        menuAreaRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeMenuWhenOutside);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeMenuWhenOutside);
+    };
+  }, [menuOpen]);
 
   async function loadInitialSetup() {
     const response = await fetch("/api/auth/initial-setup");
@@ -417,7 +443,7 @@ function App() {
           aria-labelledby="daily-plan-title"
         >
           <header className="daily-plan-topbar">
-            <div className="menu-area">
+            <div className="menu-area" ref={menuAreaRef}>
               <button
                 className="icon-button"
                 type="button"

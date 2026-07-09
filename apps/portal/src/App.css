@@ -115,7 +115,7 @@
 
 .date-heading-relative {
   color: var(--color-accent);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1.2;
 }
@@ -290,9 +290,9 @@
 }
 
 .daily-section h2 {
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   color: var(--color-primary);
-  font-size: 18px;
+  font-size: 12px;
 }
 
 .task-item {
@@ -442,6 +442,10 @@
 
   .date-heading-small {
     font-size: 12px;
+  }
+
+  .date-heading-relative {
+    font-size: 15px;
   }
 
   .period-row {

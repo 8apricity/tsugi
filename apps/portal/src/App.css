@@ -66,7 +66,7 @@
   display: grid;
   gap: 16px;
   min-height: 100svh;
-  padding: 88px 16px 136px;
+  padding: 88px 16px 148px;
   box-sizing: border-box;
 }
 
@@ -346,10 +346,13 @@
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 14px 0 36px;
+  padding: 22px 0 40px;
   border-top: 1px solid var(--color-border);
   background: rgba(245, 246, 247, 0.96);
   box-sizing: border-box;
+  overflow-y: hidden;
+  overscroll-behavior-y: none;
+  touch-action: pan-x;
 }
 
 .date-strip {
@@ -358,9 +361,12 @@
   margin: 0;
   padding: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-y: none;
   scroll-padding-inline: calc(50vw - 23px);
   scroll-snap-type: x mandatory;
   scrollbar-width: thin;
+  touch-action: pan-x;
   box-sizing: border-box;
 }
 
@@ -457,7 +463,7 @@
   }
 
   .daily-plan-shell {
-    padding: 82px 12px 132px;
+    padding: 82px 12px 144px;
   }
 
   .daily-plan-topbar {

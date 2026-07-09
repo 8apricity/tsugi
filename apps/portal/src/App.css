@@ -66,8 +66,14 @@
   display: grid;
   gap: 16px;
   min-height: 100svh;
-  padding: 88px 16px 112px;
+  padding: 88px 16px 128px;
   box-sizing: border-box;
+}
+
+.daily-plan-main {
+  display: grid;
+  gap: 16px;
+  touch-action: pan-y;
 }
 
 .daily-plan-topbar {
@@ -334,22 +340,47 @@
   margin: 0 0 4px;
 }
 
-.date-strip {
+.date-strip-footer {
   position: fixed;
   z-index: 10;
   left: 0;
   right: 0;
   bottom: 0;
-  display: flex;
-  justify-content: center;
-  width: 100%;
-  margin: 0 auto;
-  padding: 10px max(16px, calc((100vw - 860px) / 2)) 34px;
+  padding: 10px 0 34px;
   border-top: 1px solid var(--color-border);
   background: rgba(245, 246, 247, 0.96);
+  box-sizing: border-box;
+}
+
+.date-strip-marker {
+  position: absolute;
+  top: 8px;
+  bottom: 30px;
+  left: 50%;
+  width: 58px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: rgba(232, 245, 246, 0.72);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.date-strip {
+  display: flex;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   overflow-x: auto;
+  scroll-padding-inline: calc(50vw - 29px);
+  scroll-snap-type: x mandatory;
   scrollbar-width: thin;
   box-sizing: border-box;
+}
+
+.date-strip::before,
+.date-strip::after {
+  content: "";
+  flex: 0 0 calc(50vw - 29px);
 }
 
 .date-cell {
@@ -363,6 +394,7 @@
   color: var(--color-text);
   font-weight: 700;
   cursor: pointer;
+  scroll-snap-align: center;
 }
 
 .date-cell:last-child {
@@ -429,7 +461,7 @@
   }
 
   .daily-plan-shell {
-    padding: 82px 12px 108px;
+    padding: 82px 12px 124px;
   }
 
   .daily-plan-topbar {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDateStrip, formatDateHeader } from "./dailyPlanView";
+import { buildDateStrip, formatDateHeader, shiftSchoolDate } from "./dailyPlanView";
 
 describe("Daily Plan date display", () => {
   it("formats the selected School Date with a nearby relative label", () => {
@@ -34,5 +34,18 @@ describe("Daily Plan date display", () => {
       { schoolDate: "2026-07-13", label: "13 月", day: 13, weekdayLabel: "月" },
       { schoolDate: "2026-07-14", label: "14 火", day: 14, weekdayLabel: "火" },
     ]);
+  });
+
+  it("can build a wider continuous date strip", () => {
+    expect(buildDateStrip("2026-07-09", 1)).toEqual([
+      { schoolDate: "2026-07-08", label: "8 水", day: 8, weekdayLabel: "水" },
+      { schoolDate: "2026-07-09", label: "9 木", day: 9, weekdayLabel: "木" },
+      { schoolDate: "2026-07-10", label: "10 金", day: 10, weekdayLabel: "金" },
+    ]);
+  });
+
+  it("shifts a School Date by day count", () => {
+    expect(shiftSchoolDate("2026-07-09", -1)).toBe("2026-07-08");
+    expect(shiftSchoolDate("2026-07-09", 1)).toBe("2026-07-10");
   });
 });

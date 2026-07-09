@@ -31,11 +31,11 @@ export function buildDateHeader(schoolDate: string, currentSchoolDate: string) {
   };
 }
 
-export function buildDateStrip(selectedSchoolDate: string) {
+export function buildDateStrip(selectedSchoolDate: string, radius = 5) {
   const selectedDate = parseSchoolDate(selectedSchoolDate);
 
-  return Array.from({ length: 11 }, (_, index) => {
-    const date = addDays(selectedDate, index - 5);
+  return Array.from({ length: radius * 2 + 1 }, (_, index) => {
+    const date = addDays(selectedDate, index - radius);
 
     return {
       schoolDate: formatSchoolDate(date),
@@ -44,6 +44,10 @@ export function buildDateStrip(selectedSchoolDate: string) {
       weekdayLabel: weekdayLabels[date.getUTCDay()],
     };
   });
+}
+
+export function shiftSchoolDate(schoolDate: string, days: number) {
+  return formatSchoolDate(addDays(parseSchoolDate(schoolDate), days));
 }
 
 export function formatCurrentJstSchoolDate(now = new Date()) {

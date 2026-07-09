@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import "./App.css";
 import {
   buildDateHeader,
   buildDateStrip,
   formatCurrentJstSchoolDate,
+  shiftSchoolDate,
 } from "./dailyPlanView";
+
+const DATE_PICKER_RADIUS = 180;
+const DATE_SWIPE_THRESHOLD_PX = 48;
 
 type RequestStatus =
   | "checking"
@@ -115,6 +125,9 @@ function App() {
   const [selectedSchoolDate, setSelectedSchoolDate] = useState(
     formatCurrentJstSchoolDate(),
   );
+  const [dateStrip, setDateStrip] = useState(() =>
+    buildDateStrip(formatCurrentJstSchoolDate(), DATE_PICKER_RADIUS),
+  );
   const [currentSchoolDate, setCurrentSchoolDate] = useState(
     formatCurrentJstSchoolDate(),
   );
@@ -124,6 +137,13 @@ function App() {
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAreaRef = useRef<HTMLDivElement | null>(null);
+  const datePickerRef = useRef<HTMLElement | null>(null);
+  const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const datePickerScrollFrameRef = useRef<number | null>(null);
+  const datePickerScrollEndTimerRef = useRef<number | null>(null);
+  const shouldCenterDatePickerRef = useRef(true);
+  const suppressDatePickerScrollRef = useRef(false);
+  const swipeStartXRef = useRef<number | null>(null);
   const [completedPlaceholderTaskIds, setCompletedPlaceholderTaskIds] =
     useState<Set<string>>(() => new Set());
 
@@ -241,6 +261,156 @@ function App() {
       document.removeEventListener("pointerdown", closeMenuWhenOutside);
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !shouldCenterDatePickerRef.current) {
+      return;
+    }
+
+    const button = dateButtonRefs.current.get(selectedSchoolDate);
+
+    if (!button) {
+      setDateStrip(buildDateStrip(selectedSchoolDate, DATE_PICKER_RADIUS));
+      return;
+    }
+
+    shouldCenterDatePickerRef.current = false;
+    suppressDatePickerScrollRef.current = true;
+    button.scrollIntoView({
+      behavior: "auto",
+      block: "nearest",
+      inline: "center",
+    });
+    window.setTimeout(() => {
+      suppressDatePickerScrollRef.current = false;
+    }, 120);
+  }, [selectedSchoolDate, dateStrip, status]);
+
+  useEffect(() => {
+    return () => {
+      if (datePickerScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(datePickerScrollFrameRef.current);
+      }
+
+      if (datePickerScrollEndTimerRef.current !== null) {
+        window.clearTimeout(datePickerScrollEndTimerRef.current);
+      }
+    };
+  }, []);
+
+  function selectSchoolDate(schoolDate: string, centerDatePicker: boolean) {
+    if (!dateStrip.some((date) => date.schoolDate === schoolDate)) {
+      setDateStrip(buildDateStrip(schoolDate, DATE_PICKER_RADIUS));
+    }
+
+    shouldCenterDatePickerRef.current = centerDatePicker;
+    setSelectedSchoolDate(schoolDate);
+    setCurrentSchoolDate(formatCurrentJstSchoolDate());
+  }
+
+  function updateSelectedDateFromPickerCenter() {
+    const picker = datePickerRef.current;
+
+    if (!picker) {
+      return;
+    }
+
+    const pickerRect = picker.getBoundingClientRect();
+    const pickerCenter = pickerRect.left + pickerRect.width / 2;
+    let closestSchoolDate: string | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    for (const [schoolDate, button] of dateButtonRefs.current) {
+      const buttonRect = button.getBoundingClientRect();
+      const buttonCenter = buttonRect.left + buttonRect.width / 2;
+      const distance = Math.abs(buttonCenter - pickerCenter);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestSchoolDate = schoolDate;
+      }
+    }
+
+    if (closestSchoolDate && closestSchoolDate !== selectedSchoolDate) {
+      selectSchoolDate(closestSchoolDate, false);
+    }
+  }
+
+  function handleDatePickerScroll() {
+    if (suppressDatePickerScrollRef.current) {
+      return;
+    }
+
+    if (datePickerScrollFrameRef.current !== null) {
+      return;
+    }
+
+    datePickerScrollFrameRef.current = window.requestAnimationFrame(() => {
+      datePickerScrollFrameRef.current = null;
+      updateSelectedDateFromPickerCenter();
+    });
+  }
+
+  function handleDatePickerPointerDown() {
+    suppressDatePickerScrollRef.current = false;
+  }
+
+  function centerDatePickerOnDate(schoolDate: string) {
+    const button = dateButtonRefs.current.get(schoolDate);
+
+    if (!button) {
+      return;
+    }
+
+    suppressDatePickerScrollRef.current = true;
+    button.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+
+    if (datePickerScrollEndTimerRef.current !== null) {
+      window.clearTimeout(datePickerScrollEndTimerRef.current);
+    }
+
+    datePickerScrollEndTimerRef.current = window.setTimeout(() => {
+      suppressDatePickerScrollRef.current = false;
+      updateSelectedDateFromPickerCenter();
+    }, 420);
+  }
+
+  function handleDateTap(schoolDate: string) {
+    selectSchoolDate(schoolDate, false);
+    centerDatePickerOnDate(schoolDate);
+  }
+
+  function handleMainPointerDown(event: ReactPointerEvent<HTMLElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+
+    swipeStartXRef.current = event.clientX;
+  }
+
+  function handleMainPointerUp(event: ReactPointerEvent<HTMLElement>) {
+    const startX = swipeStartXRef.current;
+    swipeStartXRef.current = null;
+
+    if (startX === null) {
+      return;
+    }
+
+    const deltaX = event.clientX - startX;
+
+    if (Math.abs(deltaX) < DATE_SWIPE_THRESHOLD_PX) {
+      return;
+    }
+
+    selectSchoolDate(
+      shiftSchoolDate(selectedSchoolDate, deltaX < 0 ? 1 : -1),
+      true,
+    );
+  }
 
   async function loadInitialSetup() {
     const response = await fetch("/api/auth/initial-setup");
@@ -433,7 +603,6 @@ function App() {
   }
 
   if (status === "authenticated" && studentAccount) {
-    const dateStrip = buildDateStrip(selectedSchoolDate);
     const dateHeader = buildDateHeader(selectedSchoolDate, currentSchoolDate);
 
     return (
@@ -494,130 +663,152 @@ function App() {
             <div className="topbar-spacer" aria-hidden="true" />
           </header>
 
-          {dailyPlanState.status === "loading" ? (
-            <div className="panel state-panel" aria-live="polite">
-              Daily Plan を読み込んでいます。
-            </div>
-          ) : null}
+          <div
+            className="daily-plan-main"
+            onPointerDown={handleMainPointerDown}
+            onPointerUp={handleMainPointerUp}
+            onPointerCancel={() => {
+              swipeStartXRef.current = null;
+            }}
+          >
+            {dailyPlanState.status === "loading" ? (
+              <div className="panel state-panel" aria-live="polite">
+                Daily Plan を読み込んでいます。
+              </div>
+            ) : null}
 
-          {dailyPlanState.status === "affiliation-renewal-needed" ? (
-            <div className="panel state-panel" role="status">
-              <h2>Affiliation Renewal が必要です</h2>
-              <p>
-                {dailyPlanState.schoolYear}
-                年度の Student Affiliation を設定すると Daily Plan を表示できます。
-              </p>
-            </div>
-          ) : null}
+            {dailyPlanState.status === "affiliation-renewal-needed" ? (
+              <div className="panel state-panel" role="status">
+                <h2>Affiliation Renewal が必要です</h2>
+                <p>
+                  {dailyPlanState.schoolYear}
+                  年度の Student Affiliation を設定すると Daily Plan を表示できます。
+                </p>
+              </div>
+            ) : null}
 
-          {dailyPlanState.status === "error" ? (
-            <div className="panel state-panel" role="alert">
-              <h2>Daily Plan を読み込めませんでした</h2>
-              <p>時間をおいて再度お試しください。</p>
-              <button
-                className="button-secondary"
-                type="button"
-                onClick={() => setDailyPlanReloadToken((token) => token + 1)}
-              >
-                再読み込み
-              </button>
-            </div>
-          ) : null}
+            {dailyPlanState.status === "error" ? (
+              <div className="panel state-panel" role="alert">
+                <h2>Daily Plan を読み込めませんでした</h2>
+                <p>時間をおいて再度お試しください。</p>
+                <button
+                  className="button-secondary"
+                  type="button"
+                  onClick={() => setDailyPlanReloadToken((token) => token + 1)}
+                >
+                  再読み込み
+                </button>
+              </div>
+            ) : null}
 
-          {dailyPlanState.status === "ready" ? (
-            <>
-              <section className="panel timetable-panel" aria-label="Period list">
-                <div className="period-list">
-                  {dailyPlanState.dailyPlan.periods.map((period) => (
-                    <article className="period-row" key={period.periodNumber}>
-                      <div className="period-number">{period.periodNumber}</div>
-                      <div className="period-main">
-                        <div className="lesson-line">
-                          <span className="lesson-name">{period.lessonName}</span>
-                          {period.hasTasks ? (
-                            <span className="task-pill">タスク</span>
+            {dailyPlanState.status === "ready" ? (
+              <>
+                <section className="panel timetable-panel" aria-label="Period list">
+                  <div className="period-list">
+                    {dailyPlanState.dailyPlan.periods.map((period) => (
+                      <article className="period-row" key={period.periodNumber}>
+                        <div className="period-number">{period.periodNumber}</div>
+                        <div className="period-main">
+                          <div className="lesson-line">
+                            <span className="lesson-name">{period.lessonName}</span>
+                            {period.hasTasks ? (
+                              <span className="task-pill">タスク</span>
+                            ) : null}
+                          </div>
+                          {period.notes.length > 0 ? (
+                            <ul className="lesson-notes">
+                              {period.notes.map((note) => (
+                                <li key={note.noteId}>{note.body}</li>
+                              ))}
+                            </ul>
                           ) : null}
                         </div>
-                        {period.notes.length > 0 ? (
-                          <ul className="lesson-notes">
-                            {period.notes.map((note) => (
-                              <li key={note.noteId}>{note.body}</li>
-                            ))}
-                          </ul>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="panel daily-section" aria-labelledby="tasks-title">
+                  <h2 id="tasks-title">タスク</h2>
+                  <div className="task-list">
+                    {dailyPlanState.dailyPlan.tasks.map((task) => {
+                      const completed = completedPlaceholderTaskIds.has(
+                        task.taskId,
+                      );
+
+                      return (
+                        <label className="task-item" key={task.taskId}>
+                          <input
+                            type="checkbox"
+                            checked={completed}
+                            onChange={() => togglePlaceholderTask(task.taskId)}
+                          />
+                          <span>
+                            <strong>{task.title}</strong>
+                            <small>
+                              {task.dueDate ? `${task.dueDate}` : task.dueLabel}
+                              {task.relatedLesson
+                                ? ` · ${task.relatedLesson.periodNumber}限 ${task.relatedLesson.lessonName}`
+                                : ""}
+                              {!task.relatedLesson && task.relatedLessonName
+                                ? ` · ${task.relatedLessonName}`
+                                : ""}
+                            </small>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="panel daily-section" aria-labelledby="notes-title">
+                  <h2 id="notes-title">ノート</h2>
+                  <div className="note-list">
+                    {dailyPlanState.dailyPlan.notes.map((note) => (
+                      <article className="note-item" key={note.noteId}>
+                        <p>{note.body}</p>
+                        {note.relatedContext?.type === "school-date" ? (
+                          <small>{note.relatedContext.schoolDate}</small>
                         ) : null}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </>
+            ) : null}
+          </div>
 
-              <section className="panel daily-section" aria-labelledby="tasks-title">
-                <h2 id="tasks-title">タスク</h2>
-                <div className="task-list">
-                  {dailyPlanState.dailyPlan.tasks.map((task) => {
-                    const completed = completedPlaceholderTaskIds.has(
-                      task.taskId,
-                    );
-
-                    return (
-                      <label className="task-item" key={task.taskId}>
-                        <input
-                          type="checkbox"
-                          checked={completed}
-                          onChange={() => togglePlaceholderTask(task.taskId)}
-                        />
-                        <span>
-                          <strong>{task.title}</strong>
-                          <small>
-                            {task.dueDate ? `${task.dueDate}` : task.dueLabel}
-                            {task.relatedLesson
-                              ? ` · ${task.relatedLesson.periodNumber}限 ${task.relatedLesson.lessonName}`
-                              : ""}
-                            {!task.relatedLesson && task.relatedLessonName
-                              ? ` · ${task.relatedLessonName}`
-                              : ""}
-                          </small>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section className="panel daily-section" aria-labelledby="notes-title">
-                <h2 id="notes-title">ノート</h2>
-                <div className="note-list">
-                  {dailyPlanState.dailyPlan.notes.map((note) => (
-                    <article className="note-item" key={note.noteId}>
-                      <p>{note.body}</p>
-                      {note.relatedContext?.type === "school-date" ? (
-                        <small>{note.relatedContext.schoolDate}</small>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
-              </section>
-            </>
-          ) : null}
-
-          <nav className="date-strip" aria-label="Date selection">
-            {dateStrip.map((date) => (
-              <button
-                className={`date-cell ${
-                  date.schoolDate === selectedSchoolDate ? "selected" : ""
-                }`}
-                key={date.schoolDate}
-                type="button"
-                onClick={() => {
-                  setSelectedSchoolDate(date.schoolDate);
-                  setCurrentSchoolDate(formatCurrentJstSchoolDate());
-                }}
-              >
-                <span className="date-cell-day">{date.day}</span>
-                <span className="date-cell-weekday">{date.weekdayLabel}</span>
-              </button>
-            ))}
-          </nav>
+          <footer className="date-strip-footer">
+            <div className="date-strip-marker" aria-hidden="true" />
+            <nav
+              className="date-strip"
+              aria-label="Date selection"
+              ref={datePickerRef}
+              onPointerDown={handleDatePickerPointerDown}
+              onScroll={handleDatePickerScroll}
+            >
+              {dateStrip.map((date) => (
+                <button
+                  className={`date-cell ${
+                    date.schoolDate === selectedSchoolDate ? "selected" : ""
+                  }`}
+                  key={date.schoolDate}
+                  type="button"
+                  ref={(element) => {
+                    if (element) {
+                      dateButtonRefs.current.set(date.schoolDate, element);
+                    } else {
+                      dateButtonRefs.current.delete(date.schoolDate);
+                    }
+                  }}
+                  onClick={() => handleDateTap(date.schoolDate)}
+                >
+                  <span className="date-cell-day">{date.day}</span>
+                  <span className="date-cell-weekday">{date.weekdayLabel}</span>
+                </button>
+              ))}
+            </nav>
+          </footer>
         </section>
       </main>
     );

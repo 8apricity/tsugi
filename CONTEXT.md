@@ -170,11 +170,11 @@ A position in the standard timetable identified by weekday and period number. A 
 _Avoid_: Class period, clock time
 
 **Lesson**:
-The class activity assigned to a lesson slot, usually a subject or homeroom activity. A lesson is what students see after a period reference is resolved.
+The class activity displayed for one school date and period number, usually a subject or homeroom activity. A lesson is what students see after applying the standard timetable and timetable changes to a daily plan or other timetable view.
 _Avoid_: Subject, period, course
 
 **Lesson Name**:
-The name of a lesson, such as Mathematics, English, or homeroom. A due reference can use a lesson name to find the next matching lesson in the displayed timetable.
+The name of a lesson, such as Mathematics, English, or homeroom. A task may be related to a lesson name without being related to one specific lesson on a school date.
 _Avoid_: Subject, course
 
 **Period Reference**:
@@ -182,16 +182,12 @@ A shorthand reference to a lesson slot in the standard timetable, such as "Monda
 _Avoid_: Subject name, clock time
 
 **Task**:
-A school-life obligation shared inside the school community with a due date or due reference and target scope. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete, and may optionally be related to a lesson. A task can have an individual student as its target scope without becoming a separate personal-task concept.
+A school-life obligation shared inside the school community with a due date and target scope. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete. A task may optionally be related to a lesson, a lesson name, or both. A task can have an individual student as its target scope without becoming a separate personal-task concept.
 _Avoid_: Assignment, homework, todo
 
 **Note**:
 Shared information that records a school-life notice or reminder without being a task or timetable change. A note has a target scope and may have no related context or one related context: a school date, a lesson slot, or a task.
 _Avoid_: Announcement, comment, memo
-
-**Due Reference**:
-A shorthand way to describe a task's due timing from the next or second-next matching lesson in the displayed timetable. A due reference uses a lesson name to decide what counts as the next lesson, and should only be used when it identifies one due timing for the task's target scope.
-_Avoid_: Reminder, recurrence, deadline rule
 
 **Task Completion**:
 A student's personal completion state for a task. Task completion belongs to the student, not to the shared task itself.
@@ -272,10 +268,13 @@ Developer: Is bringing a calculator tomorrow an assignment?
 Domain expert: No. In Tsugi it is a task, because tasks include more than homework.
 
 Developer: Does every task need to be tied to a lesson?
-Domain expert: No. A task has a target scope and due date; a lesson is only an optional relation, though it can help fill due dates such as "next time".
+Domain expert: No. A task has a target scope and due date; a lesson or lesson name is only an optional relation.
 
-Developer: Can a class-wide task use "next math" if different tracks have math on different days?
-Domain expert: No. The task should use a narrower target scope or a direct due date so the shared task has one due date.
+Developer: Can a task be due at a period-level timing such as "before third period"?
+Domain expert: Not as formal task data. A task's due timing is date-level; period-level instructions can be written in a note related to that task.
+
+Developer: Can a task be related to a lesson name without being related to one lesson on one school date?
+Domain expert: Yes. A task may be related to a lesson name, a specific lesson, both, or neither.
 
 Developer: If a student marks a task complete, does that approve the task information?
 Domain expert: No. Task completion is personal progress, while approval is about accepting a proposed change to shared information.

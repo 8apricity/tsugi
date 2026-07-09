@@ -180,13 +180,16 @@ create table task_snapshots (
   task_snapshot_id text primary key,
   title text not null,
   due_date text,
-  due_reference_kind text,
-  lesson_name text,
+  related_lesson_school_date text,
+  related_lesson_period_number integer,
+  related_lesson_name text,
   created_at text not null,
 
-  check (due_reference_kind is null or due_reference_kind in ('next', 'second-next')),
-  check (due_date is null or due_reference_kind is null),
-  check (due_reference_kind is null or lesson_name is not null)
+  check (
+    (related_lesson_school_date is null and related_lesson_period_number is null)
+    or (related_lesson_school_date is not null and related_lesson_period_number is not null)
+  ),
+  check (related_lesson_period_number is null or related_lesson_period_number > 0)
 );
 
 create table timetable_change_snapshots (
@@ -228,6 +231,10 @@ create table note_snapshots (
   )
 );
 ```
+
+Tasks store due timing at school-date level only. If a student needs to record a finer instruction such as "before third period" or "by the start of class", that detail belongs in a note related to the task rather than in formal task due fields.
+
+`related_lesson_school_date` and `related_lesson_period_number` identify a specific lesson in the displayed timetable for one school date. `related_lesson_name` may be stored with or without a specific related lesson; the two are not exclusive. For example, a task created from a daily plan lesson can store both the specific lesson and its lesson name, while a task created from a table-like view may be related only to a lesson name.
 
 `timetable_change_snapshots` represents one date and one period. A UI may create several timetable changes in one operation, but the database stores them as separate shared information items.
 

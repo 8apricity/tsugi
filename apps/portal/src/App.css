@@ -66,7 +66,7 @@
   display: grid;
   gap: 16px;
   min-height: 100svh;
-  padding: 88px 16px 128px;
+  padding: 88px 16px 136px;
   box-sizing: border-box;
 }
 
@@ -346,7 +346,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 8px 0 34px;
+  padding: 14px 0 36px;
   border-top: 1px solid var(--color-border);
   background: rgba(245, 246, 247, 0.96);
   box-sizing: border-box;
@@ -386,7 +386,7 @@
   opacity: var(--date-cell-opacity);
   scroll-snap-align: center;
   transform: scale(var(--date-cell-scale));
-  transform-origin: center bottom;
+  transform-origin: center center;
   transition:
     color 120ms ease,
     opacity 120ms ease,
@@ -457,7 +457,7 @@
   }
 
   .daily-plan-shell {
-    padding: 82px 12px 124px;
+    padding: 82px 12px 132px;
   }
 
   .daily-plan-topbar {

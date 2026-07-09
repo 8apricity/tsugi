@@ -15,7 +15,7 @@ import {
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
-const DATE_PICKER_SCALE_DISTANCE_PX = 128;
+const DATE_PICKER_SCALE_DISTANCE_PX = 78;
 
 type RequestStatus =
   | "checking"

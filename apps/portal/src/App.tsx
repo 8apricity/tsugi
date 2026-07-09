@@ -1,5 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import "./App.css";
+import {
+  buildDateStrip,
+  formatCurrentJstSchoolDate,
+  formatDateHeader,
+} from "./dailyPlanView";
 
 type RequestStatus =
   | "checking"
@@ -30,6 +35,64 @@ type InitialSetupOptions = {
   }>;
 };
 
+type DailyPlanTask = {
+  taskId: string;
+  title: string;
+  dueDate?: string;
+  dueLabel?: string;
+  relatedLesson?: {
+    schoolDate: string;
+    periodNumber: number;
+    lessonName: string;
+  };
+  relatedLessonName?: string;
+  completed: false;
+};
+
+type DailyPlanNote = {
+  noteId: string;
+  body: string;
+  relatedContext:
+    | {
+        type: "lesson-slot";
+        schoolDate: string;
+        periodNumber: number;
+      }
+    | {
+        type: "school-date";
+        schoolDate: string;
+      }
+    | null;
+};
+
+type DailyPlan = {
+  status: "ready";
+  schoolDate: string;
+  weekday: number;
+  studentAffiliation: {
+    schoolYear: number;
+    grade: number;
+    classId: string;
+    classNumber: number;
+    trackId: string;
+    trackName: string;
+  };
+  periods: Array<{
+    periodNumber: number;
+    lessonName: string;
+    hasTasks: boolean;
+    notes: DailyPlanNote[];
+  }>;
+  tasks: DailyPlanTask[];
+  notes: DailyPlanNote[];
+};
+
+type DailyPlanState =
+  | { status: "loading" }
+  | { status: "ready"; dailyPlan: DailyPlan }
+  | { status: "affiliation-renewal-needed"; schoolYear: number }
+  | { status: "error" };
+
 function App() {
   const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
   const [schoolEmail, setSchoolEmail] = useState<string | null>(null);
@@ -49,6 +112,19 @@ function App() {
   const [confirmedSetup, setConfirmedSetup] = useState(false);
   const [status, setStatus] = useState<RequestStatus>("checking");
   const [message, setMessage] = useState<string | null>(null);
+  const [selectedSchoolDate, setSelectedSchoolDate] = useState(
+    formatCurrentJstSchoolDate(),
+  );
+  const [currentSchoolDate, setCurrentSchoolDate] = useState(
+    formatCurrentJstSchoolDate(),
+  );
+  const [dailyPlanReloadToken, setDailyPlanReloadToken] = useState(0);
+  const [dailyPlanState, setDailyPlanState] = useState<DailyPlanState>({
+    status: "loading",
+  });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [completedPlaceholderTaskIds, setCompletedPlaceholderTaskIds] =
+    useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +160,61 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !studentAccount) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadDailyPlan() {
+      setDailyPlanState({ status: "loading" });
+
+      const response = await fetch(
+        `/api/daily-plan?date=${encodeURIComponent(selectedSchoolDate)}`,
+      );
+      const body = (await response.json()) as
+        | DailyPlan
+        | { status: "affiliation-renewal-needed"; schoolYear: number }
+        | { status: "unauthenticated" | "invalid-date" | "daily-plan-unavailable" };
+
+      if (cancelled) {
+        return;
+      }
+
+      if (response.status === 401 || body.status === "unauthenticated") {
+        setStudentAccount(null);
+        setStatus("idle");
+        return;
+      }
+
+      if (body.status === "affiliation-renewal-needed") {
+        setDailyPlanState({
+          status: "affiliation-renewal-needed",
+          schoolYear: body.schoolYear,
+        });
+        return;
+      }
+
+      if (!response.ok || body.status !== "ready") {
+        setDailyPlanState({ status: "error" });
+        return;
+      }
+
+      setDailyPlanState({ status: "ready", dailyPlan: body });
+    }
+
+    loadDailyPlan().catch(() => {
+      if (!cancelled) {
+        setDailyPlanState({ status: "error" });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSchoolDate, status, studentAccount, dailyPlanReloadToken]);
 
   async function loadInitialSetup() {
     const response = await fetch("/api/auth/initial-setup");
@@ -202,8 +333,26 @@ function App() {
     setSetupSchoolEmail(null);
     setVerificationCode("");
     setSetupOptions(null);
+    setDailyPlanState({ status: "loading" });
+    setMenuOpen(false);
+    setCurrentSchoolDate(formatCurrentJstSchoolDate());
+    setCompletedPlaceholderTaskIds(new Set());
     setStatus("idle");
     setMessage("ログアウトしました。");
+  }
+
+  function togglePlaceholderTask(taskId: string) {
+    setCompletedPlaceholderTaskIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+
+      return next;
+    });
   }
 
   async function submitInitialSetup(event: FormEvent<HTMLFormElement>) {
@@ -258,25 +407,176 @@ function App() {
   }
 
   if (status === "authenticated" && studentAccount) {
+    const dateStrip = buildDateStrip(selectedSchoolDate);
+
     return (
-      <main className="app-page home-page">
-        <section className="panel home-panel" aria-labelledby="home-title">
-          <div>
-            <p className="eyebrow">Tsugi</p>
-            <h1 id="home-title">受信画面</h1>
-            <p className="lead">
-              {studentAccount.displayName} としてログインしています。
-            </p>
-          </div>
-          <dl className="account-summary">
-            <div>
-              <dt>School Email</dt>
-              <dd>{studentAccount.schoolEmail}</dd>
+      <main className="app-page daily-plan-page">
+        <section
+          className="daily-plan-shell"
+          aria-labelledby="daily-plan-title"
+        >
+          <header className="daily-plan-topbar">
+            <div className="menu-area">
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="メニュー"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                <span aria-hidden="true">☰</span>
+              </button>
+              {menuOpen ? (
+                <div className="menu-popover">
+                  <p className="menu-name">{studentAccount.displayName}</p>
+                  {dailyPlanState.status === "ready" ? (
+                    <p className="menu-affiliation">
+                      {dailyPlanState.dailyPlan.studentAffiliation.schoolYear}年度{" "}
+                      {dailyPlanState.dailyPlan.studentAffiliation.grade}年
+                      {dailyPlanState.dailyPlan.studentAffiliation.classNumber}組{" "}
+                      {dailyPlanState.dailyPlan.studentAffiliation.trackName}
+                    </p>
+                  ) : (
+                    <p className="menu-affiliation">Student Affiliation 未読込</p>
+                  )}
+                  <button className="menu-item" type="button" disabled>
+                    Settings
+                  </button>
+                  <button className="menu-item" type="button" onClick={logout}>
+                    ログアウト
+                  </button>
+                </div>
+              ) : null}
             </div>
-          </dl>
-          <button className="button-secondary" type="button" onClick={logout}>
-            ログアウト
-          </button>
+            <h1 id="daily-plan-title" className="daily-plan-title">
+              {formatDateHeader(selectedSchoolDate, currentSchoolDate)}
+            </h1>
+            <div className="topbar-spacer" aria-hidden="true" />
+          </header>
+
+          {dailyPlanState.status === "loading" ? (
+            <div className="panel state-panel" aria-live="polite">
+              Daily Plan を読み込んでいます。
+            </div>
+          ) : null}
+
+          {dailyPlanState.status === "affiliation-renewal-needed" ? (
+            <div className="panel state-panel" role="status">
+              <h2>Affiliation Renewal が必要です</h2>
+              <p>
+                {dailyPlanState.schoolYear}
+                年度の Student Affiliation を設定すると Daily Plan を表示できます。
+              </p>
+            </div>
+          ) : null}
+
+          {dailyPlanState.status === "error" ? (
+            <div className="panel state-panel" role="alert">
+              <h2>Daily Plan を読み込めませんでした</h2>
+              <p>時間をおいて再度お試しください。</p>
+              <button
+                className="button-secondary"
+                type="button"
+                onClick={() => setDailyPlanReloadToken((token) => token + 1)}
+              >
+                再読み込み
+              </button>
+            </div>
+          ) : null}
+
+          {dailyPlanState.status === "ready" ? (
+            <>
+              <section className="panel timetable-panel" aria-label="Period list">
+                <div className="period-list">
+                  {dailyPlanState.dailyPlan.periods.map((period) => (
+                    <article className="period-row" key={period.periodNumber}>
+                      <div className="period-number">{period.periodNumber}</div>
+                      <div className="period-main">
+                        <div className="lesson-line">
+                          <span className="lesson-name">{period.lessonName}</span>
+                          {period.hasTasks ? (
+                            <span className="task-pill">Task</span>
+                          ) : null}
+                        </div>
+                        {period.notes.length > 0 ? (
+                          <ul className="lesson-notes">
+                            {period.notes.map((note) => (
+                              <li key={note.noteId}>{note.body}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel daily-section" aria-labelledby="tasks-title">
+                <h2 id="tasks-title">Tasks</h2>
+                <div className="task-list">
+                  {dailyPlanState.dailyPlan.tasks.map((task) => {
+                    const completed = completedPlaceholderTaskIds.has(
+                      task.taskId,
+                    );
+
+                    return (
+                      <label className="task-item" key={task.taskId}>
+                        <input
+                          type="checkbox"
+                          checked={completed}
+                          onChange={() => togglePlaceholderTask(task.taskId)}
+                        />
+                        <span>
+                          <strong>{task.title}</strong>
+                          <small>
+                            {task.dueDate ? `${task.dueDate}` : task.dueLabel}
+                            {task.relatedLesson
+                              ? ` · ${task.relatedLesson.periodNumber}限 ${task.relatedLesson.lessonName}`
+                              : ""}
+                            {!task.relatedLesson && task.relatedLessonName
+                              ? ` · ${task.relatedLessonName}`
+                              : ""}
+                          </small>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="panel daily-section" aria-labelledby="notes-title">
+                <h2 id="notes-title">Notes</h2>
+                <div className="note-list">
+                  {dailyPlanState.dailyPlan.notes.map((note) => (
+                    <article className="note-item" key={note.noteId}>
+                      <p>{note.body}</p>
+                      {note.relatedContext?.type === "school-date" ? (
+                        <small>{note.relatedContext.schoolDate}</small>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : null}
+
+          <nav className="date-strip" aria-label="Date selection">
+            {dateStrip.map((date) => (
+              <button
+                className={`date-cell ${
+                  date.schoolDate === selectedSchoolDate ? "selected" : ""
+                }`}
+                key={date.schoolDate}
+                type="button"
+                onClick={() => {
+                  setSelectedSchoolDate(date.schoolDate);
+                  setCurrentSchoolDate(formatCurrentJstSchoolDate());
+                }}
+              >
+                {date.label}
+              </button>
+            ))}
+          </nav>
         </section>
       </main>
     );

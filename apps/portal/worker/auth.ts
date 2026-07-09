@@ -93,6 +93,35 @@ export type StudentAffiliation = {
   endedAt: number | null
 }
 
+export type StandardTimetableEntry = {
+  standardTimetableEntryId: string
+  classId: string
+  trackId: string | null
+  weekday: number
+  periodNumber: number
+  lessonName: string
+}
+
+export type DailyPlanResult =
+  | {
+      status: 'ready'
+      schoolDate: string
+      weekday: number
+      studentAffiliation: {
+        schoolYear: number
+        grade: number
+        classId: string
+        classNumber: number
+        trackId: string
+        trackName: string
+      }
+      periods: Array<{ periodNumber: number; lessonName: string }>
+    }
+  | { status: 'unauthenticated' }
+  | { status: 'invalid-date' }
+  | { status: 'daily-plan-unavailable' }
+  | { status: 'affiliation-renewal-needed'; schoolYear: number }
+
 export type CompleteInitialSetupTransactionInput = {
   setupSessionTokenHash: string
   schoolEmail: string
@@ -151,6 +180,22 @@ export type VerificationCodeStore = {
     trackId: string,
     schoolYear: number,
   ): Promise<{ track: TrackRecord; schoolClass: SchoolYearClassRecord } | null>
+  findSchoolYearClassById(
+    classId: string,
+    schoolYear: number,
+  ): Promise<SchoolYearClassRecord | null>
+  findTrackById(trackId: string): Promise<TrackRecord | null>
+  findCurrentStudentAffiliation(
+    studentAccountId: string,
+    schoolYear: number,
+  ): Promise<StudentAffiliation | null>
+  saveStudentAffiliation(record: StudentAffiliation): Promise<void>
+  saveStandardTimetableEntry(record: StandardTimetableEntry): Promise<void>
+  listStandardTimetableEntriesForWeekday(
+    classId: string,
+    trackId: string,
+    weekday: number,
+  ): Promise<StandardTimetableEntry[]>
   saveInitialSetupDraft(
     setupSessionTokenHash: string,
     draft: InitialSetupDraft,
@@ -262,6 +307,7 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
   private schoolYearClasses: SchoolYearClassRecord[] = []
   private tracks: TrackRecord[] = []
   private studentAffiliations: StudentAffiliation[] = []
+  private standardTimetableEntries: StandardTimetableEntry[] = []
   private initialSetupDrafts = new Map<string, InitialSetupDraft>()
   private failNextAffiliationSave = false
 
@@ -430,6 +476,27 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
     return schoolClass ? { track, schoolClass } : null
   }
 
+  async findSchoolYearClassById(classId: string, schoolYear: number) {
+    return (
+      this.schoolYearClasses.find(
+        (schoolClass) =>
+          schoolClass.classId === classId && schoolClass.schoolYear === schoolYear,
+      ) ?? null
+    )
+  }
+
+  async findTrackById(trackId: string) {
+    return this.tracks.find((track) => track.trackId === trackId) ?? null
+  }
+
+  async saveStudentAffiliation(record: StudentAffiliation) {
+    this.studentAffiliations.push(record)
+  }
+
+  async saveStandardTimetableEntry(record: StandardTimetableEntry) {
+    this.standardTimetableEntries.push(record)
+  }
+
   async saveInitialSetupDraft(
     setupSessionTokenHash: string,
     draft: InitialSetupDraft,
@@ -449,6 +516,19 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
           affiliation.schoolYear === schoolYear &&
           affiliation.endedAt === null,
       ) ?? null
+    )
+  }
+
+  async listStandardTimetableEntriesForWeekday(
+    classId: string,
+    trackId: string,
+    weekday: number,
+  ) {
+    return this.standardTimetableEntries.filter(
+      (entry) =>
+        entry.classId === classId &&
+        entry.weekday === weekday &&
+        (entry.trackId === null || entry.trackId === trackId),
     )
   }
 
@@ -567,6 +647,26 @@ type TrackRow = {
   track_id: string
   class_id: string
   track_name: string
+}
+
+type StudentAffiliationRow = {
+  student_affiliation_id: string
+  student_account_id: string
+  school_year: number
+  grade: number
+  class_id: string
+  track_id: string
+  selected_at: number
+  ended_at: number | null
+}
+
+type StandardTimetableEntryRow = {
+  standard_timetable_entry_id: string
+  class_id: string
+  track_id: string | null
+  weekday: number
+  period_number: number
+  lesson_name: string
 }
 
 export class D1VerificationCodeStore implements VerificationCodeStore {
@@ -925,6 +1025,118 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
       : null
   }
 
+  async findSchoolYearClassById(classId: string, schoolYear: number) {
+    const row = await this.db
+      .prepare(
+        `select class_id, school_year, grade, class_number
+         from school_year_classes
+         where class_id = ? and school_year = ?`,
+      )
+      .bind(classId, schoolYear)
+      .first<SchoolYearClassRow>()
+
+    return row ? mapSchoolYearClassRow(row) : null
+  }
+
+  async findTrackById(trackId: string) {
+    const row = await this.db
+      .prepare(
+        `select track_id, class_id, track_name
+         from tracks
+         where track_id = ?`,
+      )
+      .bind(trackId)
+      .first<TrackRow>()
+
+    return row ? mapTrackRow(row) : null
+  }
+
+  async findCurrentStudentAffiliation(studentAccountId: string, schoolYear: number) {
+    const row = await this.db
+      .prepare(
+        `select student_affiliation_id, student_account_id, school_year, grade, class_id, track_id, selected_at, ended_at
+         from student_affiliations
+         where student_account_id = ?
+           and school_year = ?
+           and ended_at is null
+         limit 1`,
+      )
+      .bind(studentAccountId, schoolYear)
+      .first<StudentAffiliationRow>()
+
+    return row ? mapStudentAffiliationRow(row) : null
+  }
+
+  async saveStudentAffiliation(record: StudentAffiliation) {
+    await this.db
+      .prepare(
+        `insert into student_affiliations (
+          student_affiliation_id,
+          student_account_id,
+          school_year,
+          grade,
+          class_id,
+          track_id,
+          selected_at,
+          ended_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        record.studentAffiliationId,
+        record.studentAccountId,
+        record.schoolYear,
+        record.grade,
+        record.classId,
+        record.trackId,
+        record.selectedAt,
+        record.endedAt,
+      )
+      .run()
+  }
+
+  async saveStandardTimetableEntry(record: StandardTimetableEntry) {
+    await this.db
+      .prepare(
+        `insert into standard_timetable_entries (
+          standard_timetable_entry_id,
+          class_id,
+          track_id,
+          weekday,
+          period_number,
+          lesson_name
+        ) values (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        record.standardTimetableEntryId,
+        record.classId,
+        record.trackId,
+        record.weekday,
+        record.periodNumber,
+        record.lessonName,
+      )
+      .run()
+  }
+
+  async listStandardTimetableEntriesForWeekday(
+    classId: string,
+    trackId: string,
+    weekday: number,
+  ) {
+    const { results } = await this.db
+      .prepare(
+        `select standard_timetable_entry_id, class_id, track_id, weekday, period_number, lesson_name
+         from standard_timetable_entries
+         where class_id = ?
+           and weekday = ?
+           and (track_id is null or track_id = ?)
+         order by period_number asc, track_id is not null asc`,
+      )
+      .bind(classId, weekday, trackId)
+      .all<StandardTimetableEntryRow>()
+
+    return results.map(mapStandardTimetableEntryRow)
+  }
+
   async saveInitialSetupDraft(
     setupSessionTokenHash: string,
     draft: InitialSetupDraft,
@@ -1148,6 +1360,32 @@ function mapTrackRow(row: TrackRow): TrackRecord {
     trackId: row.track_id,
     classId: row.class_id,
     trackName: row.track_name,
+  }
+}
+
+function mapStudentAffiliationRow(row: StudentAffiliationRow): StudentAffiliation {
+  return {
+    studentAffiliationId: row.student_affiliation_id,
+    studentAccountId: row.student_account_id,
+    schoolYear: row.school_year,
+    grade: row.grade,
+    classId: row.class_id,
+    trackId: row.track_id,
+    selectedAt: row.selected_at,
+    endedAt: row.ended_at,
+  }
+}
+
+function mapStandardTimetableEntryRow(
+  row: StandardTimetableEntryRow,
+): StandardTimetableEntry {
+  return {
+    standardTimetableEntryId: row.standard_timetable_entry_id,
+    classId: row.class_id,
+    trackId: row.track_id,
+    weekday: row.weekday,
+    periodNumber: row.period_number,
+    lessonName: row.lesson_name,
   }
 }
 
@@ -1596,6 +1834,99 @@ export async function readStudentSession({
     : { status: 'unauthenticated' }
 }
 
+export async function readDailyPlan({
+  sessionToken,
+  schoolDate,
+  now,
+  store,
+}: {
+  sessionToken: string | null
+  schoolDate: string | null
+  now: number
+  store: VerificationCodeStore
+}): Promise<DailyPlanResult> {
+  const session = await readStudentSession({ sessionToken, now, store })
+
+  if (session.status === 'unauthenticated') {
+    return { status: 'unauthenticated' }
+  }
+
+  const resolvedSchoolDate = schoolDate ?? formatJstSchoolDate(now)
+
+  if (!isValidSchoolDate(resolvedSchoolDate)) {
+    return { status: 'invalid-date' }
+  }
+
+  const currentSchoolYear = await store.findCurrentSchoolYear()
+
+  if (!currentSchoolYear) {
+    return { status: 'daily-plan-unavailable' }
+  }
+
+  const studentAffiliation = await store.findCurrentStudentAffiliation(
+    session.studentAccount.studentAccountId,
+    currentSchoolYear.schoolYear,
+  )
+
+  if (!studentAffiliation) {
+    return {
+      status: 'affiliation-renewal-needed',
+      schoolYear: currentSchoolYear.schoolYear,
+    }
+  }
+
+  const [schoolClass, track] = await Promise.all([
+    store.findSchoolYearClassById(
+      studentAffiliation.classId,
+      currentSchoolYear.schoolYear,
+    ),
+    store.findTrackById(studentAffiliation.trackId),
+  ])
+
+  if (!schoolClass || !track) {
+    return { status: 'daily-plan-unavailable' }
+  }
+
+  const weekday = weekdayForSchoolDate(resolvedSchoolDate)
+  const standardTimetableEntries =
+    await store.listStandardTimetableEntriesForWeekday(
+      studentAffiliation.classId,
+      studentAffiliation.trackId,
+      weekday,
+    )
+  const entriesByPeriod = new Map<number, StandardTimetableEntry>()
+
+  for (const entry of standardTimetableEntries) {
+    const existing = entriesByPeriod.get(entry.periodNumber)
+
+    if (!existing || entry.trackId === studentAffiliation.trackId) {
+      entriesByPeriod.set(entry.periodNumber, entry)
+    }
+  }
+
+  return {
+    status: 'ready',
+    schoolDate: resolvedSchoolDate,
+    weekday,
+    studentAffiliation: {
+      schoolYear: currentSchoolYear.schoolYear,
+      grade: studentAffiliation.grade,
+      classId: studentAffiliation.classId,
+      classNumber: schoolClass.classNumber,
+      trackId: studentAffiliation.trackId,
+      trackName: track.trackName,
+    },
+    periods: Array.from({ length: 7 }, (_, index) => {
+      const periodNumber = index + 1
+
+      return {
+        periodNumber,
+        lessonName: entriesByPeriod.get(periodNumber)?.lessonName ?? '',
+      }
+    }),
+  }
+}
+
 export async function logoutStudentSession({
   sessionToken,
   now,
@@ -1610,6 +1941,44 @@ export async function logoutStudentSession({
   }
 
   await store.invalidateStudentSession(await hashToken(sessionToken), now)
+}
+
+function formatJstSchoolDate(now: number) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(now))
+  const valueByType = new Map(parts.map((part) => [part.type, part.value]))
+
+  return `${valueByType.get('year')}-${valueByType.get('month')}-${valueByType.get('day')}`
+}
+
+function isValidSchoolDate(value: string) {
+  const match = value.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/)
+
+  if (!match) {
+    return false
+  }
+
+  const [, year, month, day] = match
+  const date = new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day)),
+  )
+
+  return (
+    date.getUTCFullYear() === Number(year) &&
+    date.getUTCMonth() === Number(month) - 1 &&
+    date.getUTCDate() === Number(day)
+  )
+}
+
+function weekdayForSchoolDate(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay()
+
+  return weekday === 0 ? 7 : weekday
 }
 
 async function hashVerificationCode(code: string) {

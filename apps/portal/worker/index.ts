@@ -5,12 +5,15 @@ import {
   createTestLoginSession,
   getInitialSetupOptions,
   logoutStudentSession,
+  readDailyPlan,
   readSetupSession,
   readStudentSession,
   requestVerificationCode,
   submitInitialSetupDraft,
   type SchoolYearClassRecord,
   type SchoolYearRecord,
+  type StandardTimetableEntry,
+  type StudentAffiliation,
   verifyCodeForExistingStudent,
   type StudentAccount,
   type TrackRecord,
@@ -51,6 +54,12 @@ async function getVerificationCodeStore(env: Env) {
       };
     }
   ).TEST_SCHOOL_STRUCTURE;
+  const testStudentAffiliations = (
+    env as Env & { TEST_STUDENT_AFFILIATIONS?: StudentAffiliation[] }
+  ).TEST_STUDENT_AFFILIATIONS;
+  const testStandardTimetableEntries = (
+    env as Env & { TEST_STANDARD_TIMETABLE_ENTRIES?: StandardTimetableEntry[] }
+  ).TEST_STANDARD_TIMETABLE_ENTRIES;
 
   if (testStudentAccounts) {
     await Promise.all(
@@ -73,6 +82,22 @@ async function getVerificationCodeStore(env: Env) {
     );
     await Promise.all(
       testSchoolStructure.tracks.map((track) => store.saveTrack(track)),
+    );
+  }
+
+  if (testStudentAffiliations) {
+    await Promise.all(
+      testStudentAffiliations.map((studentAffiliation) =>
+        store.saveStudentAffiliation(studentAffiliation),
+      ),
+    );
+  }
+
+  if (testStandardTimetableEntries) {
+    await Promise.all(
+      testStandardTimetableEntries.map((standardTimetableEntry) =>
+        store.saveStandardTimetableEntry(standardTimetableEntry),
+      ),
     );
   }
 
@@ -343,6 +368,33 @@ export default {
       }
 
       return Response.json(sessionResponseBody(result.studentAccount));
+    }
+
+    if (url.pathname === "/api/daily-plan" && request.method === "GET") {
+      const result = await readDailyPlan({
+        sessionToken: readCookie(request, sessionCookieName),
+        schoolDate: url.searchParams.get("date"),
+        now: Date.now(),
+        store: await getVerificationCodeStore(env),
+      });
+
+      if (result.status === "unauthenticated") {
+        return Response.json({ status: "unauthenticated" }, { status: 401 });
+      }
+
+      if (result.status === "invalid-date") {
+        return Response.json(result, { status: 400 });
+      }
+
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+
+      if (result.status === "daily-plan-unavailable") {
+        return Response.json(result, { status: 503 });
+      }
+
+      return Response.json(result);
     }
 
     if (url.pathname === "/api/auth/setup-session" && request.method === "GET") {

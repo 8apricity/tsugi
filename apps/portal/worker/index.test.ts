@@ -65,6 +65,168 @@ function createTestLoginEnv() {
   } as unknown as Env
 }
 
+function createDailyPlanTestEnv() {
+  return {
+    RESEND_API_KEY: 'test-resend-key',
+    TEST_LOGIN_ENABLED: 'true',
+    TEST_LOGIN_SECRET: 'test-secret',
+    TEST_STUDENT_ACCOUNTS: [
+      {
+        studentAccountId: 'test-student-2026-2-3-humanities-1',
+        schoolEmail: 'test-student-2026-2-3-humanities-1@example.invalid',
+        displayName: 'Test Humanities 1',
+      },
+      {
+        studentAccountId: 'test-student-2026-2-3-science-1',
+        schoolEmail: 'test-student-2026-2-3-science-1@example.invalid',
+        displayName: 'Test Science 1',
+      },
+      {
+        studentAccountId: 'test-student-2025-2-3-humanities-1',
+        schoolEmail: 'test-student-2025-2-3-humanities-1@example.invalid',
+        displayName: 'Test 2025 Humanities 1',
+      },
+    ],
+    TEST_SCHOOL_STRUCTURE: {
+      schoolYears: [
+        {
+          schoolYear: 2025,
+          startsOn: '2025-04-01',
+          endsOn: '2026-03-31',
+          isCurrent: false,
+        },
+        {
+          schoolYear: 2026,
+          startsOn: '2026-04-01',
+          endsOn: '2027-03-31',
+          isCurrent: true,
+        },
+      ],
+      classes: [
+        {
+          classId: '2025-grade-2-class-3',
+          schoolYear: 2025,
+          grade: 2,
+          classNumber: 3,
+        },
+        {
+          classId: '2026-grade-2-class-3',
+          schoolYear: 2026,
+          grade: 2,
+          classNumber: 3,
+        },
+      ],
+      tracks: [
+        {
+          trackId: '2025-grade-2-class-3-humanities',
+          classId: '2025-grade-2-class-3',
+          trackName: '文科',
+        },
+        {
+          trackId: '2026-grade-2-class-3-humanities',
+          classId: '2026-grade-2-class-3',
+          trackName: '文科',
+        },
+        {
+          trackId: '2026-grade-2-class-3-science',
+          classId: '2026-grade-2-class-3',
+          trackName: '理科',
+        },
+      ],
+    },
+    TEST_STUDENT_AFFILIATIONS: [
+      {
+        studentAffiliationId: 'test-affiliation-2026-humanities',
+        studentAccountId: 'test-student-2026-2-3-humanities-1',
+        schoolYear: 2026,
+        grade: 2,
+        classId: '2026-grade-2-class-3',
+        trackId: '2026-grade-2-class-3-humanities',
+        selectedAt: 1775001600000,
+        endedAt: null,
+      },
+      {
+        studentAffiliationId: 'test-affiliation-2026-science',
+        studentAccountId: 'test-student-2026-2-3-science-1',
+        schoolYear: 2026,
+        grade: 2,
+        classId: '2026-grade-2-class-3',
+        trackId: '2026-grade-2-class-3-science',
+        selectedAt: 1775001600000,
+        endedAt: null,
+      },
+      {
+        studentAffiliationId: 'test-affiliation-2025-humanities',
+        studentAccountId: 'test-student-2025-2-3-humanities-1',
+        schoolYear: 2025,
+        grade: 2,
+        classId: '2025-grade-2-class-3',
+        trackId: '2025-grade-2-class-3-humanities',
+        selectedAt: 1743465600000,
+        endedAt: null,
+      },
+    ],
+    TEST_STANDARD_TIMETABLE_ENTRIES: [
+      {
+        standardTimetableEntryId: 'mon-1-common',
+        classId: '2026-grade-2-class-3',
+        trackId: null,
+        weekday: 1,
+        periodNumber: 1,
+        lessonName: '数Ⅱβ',
+      },
+      {
+        standardTimetableEntryId: 'tue-2-humanities',
+        classId: '2026-grade-2-class-3',
+        trackId: '2026-grade-2-class-3-humanities',
+        weekday: 2,
+        periodNumber: 2,
+        lessonName: '古典',
+      },
+      {
+        standardTimetableEntryId: 'tue-2-science',
+        classId: '2026-grade-2-class-3',
+        trackId: '2026-grade-2-class-3-science',
+        weekday: 2,
+        periodNumber: 2,
+        lessonName: '生物',
+      },
+      {
+        standardTimetableEntryId: 'fri-1-common',
+        classId: '2026-grade-2-class-3',
+        trackId: null,
+        weekday: 5,
+        periodNumber: 1,
+        lessonName: '地理',
+      },
+      {
+        standardTimetableEntryId: 'fri-4-common',
+        classId: '2026-grade-2-class-3',
+        trackId: null,
+        weekday: 5,
+        periodNumber: 4,
+        lessonName: 'class-common fallback',
+      },
+      {
+        standardTimetableEntryId: 'fri-4-humanities',
+        classId: '2026-grade-2-class-3',
+        trackId: '2026-grade-2-class-3-humanities',
+        weekday: 5,
+        periodNumber: 4,
+        lessonName: '現代文',
+      },
+      {
+        standardTimetableEntryId: 'sat-1-common',
+        classId: '2026-grade-2-class-3',
+        trackId: null,
+        weekday: 6,
+        periodNumber: 1,
+        lessonName: '三丘SHSP',
+      },
+    ],
+  } as unknown as Env
+}
+
 function getLastSentCode(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) {
   const [, resendRequest] = fetchMock.mock.calls.at(-1) ?? []
   const resendBody = JSON.parse(String(resendRequest?.body)) as { text: string }
@@ -119,6 +281,166 @@ function testLogin(
     env,
   )
 }
+
+async function testLoginCookie(env: Env, studentAccountId: string) {
+  const response = await testLogin(env, studentAccountId)
+
+  if (response.status !== 200) {
+    throw new Error(`expected test login success, got ${response.status}`)
+  }
+
+  return response.headers.get('set-cookie') ?? ''
+}
+
+function readDailyPlan(env: Env, cookie = '', date?: string) {
+  const url = new URL('https://tsugi.test/api/daily-plan')
+
+  if (date !== undefined) {
+    url.searchParams.set('date', date)
+  }
+
+  return worker.fetch(
+    new Request(url, {
+      headers: cookie ? { cookie } : {},
+    }),
+    env,
+  )
+}
+
+describe('Daily Plan read API', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('rejects unauthenticated Student Session requests', async () => {
+    const response = await readDailyPlan(createDailyPlanTestEnv())
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({
+      status: 'unauthenticated',
+    })
+  })
+
+  it('defaults to the current JST School Date and returns class-common and Track-specific Lessons', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-09T16:30:00.000Z'))
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'ready',
+      schoolDate: '2026-07-10',
+      weekday: 5,
+      studentAffiliation: {
+        schoolYear: 2026,
+        grade: 2,
+        classNumber: 3,
+        trackName: '文科',
+      },
+      periods: [
+        { periodNumber: 1, lessonName: '地理' },
+        { periodNumber: 2, lessonName: '' },
+        { periodNumber: 3, lessonName: '' },
+        { periodNumber: 4, lessonName: '現代文' },
+        { periodNumber: 5, lessonName: '' },
+        { periodNumber: 6, lessonName: '' },
+        { periodNumber: 7, lessonName: '' },
+      ],
+    })
+  })
+
+  it('returns the selected valid School Date and applies Science Track overrides', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-science-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-07')
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'ready',
+      schoolDate: '2026-07-07',
+      weekday: 2,
+      studentAffiliation: {
+        trackName: '理科',
+      },
+      periods: [
+        { periodNumber: 1, lessonName: '' },
+        { periodNumber: 2, lessonName: '生物' },
+        { periodNumber: 3, lessonName: '' },
+        { periodNumber: 4, lessonName: '' },
+        { periodNumber: 5, lessonName: '' },
+        { periodNumber: 6, lessonName: '' },
+        { periodNumber: 7, lessonName: '' },
+      ],
+    })
+  })
+
+  it('keeps blank Lesson Slots empty instead of returning a rest label', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-11')
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      schoolDate: '2026-07-11',
+      weekday: 6,
+      periods: [
+        { periodNumber: 1, lessonName: '三丘SHSP' },
+        { periodNumber: 2, lessonName: '' },
+        { periodNumber: 3, lessonName: '' },
+        { periodNumber: 4, lessonName: '' },
+        { periodNumber: 5, lessonName: '' },
+        { periodNumber: 6, lessonName: '' },
+        { periodNumber: 7, lessonName: '' },
+      ],
+    })
+  })
+
+  it('fails cleanly for invalid date query values', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-02-31')
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      status: 'invalid-date',
+    })
+  })
+
+  it('reports Affiliation Renewal needed when no current Student Affiliation exists', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2025-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-10')
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      status: 'affiliation-renewal-needed',
+      schoolYear: 2026,
+    })
+  })
+})
 
 describe('test login', () => {
   afterEach(() => {

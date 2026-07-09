@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "pnpm --dir apps/portal build",
+    "lint": "pnpm --dir apps/portal lint",
+    "test": "pnpm --dir apps/portal test"
   },
   "keywords": [],
   "author": "",

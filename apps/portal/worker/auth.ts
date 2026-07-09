@@ -2071,7 +2071,8 @@ function isPlaceholderTaskRelatedToLesson(
 ) {
   if (
     task.relatedLesson?.schoolDate === lesson.schoolDate &&
-    task.relatedLesson.periodNumber === lesson.periodNumber
+    task.relatedLesson.periodNumber === lesson.periodNumber &&
+    task.relatedLesson.lessonName === lesson.lessonName
   ) {
     return true
   }

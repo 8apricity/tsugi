@@ -86,6 +86,11 @@ function createDailyPlanTestEnv() {
         schoolEmail: 'test-student-2025-2-3-humanities-1@example.invalid',
         displayName: 'Test 2025 Humanities 1',
       },
+      {
+        studentAccountId: 'test-student-2026-2-4-humanities-1',
+        schoolEmail: 'test-student-2026-2-4-humanities-1@example.invalid',
+        displayName: 'Test Class 4 Humanities 1',
+      },
     ],
     TEST_SCHOOL_STRUCTURE: {
       schoolYears: [
@@ -115,6 +120,12 @@ function createDailyPlanTestEnv() {
           grade: 2,
           classNumber: 3,
         },
+        {
+          classId: '2026-grade-2-class-4',
+          schoolYear: 2026,
+          grade: 2,
+          classNumber: 4,
+        },
       ],
       tracks: [
         {
@@ -131,6 +142,11 @@ function createDailyPlanTestEnv() {
           trackId: '2026-grade-2-class-3-science',
           classId: '2026-grade-2-class-3',
           trackName: '理科',
+        },
+        {
+          trackId: '2026-grade-2-class-4-humanities',
+          classId: '2026-grade-2-class-4',
+          trackName: '文科',
         },
       ],
     },
@@ -163,6 +179,16 @@ function createDailyPlanTestEnv() {
         classId: '2025-grade-2-class-3',
         trackId: '2025-grade-2-class-3-humanities',
         selectedAt: 1743465600000,
+        endedAt: null,
+      },
+      {
+        studentAffiliationId: 'test-affiliation-2026-class-4-humanities',
+        studentAccountId: 'test-student-2026-2-4-humanities-1',
+        schoolYear: 2026,
+        grade: 2,
+        classId: '2026-grade-2-class-4',
+        trackId: '2026-grade-2-class-4-humanities',
+        selectedAt: 1775001600000,
         endedAt: null,
       },
     ],
@@ -383,6 +409,92 @@ describe('Daily Plan read API', () => {
         { periodNumber: 7, lessonName: '' },
       ],
     })
+  })
+
+  it('keeps Humanities and Science split Lessons distinct for the same Lesson Slot', async () => {
+    const env = createDailyPlanTestEnv()
+    const humanitiesCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const scienceCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-science-1',
+    )
+
+    const humanitiesResponse = await readDailyPlan(
+      env,
+      humanitiesCookie,
+      '2026-07-07',
+    )
+    const scienceResponse = await readDailyPlan(
+      env,
+      scienceCookie,
+      '2026-07-07',
+    )
+    const humanitiesBody = (await humanitiesResponse.json()) as {
+      periods: Array<{ periodNumber: number; lessonName: string }>
+    }
+    const scienceBody = (await scienceResponse.json()) as {
+      periods: Array<{ periodNumber: number; lessonName: string }>
+    }
+
+    expect(humanitiesBody.periods[1]).toEqual({
+      periodNumber: 2,
+      lessonName: '古典',
+      hasTasks: false,
+      notes: [],
+    })
+    expect(scienceBody.periods[1]).toEqual({
+      periodNumber: 2,
+      lessonName: '生物',
+      hasTasks: false,
+      notes: [],
+    })
+  })
+
+  it('keeps 2026 Grade 2 Class 4 Lesson Slots blank while placeholder Tasks and Notes remain visible', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-10')
+    const body = (await response.json()) as {
+      periods: Array<{
+        lessonName: string
+        hasTasks: boolean
+        notes: Array<unknown>
+      }>
+      tasks: Array<unknown>
+      notes: Array<unknown>
+    }
+
+    expect(response.status).toBe(200)
+    expect(body.periods).toEqual(
+      Array.from({ length: 7 }, (_, index) => ({
+        periodNumber: index + 1,
+        lessonName: '',
+        hasTasks: false,
+        notes:
+          index === 1
+            ? [
+                {
+                  noteId: 'placeholder-lesson-slot-note-2026-07-10-period-2',
+                  body: 'Placeholder: Bring dictionary for second period.',
+                  relatedContext: {
+                    type: 'lesson-slot',
+                    schoolDate: '2026-07-10',
+                    periodNumber: 2,
+                  },
+                },
+              ]
+            : [],
+      })),
+    )
+    expect(body.tasks.length).toBeGreaterThan(0)
+    expect(body.notes.length).toBeGreaterThan(0)
   })
 
   it('keeps blank Lesson Slots empty instead of returning a rest label', async () => {

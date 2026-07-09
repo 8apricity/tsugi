@@ -102,6 +102,36 @@ export type StandardTimetableEntry = {
   lessonName: string
 }
 
+type DailyPlanTask = {
+  taskId: string
+  title: string
+  dueDate?: string
+  dueLabel?: string
+  relatedLesson?: {
+    schoolDate: string
+    periodNumber: number
+    lessonName: string
+  }
+  relatedLessonName?: string
+  completed: false
+}
+
+type DailyPlanNote = {
+  noteId: string
+  body: string
+  relatedContext:
+    | {
+        type: 'lesson-slot'
+        schoolDate: string
+        periodNumber: number
+      }
+    | {
+        type: 'school-date'
+        schoolDate: string
+      }
+    | null
+}
+
 export type DailyPlanResult =
   | {
       status: 'ready'
@@ -115,7 +145,14 @@ export type DailyPlanResult =
         trackId: string
         trackName: string
       }
-      periods: Array<{ periodNumber: number; lessonName: string }>
+      periods: Array<{
+        periodNumber: number
+        lessonName: string
+        hasTasks: boolean
+        notes: DailyPlanNote[]
+      }>
+      tasks: DailyPlanTask[]
+      notes: DailyPlanNote[]
     }
   | { status: 'unauthenticated' }
   | { status: 'invalid-date' }
@@ -1903,6 +1940,14 @@ export async function readDailyPlan({
       entriesByPeriod.set(entry.periodNumber, entry)
     }
   }
+  const placeholderTasks = listPlaceholderDailyPlanTasks(resolvedSchoolDate)
+  const placeholderNotes = listPlaceholderDailyPlanNotes(resolvedSchoolDate)
+  const placeholderLessonSlotNotes = placeholderNotes.filter(
+    (note) => note.relatedContext?.type === 'lesson-slot',
+  )
+  const placeholderBottomNotes = placeholderNotes.filter(
+    (note) => note.relatedContext?.type !== 'lesson-slot',
+  )
 
   return {
     status: 'ready',
@@ -1918,13 +1963,124 @@ export async function readDailyPlan({
     },
     periods: Array.from({ length: 7 }, (_, index) => {
       const periodNumber = index + 1
+      const lessonName = entriesByPeriod.get(periodNumber)?.lessonName ?? ''
 
       return {
         periodNumber,
-        lessonName: entriesByPeriod.get(periodNumber)?.lessonName ?? '',
+        lessonName,
+        hasTasks: placeholderTasks.some((task) =>
+          isPlaceholderTaskRelatedToLesson(task, {
+            schoolDate: resolvedSchoolDate,
+            periodNumber,
+            lessonName,
+          }),
+        ),
+        notes: placeholderLessonSlotNotes.filter(
+          (note) =>
+            note.relatedContext?.type === 'lesson-slot' &&
+            note.relatedContext.periodNumber === periodNumber,
+        ),
       }
     }),
+    tasks: placeholderTasks,
+    notes: placeholderBottomNotes,
   }
+}
+
+const placeholderDailyPlanTasks: DailyPlanTask[] = [
+  {
+    taskId: 'placeholder-task-geography-worksheet',
+    title: 'Placeholder: Bring geography worksheet',
+    dueDate: '2026-07-10',
+    relatedLesson: {
+      schoolDate: '2026-07-10',
+      periodNumber: 1,
+      lessonName: '地理',
+    },
+    completed: false,
+  },
+  {
+    taskId: 'placeholder-task-modern-japanese-reading',
+    title: 'Placeholder: Modern Japanese reading',
+    dueLabel: '今日',
+    relatedLessonName: '現代文',
+    completed: false,
+  },
+]
+
+const placeholderDailyPlanNotes: DailyPlanNote[] = [
+  {
+    noteId: 'placeholder-lesson-slot-note-2026-07-10-period-2',
+    body: 'Placeholder: Bring dictionary for second period.',
+    relatedContext: {
+      type: 'lesson-slot',
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+    },
+  },
+  {
+    noteId: 'placeholder-school-date-note-2026-07-10',
+    body: 'Placeholder: Submit library form today.',
+    relatedContext: {
+      type: 'school-date',
+      schoolDate: '2026-07-10',
+    },
+  },
+  {
+    noteId: 'placeholder-school-date-note-2026-07-12',
+    body: 'Placeholder: Other School Date note.',
+    relatedContext: {
+      type: 'school-date',
+      schoolDate: '2026-07-12',
+    },
+  },
+  {
+    noteId: 'placeholder-no-context-note',
+    body: 'Placeholder: Student council announcement.',
+    relatedContext: null,
+  },
+]
+
+function listPlaceholderDailyPlanTasks(schoolDate: string) {
+  return placeholderDailyPlanTasks.filter((task) => {
+    if (task.relatedLesson?.schoolDate) {
+      return task.relatedLesson.schoolDate === schoolDate
+    }
+
+    return true
+  })
+}
+
+function listPlaceholderDailyPlanNotes(schoolDate: string) {
+  return placeholderDailyPlanNotes.filter((note) => {
+    if (!note.relatedContext) {
+      return true
+    }
+
+    return note.relatedContext.schoolDate === schoolDate
+  })
+}
+
+function isPlaceholderTaskRelatedToLesson(
+  task: DailyPlanTask,
+  lesson: {
+    schoolDate: string
+    periodNumber: number
+    lessonName: string
+  },
+) {
+  if (
+    task.relatedLesson?.schoolDate === lesson.schoolDate &&
+    task.relatedLesson.periodNumber === lesson.periodNumber
+  ) {
+    return true
+  }
+
+  return (
+    !task.relatedLesson &&
+    task.relatedLessonName !== undefined &&
+    task.relatedLessonName === lesson.lessonName
+  )
 }
 
 export async function logoutStudentSession({

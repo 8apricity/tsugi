@@ -440,6 +440,98 @@ describe('Daily Plan read API', () => {
       schoolYear: 2026,
     })
   })
+
+  it('returns placeholder Tasks and derives Lesson task markers from related Lesson and Lesson Name', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-10')
+    const body = (await response.json()) as {
+      tasks: Array<Record<string, unknown>>
+      periods: Array<Record<string, unknown>>
+    }
+
+    expect(response.status).toBe(200)
+    expect(body.tasks).toMatchObject([
+      {
+        title: 'Placeholder: Bring geography worksheet',
+        dueDate: '2026-07-10',
+        relatedLesson: {
+          schoolDate: '2026-07-10',
+          periodNumber: 1,
+          lessonName: '地理',
+        },
+        completed: false,
+      },
+      {
+        title: 'Placeholder: Modern Japanese reading',
+        dueLabel: '今日',
+        relatedLessonName: '現代文',
+        completed: false,
+      },
+    ])
+    expect(body.tasks[0]).not.toHaveProperty('dueReference')
+    expect(body.tasks[0]).not.toHaveProperty('duePeriodNumber')
+    expect(body.tasks[1]).not.toHaveProperty('dueReference')
+    expect(body.tasks[1]).not.toHaveProperty('duePeriodNumber')
+    expect(body.periods).toMatchObject([
+      { periodNumber: 1, lessonName: '地理', hasTasks: true },
+      { periodNumber: 2, lessonName: '', hasTasks: false },
+      { periodNumber: 3, lessonName: '', hasTasks: false },
+      { periodNumber: 4, lessonName: '現代文', hasTasks: true },
+      { periodNumber: 5, lessonName: '', hasTasks: false },
+      { periodNumber: 6, lessonName: '', hasTasks: false },
+      { periodNumber: 7, lessonName: '', hasTasks: false },
+    ])
+  })
+
+  it('returns placeholder Notes for Lesson Slots, School Date, and no-context only when visible for the selected Daily Plan', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-10')
+    const body = (await response.json()) as {
+      notes: Array<Record<string, unknown>>
+      periods: Array<Record<string, unknown>>
+    }
+
+    expect(response.status).toBe(200)
+    expect(body.periods[0]).toMatchObject({ periodNumber: 1, notes: [] })
+    expect(body.periods[1]).toMatchObject({
+      periodNumber: 2,
+      notes: [
+        {
+          body: 'Placeholder: Bring dictionary for second period.',
+          relatedContext: {
+            type: 'lesson-slot',
+            schoolDate: '2026-07-10',
+            periodNumber: 2,
+          },
+        },
+      ],
+    })
+    expect(body.notes).toEqual([
+      {
+        noteId: 'placeholder-school-date-note-2026-07-10',
+        body: 'Placeholder: Submit library form today.',
+        relatedContext: {
+          type: 'school-date',
+          schoolDate: '2026-07-10',
+        },
+      },
+      {
+        noteId: 'placeholder-no-context-note',
+        body: 'Placeholder: Student council announcement.',
+        relatedContext: null,
+      },
+    ])
+  })
 })
 
 describe('test login', () => {

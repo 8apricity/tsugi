@@ -1,18 +1,18 @@
 import {
-  D1VerificationCodeStore,
-  InMemoryVerificationCodeStore,
+  createD1PersistenceAdapters,
+  createInMemoryPersistenceAdapters,
+  type PersistenceAdapters,
   type SchoolYearClassRecord,
   type SchoolYearRecord,
   type StandardTimetableEntry,
   type StudentAffiliation,
   type StudentAccount,
   type TrackRecord,
-  type VerificationCodeStore,
-} from "./auth";
+} from "./persistence";
 import { readDailyPlan, readDailyPlansRange } from "./dailyPlan";
 import { createStudentAccountAccess } from "./studentAccountAccess";
 
-const verificationCodeStores = new WeakMap<Env, VerificationCodeStore>();
+const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
 const setupSessionCookieName = "tsugi_setup";
 
@@ -22,18 +22,18 @@ class EmailDeliveryError extends Error {
   }
 }
 
-async function getVerificationCodeStore(env: Env) {
+async function getPersistenceAdapters(env: Env) {
   if (env.DB) {
-    return new D1VerificationCodeStore(env.DB);
+    return createD1PersistenceAdapters(env.DB);
   }
 
-  const existingStore = verificationCodeStores.get(env);
+  const existingAdapters = persistenceAdaptersByEnv.get(env);
 
-  if (existingStore) {
-    return existingStore;
+  if (existingAdapters) {
+    return existingAdapters;
   }
 
-  const store = new InMemoryVerificationCodeStore();
+  const adapters = createInMemoryPersistenceAdapters();
   const testStudentAccounts = (
     env as Env & { TEST_STUDENT_ACCOUNTS?: StudentAccount[] }
   ).TEST_STUDENT_ACCOUNTS;
@@ -56,7 +56,7 @@ async function getVerificationCodeStore(env: Env) {
   if (testStudentAccounts) {
     await Promise.all(
       testStudentAccounts.map((studentAccount) =>
-        store.saveStudentAccount(studentAccount),
+        adapters.seed.saveStudentAccount(studentAccount),
       ),
     );
   }
@@ -64,23 +64,23 @@ async function getVerificationCodeStore(env: Env) {
   if (testSchoolStructure) {
     await Promise.all(
       testSchoolStructure.schoolYears.map((schoolYear) =>
-        store.saveSchoolYear(schoolYear),
+        adapters.seed.saveSchoolYear(schoolYear),
       ),
     );
     await Promise.all(
       testSchoolStructure.classes.map((schoolClass) =>
-        store.saveSchoolYearClass(schoolClass),
+        adapters.seed.saveSchoolYearClass(schoolClass),
       ),
     );
     await Promise.all(
-      testSchoolStructure.tracks.map((track) => store.saveTrack(track)),
+      testSchoolStructure.tracks.map((track) => adapters.seed.saveTrack(track)),
     );
   }
 
   if (testStudentAffiliations) {
     await Promise.all(
       testStudentAffiliations.map((studentAffiliation) =>
-        store.saveStudentAffiliation(studentAffiliation),
+        adapters.seed.saveStudentAffiliation(studentAffiliation),
       ),
     );
   }
@@ -88,14 +88,14 @@ async function getVerificationCodeStore(env: Env) {
   if (testStandardTimetableEntries) {
     await Promise.all(
       testStandardTimetableEntries.map((standardTimetableEntry) =>
-        store.saveStandardTimetableEntry(standardTimetableEntry),
+        adapters.seed.saveStandardTimetableEntry(standardTimetableEntry),
       ),
     );
   }
 
-  verificationCodeStores.set(env, store);
+  persistenceAdaptersByEnv.set(env, adapters);
 
-  return store;
+  return adapters;
 }
 
 async function sendVerificationCode(
@@ -123,8 +123,11 @@ async function sendVerificationCode(
 }
 
 async function getStudentAccountAccess(env: Env) {
+  const persistence = await getPersistenceAdapters(env);
+
   return createStudentAccountAccess({
-    store: await getVerificationCodeStore(env),
+    studentAccountStore: persistence.studentAccount,
+    studentAffiliationStore: persistence.studentAffiliation,
     sendEmail: async ({ schoolEmail, code }) => {
       try {
         await sendVerificationCode(env, schoolEmail, code);
@@ -347,11 +350,13 @@ export default {
     }
 
     if (url.pathname === "/api/daily-plan" && request.method === "GET") {
+      const persistence = await getPersistenceAdapters(env);
       const result = await readDailyPlan({
         sessionToken: readCookie(request, sessionCookieName),
         schoolDate: url.searchParams.get("date"),
         now: Date.now(),
-        store: await getVerificationCodeStore(env),
+        studentAccountStore: persistence.studentAccount,
+        dailyPlanStore: persistence.dailyPlan,
       });
 
       if (result.status === "unauthenticated") {
@@ -374,12 +379,14 @@ export default {
     }
 
     if (url.pathname === "/api/daily-plans" && request.method === "GET") {
+      const persistence = await getPersistenceAdapters(env);
       const result = await readDailyPlansRange({
         sessionToken: readCookie(request, sessionCookieName),
         start: url.searchParams.get("start"),
         end: url.searchParams.get("end"),
         now: Date.now(),
-        store: await getVerificationCodeStore(env),
+        studentAccountStore: persistence.studentAccount,
+        dailyPlanStore: persistence.dailyPlan,
       });
 
       if (result.status === "unauthenticated") {

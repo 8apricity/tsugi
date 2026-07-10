@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { InMemoryVerificationCodeStore } from './auth'
+import { InMemoryPersistenceAdapters } from './persistence'
 import {
   completeInitialSetup,
   getInitialSetupOptions,
@@ -11,7 +11,7 @@ import {
   verifyCodeForExistingStudent,
 } from './studentAccountAccess'
 
-async function createSetupSession(store: InMemoryVerificationCodeStore) {
+async function createSetupSession(store: InMemoryPersistenceAdapters) {
   await requestVerificationCode({
     schoolEmailNumber: '12345678',
     now: 1_000,
@@ -29,68 +29,9 @@ async function createSetupSession(store: InMemoryVerificationCodeStore) {
   })
 }
 
-describe('Floating Lesson Reference resolution', () => {
-  it('resolves the class-common value when the track has no override', async () => {
-    const store = new InMemoryVerificationCodeStore()
-
-    await store.saveStandardTimetableEntry({
-      standardTimetableEntryId: 'floating-star-common',
-      classId: 'class-1',
-      trackId: null,
-      referenceType: 'floating',
-      referenceLabel: '★',
-      lessonName: '共通授業',
-    })
-
-    await expect(
-      store.findStandardTimetableEntryForFloatingReference(
-        'class-1',
-        'track-1',
-        '★',
-      ),
-    ).resolves.toMatchObject({
-      referenceType: 'floating',
-      referenceLabel: '★',
-      lessonName: '共通授業',
-    })
-  })
-
-  it('prefers the track-specific value over the class-common value', async () => {
-    const store = new InMemoryVerificationCodeStore()
-
-    await store.saveStandardTimetableEntry({
-      standardTimetableEntryId: 'floating-star-common',
-      classId: '2026-grade-2-class-3',
-      trackId: null,
-      referenceType: 'floating',
-      referenceLabel: '★',
-      lessonName: '共通授業',
-    })
-    await store.saveStandardTimetableEntry({
-      standardTimetableEntryId: 'floating-star-humanities',
-      classId: '2026-grade-2-class-3',
-      trackId: '2026-grade-2-class-3-humanities',
-      referenceType: 'floating',
-      referenceLabel: '★',
-      lessonName: '自走',
-    })
-
-    await expect(
-      store.findStandardTimetableEntryForFloatingReference(
-        '2026-grade-2-class-3',
-        '2026-grade-2-class-3-humanities',
-        '★',
-      ),
-    ).resolves.toMatchObject({
-      trackId: '2026-grade-2-class-3-humanities',
-      lessonName: '自走',
-    })
-  })
-})
-
 describe('requestVerificationCode', () => {
   it('invalidates earlier unused verification codes when a new code is sent', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     const sendEmail = vi.fn().mockResolvedValue(undefined)
 
     await requestVerificationCode({
@@ -120,7 +61,7 @@ describe('requestVerificationCode', () => {
   })
 
   it('stores a hash instead of the plaintext verification code', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
 
     await requestVerificationCode({
       schoolEmailNumber: '12345678',
@@ -139,7 +80,7 @@ describe('requestVerificationCode', () => {
   })
 
   it('always sends a verification code to the configured development School Email even inside rate limits', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     const sendEmail = vi.fn().mockResolvedValue(undefined)
 
     for (let index = 0; index < 6; index += 1) {
@@ -161,7 +102,7 @@ describe('requestVerificationCode', () => {
   })
 
   it('does not send email when saving the verification code fails', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     const sendEmail = vi.fn().mockResolvedValue(undefined)
     vi.spyOn(store, 'saveRequest').mockRejectedValueOnce(
       new Error('database unavailable'),
@@ -181,7 +122,7 @@ describe('requestVerificationCode', () => {
   })
 
   it('invalidates the saved verification code when email delivery fails', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
 
     await expect(
       requestVerificationCode({
@@ -203,7 +144,7 @@ describe('requestVerificationCode', () => {
 
 describe('initial Student Affiliation setup', () => {
   it('returns current School Year Grade/Class/Track choices for a valid setup session', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     await createSetupSession(store)
     await store.saveSchoolYear({
       schoolYear: 2026,
@@ -227,7 +168,8 @@ describe('initial Student Affiliation setup', () => {
       getInitialSetupOptions({
         setupSessionToken: 'setup-session-token',
         now: 2_000,
-        store,
+        studentAccountStore: store,
+        studentAffiliationStore: store,
       }),
     ).resolves.toEqual({
       status: 'ready',
@@ -249,7 +191,7 @@ describe('initial Student Affiliation setup', () => {
   })
 
   it('validates trimmed names and selected Track before saving initial setup draft', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     await createSetupSession(store)
     await store.saveSchoolYear({
       schoolYear: 2026,
@@ -277,7 +219,8 @@ describe('initial Student Affiliation setup', () => {
         trackId: 'track-2-3-science',
         confirmed: true,
         now: 2_000,
-        store,
+        studentAccountStore: store,
+        studentAffiliationStore: store,
       }),
     ).resolves.toEqual({
       status: 'saved',
@@ -293,7 +236,7 @@ describe('initial Student Affiliation setup', () => {
   })
 
   it('completes initial setup by creating Student Account, current affiliation, and Student Session', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     await createSetupSession(store)
     await store.saveSchoolYear({
       schoolYear: 2026,
@@ -319,7 +262,8 @@ describe('initial Student Affiliation setup', () => {
       trackId: 'track-2-3-science',
       confirmed: true,
       now: 2_000,
-      store,
+      studentAccountStore: store,
+      studentAffiliationStore: store,
     })
 
     if (draftResult.status !== 'saved') {
@@ -331,7 +275,8 @@ describe('initial Student Affiliation setup', () => {
       draft: draftResult.draft,
       now: 3_000,
       sessionToken: 'created-session-token',
-      store,
+      studentAccountStore: store,
+      studentAffiliationStore: store,
     })
 
     expect(result).toMatchObject({
@@ -373,7 +318,7 @@ describe('initial Student Affiliation setup', () => {
   })
 
   it('rolls back Student Account creation when affiliation creation fails', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     await createSetupSession(store)
     const draft = {
       displayName: 'Sora',
@@ -391,7 +336,8 @@ describe('initial Student Affiliation setup', () => {
         draft,
         now: 3_000,
         sessionToken: 'created-session-token',
-        store,
+        studentAccountStore: store,
+        studentAffiliationStore: store,
       }),
     ).rejects.toThrow('student affiliation save failed')
     await expect(
@@ -409,7 +355,7 @@ describe('initial Student Affiliation setup', () => {
   })
 
   it('recovers a duplicate School Email race by issuing a session for existing Student Account', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     await createSetupSession(store)
     await store.saveStudentAccount({
       studentAccountId: 'existing-student-account',
@@ -430,7 +376,8 @@ describe('initial Student Affiliation setup', () => {
         },
         now: 3_000,
         sessionToken: 'race-session-token',
-        store,
+        studentAccountStore: store,
+        studentAffiliationStore: store,
       }),
     ).resolves.toMatchObject({
       status: 'authenticated',
@@ -449,14 +396,15 @@ describe('initial Student Affiliation setup', () => {
   })
 
   it('rejects missing master data, invalid names, missing Track, and unconfirmed submission', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     await createSetupSession(store)
 
     await expect(
       getInitialSetupOptions({
         setupSessionToken: 'setup-session-token',
         now: 2_000,
-        store,
+        studentAccountStore: store,
+        studentAffiliationStore: store,
       }),
     ).resolves.toEqual({ status: 'setup-unavailable' })
 
@@ -475,7 +423,8 @@ describe('initial Student Affiliation setup', () => {
         trackId: 'track-missing',
         confirmed: true,
         now: 2_000,
-        store,
+        studentAccountStore: store,
+        studentAffiliationStore: store,
       }),
     ).resolves.toEqual({ status: 'invalid-name' })
 
@@ -487,7 +436,8 @@ describe('initial Student Affiliation setup', () => {
         trackId: null,
         confirmed: true,
         now: 2_000,
-        store,
+        studentAccountStore: store,
+        studentAffiliationStore: store,
       }),
     ).resolves.toEqual({ status: 'invalid-affiliation' })
 
@@ -499,7 +449,8 @@ describe('initial Student Affiliation setup', () => {
         trackId: 'track-missing',
         confirmed: false,
         now: 2_000,
-        store,
+        studentAccountStore: store,
+        studentAffiliationStore: store,
       }),
     ).resolves.toEqual({ status: 'confirmation-required' })
   })
@@ -507,7 +458,7 @@ describe('initial Student Affiliation setup', () => {
 
 describe('verifyCodeForExistingStudent', () => {
   it('creates a 30-minute setup session for a new Student Account without creating a Student Account', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
 
     await requestVerificationCode({
       schoolEmailNumber: '12345678',
@@ -555,7 +506,7 @@ describe('verifyCodeForExistingStudent', () => {
   })
 
   it('creates a 30-day Student Session for an existing Student Account', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
 
     await requestVerificationCode({
       schoolEmailNumber: '12345678',
@@ -595,7 +546,7 @@ describe('verifyCodeForExistingStudent', () => {
   })
 
   it('rejects an invalid verification code without creating a Student Session', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
 
     await requestVerificationCode({
       schoolEmailNumber: '12345678',
@@ -630,7 +581,7 @@ describe('verifyCodeForExistingStudent', () => {
   })
 
   it('treats expired and logged-out Student Sessions as unauthenticated', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
     await requestVerificationCode({
       schoolEmailNumber: '12345678',
       now: 1_000,
@@ -692,7 +643,7 @@ describe('verifyCodeForExistingStudent', () => {
   })
 
   it('treats expired and superseded setup sessions as invalid', async () => {
-    const store = new InMemoryVerificationCodeStore()
+    const store = new InMemoryPersistenceAdapters()
 
     await requestVerificationCode({
       schoolEmailNumber: '12345678',

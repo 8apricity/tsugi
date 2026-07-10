@@ -1,10 +1,11 @@
 import {
   type InitialSetupDraft,
   type SchoolYearClassRecord,
+  type StudentAccountAccessStore,
+  type StudentAffiliationSetupStore,
   type StudentAccount,
   type TrackRecord,
-  type VerificationCodeStore,
-} from './auth'
+} from './persistence'
 
 const schoolEmailNumberPattern = /^[0-9]{8}$/
 const resendCooldownMs = 60_000
@@ -39,7 +40,7 @@ export type RequestVerificationCodeInput = {
   schoolEmailNumber: unknown
   now: number
   code: string
-  store: VerificationCodeStore
+  store: StudentAccountAccessStore
   sendEmail: SendVerificationCodeEmail
 }
 
@@ -54,7 +55,7 @@ export type VerifyCodeForExistingStudentInput = {
   now: number
   sessionToken: string
   setupSessionToken: string
-  store: VerificationCodeStore
+  store: StudentAccountAccessStore
 }
 
 export type VerifyCodeForExistingStudentResult =
@@ -125,14 +126,16 @@ export type CreateTestLoginSessionResult =
 
 
 type StudentAccountAccessDependencies = {
-  store: VerificationCodeStore
+  studentAccountStore: StudentAccountAccessStore
+  studentAffiliationStore: StudentAffiliationSetupStore
   sendEmail: SendVerificationCodeEmail
   generateVerificationCode?: () => string
   generateSessionToken?: () => string
 }
 
 export function createStudentAccountAccess({
-  store,
+  studentAccountStore,
+  studentAffiliationStore,
   sendEmail,
   generateVerificationCode = createVerificationCode,
   generateSessionToken = createSessionToken,
@@ -149,7 +152,7 @@ export function createStudentAccountAccess({
         schoolEmailNumber,
         now,
         code: generateVerificationCode(),
-        store,
+        store: studentAccountStore,
         sendEmail,
       })
     },
@@ -169,7 +172,7 @@ export function createStudentAccountAccess({
         now,
         sessionToken: generateSessionToken(),
         setupSessionToken: generateSessionToken(),
-        store,
+        store: studentAccountStore,
       })
     },
 
@@ -180,7 +183,11 @@ export function createStudentAccountAccess({
       sessionToken: string | null
       now: number
     }) {
-      return readStudentSession({ sessionToken, now, store })
+      return readStudentSession({
+        sessionToken,
+        now,
+        store: studentAccountStore,
+      })
     },
 
     readSetupSession({
@@ -190,7 +197,11 @@ export function createStudentAccountAccess({
       setupSessionToken: string | null
       now: number
     }) {
-      return readSetupSession({ setupSessionToken, now, store })
+      return readSetupSession({
+        setupSessionToken,
+        now,
+        store: studentAccountStore,
+      })
     },
 
     getInitialSetupOptions({
@@ -200,7 +211,12 @@ export function createStudentAccountAccess({
       setupSessionToken: string | null
       now: number
     }) {
-      return getInitialSetupOptions({ setupSessionToken, now, store })
+      return getInitialSetupOptions({
+        setupSessionToken,
+        now,
+        studentAccountStore,
+        studentAffiliationStore,
+      })
     },
 
     async completeInitialSetup({
@@ -225,7 +241,8 @@ export function createStudentAccountAccess({
         trackId,
         confirmed,
         now,
-        store,
+        studentAccountStore,
+        studentAffiliationStore,
       })
 
       if (draftResult.status !== 'saved') {
@@ -237,7 +254,8 @@ export function createStudentAccountAccess({
         draft: draftResult.draft,
         now,
         sessionToken: generateSessionToken(),
-        store,
+        studentAccountStore,
+        studentAffiliationStore,
       })
     },
 
@@ -252,7 +270,7 @@ export function createStudentAccountAccess({
         studentAccountId,
         now,
         sessionToken: generateSessionToken(),
-        store,
+        store: studentAccountStore,
       })
     },
 
@@ -263,7 +281,11 @@ export function createStudentAccountAccess({
       sessionToken: string | null
       now: number
     }) {
-      return logoutStudentSession({ sessionToken, now, store })
+      return logoutStudentSession({
+        sessionToken,
+        now,
+        store: studentAccountStore,
+      })
     },
   }
 }
@@ -431,7 +453,7 @@ export async function readSetupSession({
 }: {
   setupSessionToken: string | null
   now: number
-  store: VerificationCodeStore
+  store: StudentAccountAccessStore
 }): Promise<ReadSetupSessionResult> {
   if (!setupSessionToken) {
     return { status: 'invalid' }
@@ -451,28 +473,36 @@ export async function readSetupSession({
 export async function getInitialSetupOptions({
   setupSessionToken,
   now,
-  store,
+  studentAccountStore,
+  studentAffiliationStore,
 }: {
   setupSessionToken: string | null
   now: number
-  store: VerificationCodeStore
+  studentAccountStore: StudentAccountAccessStore
+  studentAffiliationStore: StudentAffiliationSetupStore
 }): Promise<InitialSetupOptionsResult> {
-  const setupSession = await readSetupSession({ setupSessionToken, now, store })
+  const setupSession = await readSetupSession({
+    setupSessionToken,
+    now,
+    store: studentAccountStore,
+  })
 
   if (setupSession.status === 'invalid') {
     return { status: 'invalid-setup-session' }
   }
 
-  const currentSchoolYear = await store.findCurrentSchoolYear()
+  const currentSchoolYear = await studentAffiliationStore.findCurrentSchoolYear()
 
   if (!currentSchoolYear) {
     return { status: 'setup-unavailable' }
   }
 
-  const classes = await store.listClassesForSchoolYear(
+  const classes = await studentAffiliationStore.listClassesForSchoolYear(
     currentSchoolYear.schoolYear,
   )
-  const tracks = await store.listTracksForSchoolYear(currentSchoolYear.schoolYear)
+  const tracks = await studentAffiliationStore.listTracksForSchoolYear(
+    currentSchoolYear.schoolYear,
+  )
 
   if (classes.length === 0 || tracks.length === 0) {
     return { status: 'setup-unavailable' }
@@ -533,7 +563,8 @@ export async function submitInitialSetupDraft({
   trackId,
   confirmed,
   now,
-  store,
+  studentAccountStore,
+  studentAffiliationStore,
 }: {
   setupSessionToken: string | null
   displayName: unknown
@@ -541,7 +572,8 @@ export async function submitInitialSetupDraft({
   trackId: unknown
   confirmed: unknown
   now: number
-  store: VerificationCodeStore
+  studentAccountStore: StudentAccountAccessStore
+  studentAffiliationStore: StudentAffiliationSetupStore
 }): Promise<SubmitInitialSetupDraftResult> {
   if (confirmed !== true) {
     return { status: 'confirmation-required' }
@@ -563,19 +595,23 @@ export async function submitInitialSetupDraft({
     return { status: 'invalid-affiliation' }
   }
 
-  const setupSession = await readSetupSession({ setupSessionToken, now, store })
+  const setupSession = await readSetupSession({
+    setupSessionToken,
+    now,
+    store: studentAccountStore,
+  })
 
   if (setupSession.status === 'invalid') {
     return { status: 'invalid-setup-session' }
   }
 
-  const currentSchoolYear = await store.findCurrentSchoolYear()
+  const currentSchoolYear = await studentAffiliationStore.findCurrentSchoolYear()
 
   if (!currentSchoolYear) {
     return { status: 'setup-unavailable' }
   }
 
-  const resolvedTrack = await store.findTrackWithClass(
+  const resolvedTrack = await studentAffiliationStore.findTrackWithClass(
     trackId,
     currentSchoolYear.schoolYear,
   )
@@ -593,7 +629,7 @@ export async function submitInitialSetupDraft({
     trackId: resolvedTrack.track.trackId,
   }
 
-  await store.saveInitialSetupDraft(
+  await studentAffiliationStore.saveInitialSetupDraft(
     await hashToken(setupSessionToken ?? ''),
     draft,
   )
@@ -606,20 +642,22 @@ export async function completeInitialSetup({
   draft,
   now,
   sessionToken,
-  store,
+  studentAccountStore,
+  studentAffiliationStore,
 }: {
   setupSessionToken: string | null
   draft: InitialSetupDraft
   now: number
   sessionToken: string
-  store: VerificationCodeStore
+  studentAccountStore: StudentAccountAccessStore
+  studentAffiliationStore: StudentAffiliationSetupStore
 }): Promise<CompleteInitialSetupResult> {
   if (!setupSessionToken) {
     return { status: 'invalid-setup-session' }
   }
 
   const setupSessionTokenHash = await hashToken(setupSessionToken)
-  const setupSession = await store.findSetupSessionByTokenHash(
+  const setupSession = await studentAccountStore.findSetupSessionByTokenHash(
     setupSessionTokenHash,
   )
 
@@ -628,21 +666,22 @@ export async function completeInitialSetup({
   }
 
   const expiresAt = now + studentSessionLifetimeMs
-  const studentAccount = await store.completeInitialSetupTransaction({
-    setupSessionTokenHash,
-    schoolEmail: setupSession.schoolEmail,
-    studentAccountId: crypto.randomUUID(),
-    studentAffiliationId: crypto.randomUUID(),
-    displayName: draft.displayName,
-    realName: draft.realName,
-    schoolYear: draft.schoolYear,
-    grade: draft.grade,
-    classId: draft.classId,
-    trackId: draft.trackId,
-    sessionTokenHash: await hashToken(sessionToken),
-    now,
-    expiresAt,
-  })
+  const studentAccount =
+    await studentAffiliationStore.completeInitialSetupTransaction({
+      setupSessionTokenHash,
+      schoolEmail: setupSession.schoolEmail,
+      studentAccountId: crypto.randomUUID(),
+      studentAffiliationId: crypto.randomUUID(),
+      displayName: draft.displayName,
+      realName: draft.realName,
+      schoolYear: draft.schoolYear,
+      grade: draft.grade,
+      classId: draft.classId,
+      trackId: draft.trackId,
+      sessionTokenHash: await hashToken(sessionToken),
+      now,
+      expiresAt,
+    })
 
   return {
     status: 'authenticated',
@@ -661,7 +700,7 @@ export async function createTestLoginSession({
   studentAccountId: unknown
   now: number
   sessionToken: string
-  store: VerificationCodeStore
+  store: StudentAccountAccessStore
 }): Promise<CreateTestLoginSessionResult> {
   if (
     typeof studentAccountId !== 'string' ||
@@ -704,7 +743,7 @@ export async function readStudentSession({
 }: {
   sessionToken: string | null
   now: number
-  store: VerificationCodeStore
+  store: StudentAccountAccessStore
 }): Promise<ReadStudentSessionResult> {
   if (!sessionToken) {
     return { status: 'unauthenticated' }
@@ -734,7 +773,7 @@ export async function logoutStudentSession({
 }: {
   sessionToken: string | null
   now: number
-  store: VerificationCodeStore
+  store: StudentAccountAccessStore
 }) {
   if (!sessionToken) {
     return

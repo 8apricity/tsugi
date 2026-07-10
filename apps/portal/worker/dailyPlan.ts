@@ -1,11 +1,12 @@
 import {
+  type DailyPlanStore,
   type PeriodStandardTimetableEntry,
   type SchoolYearClassRecord,
   type SchoolYearRecord,
   type StudentAffiliation,
+  type StudentAccountAccessStore,
   type TrackRecord,
-  type VerificationCodeStore,
-} from './auth'
+} from './persistence'
 import { readStudentSession } from './studentAccountAccess'
 
 type DailyPlanTask = {
@@ -82,14 +83,20 @@ export async function readDailyPlan({
   sessionToken,
   schoolDate,
   now,
-  store,
+  studentAccountStore,
+  dailyPlanStore,
 }: {
   sessionToken: string | null
   schoolDate: string | null
   now: number
-  store: VerificationCodeStore
+  studentAccountStore: StudentAccountAccessStore
+  dailyPlanStore: DailyPlanStore
 }): Promise<DailyPlanResult> {
-  const session = await readStudentSession({ sessionToken, now, store })
+  const session = await readStudentSession({
+    sessionToken,
+    now,
+    store: studentAccountStore,
+  })
 
   if (session.status === 'unauthenticated') {
     return { status: 'unauthenticated' }
@@ -104,7 +111,7 @@ export async function readDailyPlan({
   return readDailyPlanForAuthenticatedStudent({
     studentAccountId: session.studentAccount.studentAccountId,
     schoolDate: resolvedSchoolDate,
-    store,
+    store: dailyPlanStore,
   })
 }
 
@@ -113,15 +120,21 @@ export async function readDailyPlansRange({
   start,
   end,
   now,
-  store,
+  studentAccountStore,
+  dailyPlanStore,
 }: {
   sessionToken: string | null
   start: string | null
   end: string | null
   now: number
-  store: VerificationCodeStore
+  studentAccountStore: StudentAccountAccessStore
+  dailyPlanStore: DailyPlanStore
 }): Promise<DailyPlansRangeResult> {
-  const session = await readStudentSession({ sessionToken, now, store })
+  const session = await readStudentSession({
+    sessionToken,
+    now,
+    store: studentAccountStore,
+  })
 
   if (session.status === 'unauthenticated') {
     return { status: 'unauthenticated' }
@@ -144,7 +157,7 @@ export async function readDailyPlansRange({
 
   const sharedContext = await resolveDailyPlanSharedContext({
     studentAccountId: session.studentAccount.studentAccountId,
-    store,
+    store: dailyPlanStore,
   })
 
   if (sharedContext.status !== 'ready') {
@@ -159,11 +172,12 @@ export async function readDailyPlansRange({
 
   await Promise.all(
     [...uniqueWeekdays].map(async (weekday) => {
-      const entries = await store.listStandardTimetableEntriesForWeekday(
-        sharedContext.studentAffiliation.classId,
-        sharedContext.studentAffiliation.trackId,
-        weekday,
-      )
+      const entries =
+        await dailyPlanStore.listStandardTimetableEntriesForWeekday(
+          sharedContext.studentAffiliation.classId,
+          sharedContext.studentAffiliation.trackId,
+          weekday,
+        )
       entriesByWeekday.set(
         weekday,
         buildEntriesByPeriod(entries, sharedContext.studentAffiliation.trackId),
@@ -200,7 +214,7 @@ async function readDailyPlanForAuthenticatedStudent({
 }: {
   studentAccountId: string
   schoolDate: string
-  store: VerificationCodeStore
+  store: DailyPlanStore
 }): Promise<DailyPlanResult> {
   const sharedContext = await resolveDailyPlanSharedContext({
     studentAccountId,
@@ -234,7 +248,7 @@ async function resolveDailyPlanSharedContext({
   store,
 }: {
   studentAccountId: string
-  store: VerificationCodeStore
+  store: DailyPlanStore
 }): Promise<
   | {
       status: 'ready'

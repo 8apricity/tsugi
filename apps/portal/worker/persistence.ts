@@ -1,3 +1,4 @@
+// Domain-local seams share storage implementations without sharing caller interfaces.
 export type VerificationCodeRequestRecord = {
   emailVerificationCodeId?: string
   schoolEmail: string
@@ -108,7 +109,7 @@ export type CompleteInitialSetupTransactionInput = {
   expiresAt: number
 }
 
-export type VerificationCodeStore = {
+export type StudentAccountAccessStore = {
   findRequestsBySchoolEmail(
     schoolEmail: string,
   ): Promise<VerificationCodeRequestRecord[]>
@@ -140,9 +141,9 @@ export type VerificationCodeStore = {
     schoolEmail: string,
     invalidatedAt: number,
   ): Promise<void>
-  saveSchoolYear(record: SchoolYearRecord): Promise<void>
-  saveSchoolYearClass(record: SchoolYearClassRecord): Promise<void>
-  saveTrack(record: TrackRecord): Promise<void>
+}
+
+export type StudentAffiliationSetupStore = {
   findCurrentSchoolYear(): Promise<SchoolYearRecord | null>
   listClassesForSchoolYear(schoolYear: number): Promise<SchoolYearClassRecord[]>
   listTracksForSchoolYear(schoolYear: number): Promise<TrackRecord[]>
@@ -150,27 +151,6 @@ export type VerificationCodeStore = {
     trackId: string,
     schoolYear: number,
   ): Promise<{ track: TrackRecord; schoolClass: SchoolYearClassRecord } | null>
-  findSchoolYearClassById(
-    classId: string,
-    schoolYear: number,
-  ): Promise<SchoolYearClassRecord | null>
-  findTrackById(trackId: string): Promise<TrackRecord | null>
-  findCurrentStudentAffiliation(
-    studentAccountId: string,
-    schoolYear: number,
-  ): Promise<StudentAffiliation | null>
-  saveStudentAffiliation(record: StudentAffiliation): Promise<void>
-  saveStandardTimetableEntry(record: StandardTimetableEntry): Promise<void>
-  listStandardTimetableEntriesForWeekday(
-    classId: string,
-    trackId: string,
-    weekday: number,
-  ): Promise<PeriodStandardTimetableEntry[]>
-  findStandardTimetableEntryForFloatingReference(
-    classId: string,
-    trackId: string,
-    referenceLabel: string,
-  ): Promise<FloatingStandardTimetableEntry | null>
   saveInitialSetupDraft(
     setupSessionTokenHash: string,
     draft: InitialSetupDraft,
@@ -180,7 +160,46 @@ export type VerificationCodeStore = {
   ): Promise<StudentAccount>
 }
 
-export class InMemoryVerificationCodeStore implements VerificationCodeStore {
+export type DailyPlanStore = {
+  findCurrentSchoolYear(): Promise<SchoolYearRecord | null>
+  findSchoolYearClassById(
+    classId: string,
+    schoolYear: number,
+  ): Promise<SchoolYearClassRecord | null>
+  findTrackById(trackId: string): Promise<TrackRecord | null>
+  findCurrentStudentAffiliation(
+    studentAccountId: string,
+    schoolYear: number,
+  ): Promise<StudentAffiliation | null>
+  listStandardTimetableEntriesForWeekday(
+    classId: string,
+    trackId: string,
+    weekday: number,
+  ): Promise<PeriodStandardTimetableEntry[]>
+}
+
+export type PersistenceSeedStore = {
+  saveStudentAccount(record: StudentAccount): Promise<void>
+  saveSchoolYear(record: SchoolYearRecord): Promise<void>
+  saveSchoolYearClass(record: SchoolYearClassRecord): Promise<void>
+  saveTrack(record: TrackRecord): Promise<void>
+  saveStudentAffiliation(record: StudentAffiliation): Promise<void>
+  saveStandardTimetableEntry(record: StandardTimetableEntry): Promise<void>
+}
+
+export type PersistenceAdapters = {
+  studentAccount: StudentAccountAccessStore
+  studentAffiliation: StudentAffiliationSetupStore
+  dailyPlan: DailyPlanStore
+  seed: PersistenceSeedStore
+}
+
+export class InMemoryPersistenceAdapters
+  implements
+    StudentAccountAccessStore,
+    StudentAffiliationSetupStore,
+    DailyPlanStore
+{
   private records: VerificationCodeRequestRecord[] = []
   private studentAccounts: StudentAccount[] = []
   private studentSessions: StudentSession[] = []
@@ -570,7 +589,12 @@ type StandardTimetableEntryRow = {
   lesson_name: string
 }
 
-export class D1VerificationCodeStore implements VerificationCodeStore {
+export class D1PersistenceAdapters
+  implements
+    StudentAccountAccessStore,
+    StudentAffiliationSetupStore,
+    DailyPlanStore
+{
   private readonly db: D1Database
 
   constructor(db: D1Database) {
@@ -1255,6 +1279,28 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
 
       return recoveredStudentAccount
     }
+  }
+}
+
+export function createInMemoryPersistenceAdapters(): PersistenceAdapters {
+  const implementation = new InMemoryPersistenceAdapters()
+
+  return {
+    studentAccount: implementation,
+    studentAffiliation: implementation,
+    dailyPlan: implementation,
+    seed: implementation,
+  }
+}
+
+export function createD1PersistenceAdapters(db: D1Database): PersistenceAdapters {
+  const implementation = new D1PersistenceAdapters(db)
+
+  return {
+    studentAccount: implementation,
+    studentAffiliation: implementation,
+    dailyPlan: implementation,
+    seed: implementation,
   }
 }
 

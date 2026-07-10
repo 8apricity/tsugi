@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { InMemoryVerificationCodeStore } from './auth'
+import { createInMemoryPersistenceAdapters } from './persistence'
 import { readDailyPlan, readDailyPlansRange } from './dailyPlan'
 import { createStudentAccountAccess } from './studentAccountAccess'
 
@@ -7,31 +7,31 @@ const studentAccountId = 'test-student-2026-2-3-humanities-1'
 const sessionToken = 'daily-plan-test-session'
 
 async function createReadyDailyPlanStore() {
-  const store = new InMemoryVerificationCodeStore()
+  const store = createInMemoryPersistenceAdapters()
 
-  await store.saveStudentAccount({
+  await store.seed.saveStudentAccount({
     studentAccountId,
     schoolEmail: 'test-student@example.invalid',
     displayName: 'Test Student',
   })
-  await store.saveSchoolYear({
+  await store.seed.saveSchoolYear({
     schoolYear: 2026,
     startsOn: '2026-04-01',
     endsOn: '2027-03-31',
     isCurrent: true,
   })
-  await store.saveSchoolYearClass({
+  await store.seed.saveSchoolYearClass({
     classId: '2026-grade-2-class-3',
     schoolYear: 2026,
     grade: 2,
     classNumber: 3,
   })
-  await store.saveTrack({
+  await store.seed.saveTrack({
     trackId: '2026-grade-2-class-3-humanities',
     classId: '2026-grade-2-class-3',
     trackName: '文科',
   })
-  await store.saveStudentAffiliation({
+  await store.seed.saveStudentAffiliation({
     studentAffiliationId: 'affiliation-1',
     studentAccountId,
     schoolYear: 2026,
@@ -41,7 +41,7 @@ async function createReadyDailyPlanStore() {
     selectedAt: Date.UTC(2026, 3, 1),
     endedAt: null,
   })
-  await store.saveStandardTimetableEntry({
+  await store.seed.saveStandardTimetableEntry({
     standardTimetableEntryId: 'fri-1-common',
     classId: '2026-grade-2-class-3',
     trackId: null,
@@ -50,7 +50,7 @@ async function createReadyDailyPlanStore() {
     periodNumber: 1,
     lessonName: '地理',
   })
-  await store.saveStandardTimetableEntry({
+  await store.seed.saveStandardTimetableEntry({
     standardTimetableEntryId: 'fri-4-common',
     classId: '2026-grade-2-class-3',
     trackId: null,
@@ -59,7 +59,7 @@ async function createReadyDailyPlanStore() {
     periodNumber: 4,
     lessonName: '共通授業',
   })
-  await store.saveStandardTimetableEntry({
+  await store.seed.saveStandardTimetableEntry({
     standardTimetableEntryId: 'fri-4-humanities',
     classId: '2026-grade-2-class-3',
     trackId: '2026-grade-2-class-3-humanities',
@@ -69,7 +69,8 @@ async function createReadyDailyPlanStore() {
     lessonName: '現代文',
   })
   await createStudentAccountAccess({
-    store,
+    studentAccountStore: store.studentAccount,
+    studentAffiliationStore: store.studentAffiliation,
     sendEmail: async () => undefined,
     generateSessionToken: () => sessionToken,
   }).createTestLoginSession({
@@ -82,11 +83,13 @@ async function createReadyDailyPlanStore() {
 
 describe('Daily Plan module', () => {
   it('rejects an unauthenticated Daily Plan read', async () => {
+    const store = createInMemoryPersistenceAdapters()
     const result = await readDailyPlan({
       sessionToken: null,
       schoolDate: '2026-07-10',
       now: Date.UTC(2026, 6, 10),
-      store: new InMemoryVerificationCodeStore(),
+      studentAccountStore: store.studentAccount,
+      dailyPlanStore: store.dailyPlan,
     })
 
     expect(result).toEqual({ status: 'unauthenticated' })
@@ -98,7 +101,8 @@ describe('Daily Plan module', () => {
       sessionToken,
       schoolDate: '2026-07-10',
       now: Date.UTC(2026, 6, 10),
-      store,
+      studentAccountStore: store.studentAccount,
+      dailyPlanStore: store.dailyPlan,
     })
 
     expect(result).toMatchObject({
@@ -147,7 +151,8 @@ describe('Daily Plan module', () => {
       sessionToken,
       schoolDate: null,
       now: Date.UTC(2026, 6, 9, 15),
-      store,
+      studentAccountStore: store.studentAccount,
+      dailyPlanStore: store.dailyPlan,
     })
 
     expect(result).toMatchObject({ status: 'ready', schoolDate: '2026-07-10' })
@@ -161,7 +166,8 @@ describe('Daily Plan module', () => {
         sessionToken,
         schoolDate: '2026-02-31',
         now: Date.UTC(2026, 6, 10),
-        store,
+        studentAccountStore: store.studentAccount,
+        dailyPlanStore: store.dailyPlan,
       }),
     ).resolves.toEqual({ status: 'invalid-date' })
     await expect(
@@ -170,7 +176,8 @@ describe('Daily Plan module', () => {
         start: '2026-07-01',
         end: '2026-08-01',
         now: Date.UTC(2026, 6, 10),
-        store,
+        studentAccountStore: store.studentAccount,
+        dailyPlanStore: store.dailyPlan,
       }),
     ).resolves.toEqual({ status: 'date-range-too-large' })
   })
@@ -182,7 +189,8 @@ describe('Daily Plan module', () => {
       start: '2026-07-09',
       end: '2026-07-11',
       now: Date.UTC(2026, 6, 10),
-      store,
+      studentAccountStore: store.studentAccount,
+      dailyPlanStore: store.dailyPlan,
     })
 
     expect(result.status).toBe('ready')

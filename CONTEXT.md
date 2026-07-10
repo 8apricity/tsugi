@@ -66,7 +66,7 @@ School-life information that students share inside the school community, such as
 _Avoid_: Official information, school announcement, post
 
 **Active Shared Information**:
-Shared information whose latest applied change makes it currently reflected in a student's daily plan or reference view. Active shared information may come from an accepted change proposal or a direct change, and stops being active when a later shared information change removes it.
+Shared information whose latest applied change makes it currently reflected in student-facing plans or views, such as a daily plan or multi-day plan. Active shared information may come from an accepted change proposal or a direct change, and stops being active when a later shared information change removes it.
 _Avoid_: Master, official information, approved item, canonical item
 
 **Shared Information Change**:
@@ -130,16 +130,20 @@ A report shown to one responding student that compares their own submitted answe
 _Avoid_: Public ranking, individual comparison
 
 **Timetable**:
-A student's displayed schedule for a school day, week, or school year, produced from a standard timetable and later timetable changes. A timetable can differ by grade, class, track, and individual student.
+A student's displayed schedule for a school day, date range, or school year, produced from a standard timetable and later timetable changes. A timetable can differ by grade, class, track, and individual student.
 _Avoid_: Calendar, event list
 
 **Daily Plan**:
-A student's day-level view of their timetable and tasks after applying relevant timetable layers and target scopes. The daily plan is the primary way a student checks what they need to attend or complete.
-_Avoid_: Calendar, dashboard, home feed
+A student's day-level view centered on the timetable, with the tasks and notes relevant to that school date after applying relevant timetable layers and selected target scopes. The daily plan is the primary way a student checks what they need to attend, complete, or notice for the day.
+_Avoid_: Daily timetable, calendar, dashboard, home feed
 
-**Reference View**:
-A way for a student to inspect shared information outside their own target scopes. Reference views may be useful for group-scoped timetables and tasks, while individual-scoped tasks, threads, and test result collections stay limited to their target scope.
-_Avoid_: Daily plan, public feed, unrestricted access
+**Multi-Day Plan**:
+A student's view across multiple school dates, made from the selected daily plans and centered on the timetable across those dates. A multi-day plan is the primary way a student checks the shape of several school days without treating the range as a fixed week.
+_Avoid_: Weekly plan, calendar, dashboard
+
+**Reference Scope**:
+A target scope outside a student's own current target scopes that the student chooses to inspect through a daily plan or multi-day plan. Reference scopes may be useful for track-scoped timetables, tasks, and notes; in a class with only one track, the track scope effectively acts like a class scope. Individual-scoped tasks, notes, threads, and test result collections stay limited to their target scope.
+_Avoid_: Reference view, public feed, unrestricted access
 
 **Standard Timetable**:
 The baseline recurring timetable for a class and track in a school year. Timetable changes refer back to this baseline with period references such as "Monday period 1".
@@ -162,7 +166,7 @@ A scope-specific source of timetable changes, ordered from broader to narrower s
 _Avoid_: Calendar layer, priority, category
 
 **Track**:
-A curriculum grouping under a class that can split the standard timetable. Track names may appear across multiple classes, but Tsugi currently treats track as subordinate to class for target scopes.
+A curriculum grouping under a class that can split the standard timetable. Track names may appear across multiple classes, but Tsugi currently treats track as subordinate to class for target scopes. In a class with only one track, the track scope effectively acts like a class scope.
 _Avoid_: Course, subject, class
 
 **Lesson Slot**:
@@ -206,8 +210,8 @@ The type of active shared information, such as task, timetable change, or note. 
 _Avoid_: Category edit, type conversion
 
 **Creator Scope**:
-The rule that a student can propose or directly make changes to shared information, collections, or threads only for a target scope that includes that student.
-_Avoid_: Admin permission, ownership
+The rule that a student can propose or directly make changes to shared information, collections, or threads only for a target scope that includes that student. Choosing a reference scope does not expand creator scope.
+_Avoid_: Reference scope, admin permission, ownership
 
 **Group**:
 A future target scope for students who share an activity or affiliation outside grade, class, and track, such as a club. Groups are reserved for later and are not part of the initial core.
@@ -253,13 +257,19 @@ Developer: Does the standard timetable change each term?
 Domain expert: No. The standard timetable is owned by the school year; term-like differences are timetable changes from that baseline.
 
 Developer: What should a student check first in Tsugi?
-Domain expert: Their daily plan, because it shows the timetable and tasks that apply to them for the day.
+Domain expert: Their daily plan, because it shows the timetable, tasks, and notes that apply to them for the day.
+
+Developer: When should a student use a multi-day plan instead?
+Domain expert: When they want to see the shape of several school days across multiple daily plans.
 
 Developer: Is active shared information the source of truth?
 Domain expert: No. Active shared information is the current state students see, while shared information changes explain how that state came to be.
 
 Developer: Can a student inspect another class's timetable?
-Domain expert: Yes, through a reference view. It does not make that other class's entries part of the student's daily plan.
+Domain expert: Yes, by choosing that class as a reference scope. It does not make that other class's entries part of the student's own target scopes.
+
+Developer: Can a student create a timetable change for a reference scope?
+Domain expert: No. Reference scope is for inspection; creator scope still requires the target scope to include the student.
 
 Developer: If a student-level timetable change overrides a class-level change, does the class-level active shared information disappear?
 Domain expert: No. The student sees the student-level entry in the displayed timetable, but can still inspect the broader class-level entry.

@@ -197,6 +197,7 @@ function createDailyPlanTestEnv() {
         standardTimetableEntryId: 'mon-1-common',
         classId: '2026-grade-2-class-3',
         trackId: null,
+        referenceType: 'period',
         weekday: 1,
         periodNumber: 1,
         lessonName: '数Ⅱβ',
@@ -205,6 +206,7 @@ function createDailyPlanTestEnv() {
         standardTimetableEntryId: 'tue-2-humanities',
         classId: '2026-grade-2-class-3',
         trackId: '2026-grade-2-class-3-humanities',
+        referenceType: 'period',
         weekday: 2,
         periodNumber: 2,
         lessonName: '古典',
@@ -213,6 +215,7 @@ function createDailyPlanTestEnv() {
         standardTimetableEntryId: 'tue-2-science',
         classId: '2026-grade-2-class-3',
         trackId: '2026-grade-2-class-3-science',
+        referenceType: 'period',
         weekday: 2,
         periodNumber: 2,
         lessonName: '生物',
@@ -221,6 +224,7 @@ function createDailyPlanTestEnv() {
         standardTimetableEntryId: 'fri-1-common',
         classId: '2026-grade-2-class-3',
         trackId: null,
+        referenceType: 'period',
         weekday: 5,
         periodNumber: 1,
         lessonName: '地理',
@@ -229,6 +233,7 @@ function createDailyPlanTestEnv() {
         standardTimetableEntryId: 'fri-4-common',
         classId: '2026-grade-2-class-3',
         trackId: null,
+        referenceType: 'period',
         weekday: 5,
         periodNumber: 4,
         lessonName: 'class-common fallback',
@@ -237,6 +242,7 @@ function createDailyPlanTestEnv() {
         standardTimetableEntryId: 'fri-4-humanities',
         classId: '2026-grade-2-class-3',
         trackId: '2026-grade-2-class-3-humanities',
+        referenceType: 'period',
         weekday: 5,
         periodNumber: 4,
         lessonName: '現代文',
@@ -245,9 +251,18 @@ function createDailyPlanTestEnv() {
         standardTimetableEntryId: 'sat-1-common',
         classId: '2026-grade-2-class-3',
         trackId: null,
+        referenceType: 'period',
         weekday: 6,
         periodNumber: 1,
         lessonName: '三丘SHSP',
+      },
+      {
+        standardTimetableEntryId: 'floating-star-humanities',
+        classId: '2026-grade-2-class-3',
+        trackId: '2026-grade-2-class-3-humanities',
+        referenceType: 'floating',
+        referenceLabel: '★',
+        lessonName: '自走',
       },
     ],
   } as unknown as Env
@@ -500,10 +515,10 @@ describe('Daily Plan read API', () => {
           index === 1
             ? [
                 {
-                  noteId: 'placeholder-lesson-slot-note-2026-07-10-period-2',
+                  noteId: 'placeholder-daily-lesson-note-2026-07-10-period-2',
                   body: 'Placeholder: Bring dictionary for second period.',
                   relatedContext: {
-                    type: 'lesson-slot',
+                    type: 'daily-lesson',
                     schoolDate: '2026-07-10',
                     periodNumber: 2,
                   },
@@ -539,6 +554,22 @@ describe('Daily Plan read API', () => {
         { periodNumber: 7, lessonName: '' },
       ],
     })
+  })
+
+  it('does not turn a Floating Lesson Reference into a Daily Lesson without a Timetable Change', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-10')
+    const body = (await response.json()) as {
+      periods: Array<{ lessonName: string }>
+    }
+
+    expect(response.status).toBe(200)
+    expect(body.periods.map((period) => period.lessonName)).not.toContain('自走')
   })
 
   it('fails cleanly for invalid date query values', async () => {
@@ -619,7 +650,7 @@ describe('Daily Plan read API', () => {
     ])
   })
 
-  it('returns placeholder Notes for Lesson Slots, School Date, and no-context only when visible for the selected Daily Plan', async () => {
+  it('returns placeholder Notes for Daily Lessons, School Date, and no-context only when visible for the selected Daily Plan', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(
       env,
@@ -638,9 +669,10 @@ describe('Daily Plan read API', () => {
       periodNumber: 2,
       notes: [
         {
+          noteId: 'placeholder-daily-lesson-note-2026-07-10-period-2',
           body: 'Placeholder: Bring dictionary for second period.',
           relatedContext: {
-            type: 'lesson-slot',
+            type: 'daily-lesson',
             schoolDate: '2026-07-10',
             periodNumber: 2,
           },

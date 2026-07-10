@@ -41,7 +41,7 @@ export type DailyPlanNoteForCache = {
   body: string;
   relatedContext:
     | {
-        type: "lesson-slot";
+        type: "daily-lesson";
         schoolDate: string;
         periodNumber: number;
       }

@@ -93,14 +93,27 @@ export type StudentAffiliation = {
   endedAt: number | null
 }
 
-export type StandardTimetableEntry = {
+type StandardTimetableEntryBase = {
   standardTimetableEntryId: string
   classId: string
   trackId: string | null
-  weekday: number
-  periodNumber: number
   lessonName: string
 }
+
+export type PeriodStandardTimetableEntry = StandardTimetableEntryBase & {
+  referenceType: 'period'
+  weekday: number
+  periodNumber: number
+}
+
+export type FloatingStandardTimetableEntry = StandardTimetableEntryBase & {
+  referenceType: 'floating'
+  referenceLabel: string
+}
+
+export type StandardTimetableEntry =
+  | PeriodStandardTimetableEntry
+  | FloatingStandardTimetableEntry
 
 type DailyPlanTask = {
   taskId: string
@@ -121,7 +134,7 @@ type DailyPlanNote = {
   body: string
   relatedContext:
     | {
-        type: 'lesson-slot'
+        type: 'daily-lesson'
         schoolDate: string
         periodNumber: number
       }
@@ -245,7 +258,12 @@ export type VerificationCodeStore = {
     classId: string,
     trackId: string,
     weekday: number,
-  ): Promise<StandardTimetableEntry[]>
+  ): Promise<PeriodStandardTimetableEntry[]>
+  findStandardTimetableEntryForFloatingReference(
+    classId: string,
+    trackId: string,
+    referenceLabel: string,
+  ): Promise<FloatingStandardTimetableEntry | null>
   saveInitialSetupDraft(
     setupSessionTokenHash: string,
     draft: InitialSetupDraft,
@@ -575,11 +593,28 @@ export class InMemoryVerificationCodeStore implements VerificationCodeStore {
     weekday: number,
   ) {
     return this.standardTimetableEntries.filter(
-      (entry) =>
+      (entry): entry is PeriodStandardTimetableEntry =>
+        entry.referenceType === 'period' &&
         entry.classId === classId &&
         entry.weekday === weekday &&
         (entry.trackId === null || entry.trackId === trackId),
     )
+  }
+
+  async findStandardTimetableEntryForFloatingReference(
+    classId: string,
+    trackId: string,
+    referenceLabel: string,
+  ) {
+    const entries = this.standardTimetableEntries.filter(
+      (entry): entry is FloatingStandardTimetableEntry =>
+        entry.referenceType === 'floating' &&
+        entry.classId === classId &&
+        (entry.trackId === null || entry.trackId === trackId) &&
+        entry.referenceLabel === referenceLabel,
+    )
+
+    return entries.find((entry) => entry.trackId === trackId) ?? entries[0] ?? null
   }
 
   async completeInitialSetupTransaction(
@@ -714,8 +749,10 @@ type StandardTimetableEntryRow = {
   standard_timetable_entry_id: string
   class_id: string
   track_id: string | null
-  weekday: number
-  period_number: number
+  reference_type: 'period' | 'floating'
+  weekday: number | null
+  period_number: number | null
+  reference_label: string | null
   lesson_name: string
 }
 
@@ -1151,17 +1188,21 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
           standard_timetable_entry_id,
           class_id,
           track_id,
+          reference_type,
           weekday,
           period_number,
+          reference_label,
           lesson_name
-        ) values (?, ?, ?, ?, ?, ?)`,
+        ) values (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.standardTimetableEntryId,
         record.classId,
         record.trackId,
-        record.weekday,
-        record.periodNumber,
+        record.referenceType,
+        record.referenceType === 'period' ? record.weekday : null,
+        record.referenceType === 'period' ? record.periodNumber : null,
+        record.referenceType === 'floating' ? record.referenceLabel : null,
         record.lessonName,
       )
       .run()
@@ -1174,9 +1215,11 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
   ) {
     const { results } = await this.db
       .prepare(
-        `select standard_timetable_entry_id, class_id, track_id, weekday, period_number, lesson_name
+        `select standard_timetable_entry_id, class_id, track_id, reference_type,
+                weekday, period_number, reference_label, lesson_name
          from standard_timetable_entries
          where class_id = ?
+           and reference_type = 'period'
            and weekday = ?
            and (track_id is null or track_id = ?)
          order by period_number asc, track_id is not null asc`,
@@ -1184,7 +1227,30 @@ export class D1VerificationCodeStore implements VerificationCodeStore {
       .bind(classId, weekday, trackId)
       .all<StandardTimetableEntryRow>()
 
-    return results.map(mapStandardTimetableEntryRow)
+    return results.map(mapPeriodStandardTimetableEntryRow)
+  }
+
+  async findStandardTimetableEntryForFloatingReference(
+    classId: string,
+    trackId: string,
+    referenceLabel: string,
+  ) {
+    const row = await this.db
+      .prepare(
+        `select standard_timetable_entry_id, class_id, track_id, reference_type,
+                weekday, period_number, reference_label, lesson_name
+         from standard_timetable_entries
+         where class_id = ?
+           and reference_type = 'floating'
+           and reference_label = ?
+           and (track_id is null or track_id = ?)
+         order by track_id is not null desc
+         limit 1`,
+      )
+      .bind(classId, referenceLabel, trackId)
+      .first<StandardTimetableEntryRow>()
+
+    return row ? mapFloatingStandardTimetableEntryRow(row) : null
   }
 
   async saveInitialSetupDraft(
@@ -1426,15 +1492,41 @@ function mapStudentAffiliationRow(row: StudentAffiliationRow): StudentAffiliatio
   }
 }
 
-function mapStandardTimetableEntryRow(
+function mapPeriodStandardTimetableEntryRow(
   row: StandardTimetableEntryRow,
-): StandardTimetableEntry {
+): PeriodStandardTimetableEntry {
+  if (
+    row.reference_type !== 'period' ||
+    row.weekday === null ||
+    row.period_number === null
+  ) {
+    throw new Error('invalid period Standard Timetable entry')
+  }
+
   return {
     standardTimetableEntryId: row.standard_timetable_entry_id,
     classId: row.class_id,
     trackId: row.track_id,
+    referenceType: 'period',
     weekday: row.weekday,
     periodNumber: row.period_number,
+    lessonName: row.lesson_name,
+  }
+}
+
+function mapFloatingStandardTimetableEntryRow(
+  row: StandardTimetableEntryRow,
+): FloatingStandardTimetableEntry {
+  if (row.reference_type !== 'floating' || row.reference_label === null) {
+    throw new Error('invalid floating Standard Timetable entry')
+  }
+
+  return {
+    standardTimetableEntryId: row.standard_timetable_entry_id,
+    classId: row.class_id,
+    trackId: row.track_id,
+    referenceType: 'floating',
+    referenceLabel: row.reference_label,
     lessonName: row.lesson_name,
   }
 }
@@ -1957,7 +2049,10 @@ export async function readDailyPlansRange({
     return sharedContext
   }
 
-  const entriesByWeekday = new Map<number, Map<number, StandardTimetableEntry>>()
+  const entriesByWeekday = new Map<
+    number,
+    Map<number, PeriodStandardTimetableEntry>
+  >()
   const uniqueWeekdays = new Set(schoolDates.map(weekdayForSchoolDate))
 
   await Promise.all(
@@ -2088,10 +2183,10 @@ async function resolveDailyPlanSharedContext({
 }
 
 function buildEntriesByPeriod(
-  standardTimetableEntries: StandardTimetableEntry[],
+  standardTimetableEntries: PeriodStandardTimetableEntry[],
   trackId: string,
 ) {
-  const entriesByPeriod = new Map<number, StandardTimetableEntry>()
+  const entriesByPeriod = new Map<number, PeriodStandardTimetableEntry>()
 
   for (const entry of standardTimetableEntries) {
     const existing = entriesByPeriod.get(entry.periodNumber)
@@ -2114,16 +2209,16 @@ function buildReadyDailyPlan({
     Awaited<ReturnType<typeof resolveDailyPlanSharedContext>>,
     { status: 'ready' }
   >
-  entriesByPeriod: Map<number, StandardTimetableEntry>
+  entriesByPeriod: Map<number, PeriodStandardTimetableEntry>
 }): Extract<DailyPlanResult, { status: 'ready' }> {
   const weekday = weekdayForSchoolDate(schoolDate)
   const placeholderTasks = listPlaceholderDailyPlanTasks(schoolDate)
   const placeholderNotes = listPlaceholderDailyPlanNotes(schoolDate)
-  const placeholderLessonSlotNotes = placeholderNotes.filter(
-    (note) => note.relatedContext?.type === 'lesson-slot',
+  const placeholderDailyLessonNotes = placeholderNotes.filter(
+    (note) => note.relatedContext?.type === 'daily-lesson',
   )
   const placeholderBottomNotes = placeholderNotes.filter(
-    (note) => note.relatedContext?.type !== 'lesson-slot',
+    (note) => note.relatedContext?.type !== 'daily-lesson',
   )
 
   return {
@@ -2152,9 +2247,9 @@ function buildReadyDailyPlan({
             lessonName,
           }),
         ),
-        notes: placeholderLessonSlotNotes.filter(
+        notes: placeholderDailyLessonNotes.filter(
           (note) =>
-            note.relatedContext?.type === 'lesson-slot' &&
+            note.relatedContext?.type === 'daily-lesson' &&
             note.relatedContext.periodNumber === periodNumber,
         ),
       }
@@ -2187,10 +2282,10 @@ const placeholderDailyPlanTasks: DailyPlanTask[] = [
 
 const placeholderDailyPlanNotes: DailyPlanNote[] = [
   {
-    noteId: 'placeholder-lesson-slot-note-2026-07-10-period-2',
+    noteId: 'placeholder-daily-lesson-note-2026-07-10-period-2',
     body: 'Placeholder: Bring dictionary for second period.',
     relatedContext: {
-      type: 'lesson-slot',
+      type: 'daily-lesson',
       schoolDate: '2026-07-10',
       periodNumber: 2,
     },

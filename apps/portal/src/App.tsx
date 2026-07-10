@@ -2,20 +2,13 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import "./App.css";
-import {
-  createDailyPlanCache,
-  type DailyPlanForCache as DailyPlan,
-} from "./dailyPlanCache";
-import {
-  buildDateHeader,
-  buildDateStrip,
-  formatCurrentJstSchoolDate,
-  shiftSchoolDate,
-} from "./dailyPlanView";
+import { createDailyPlanClient } from "./dailyPlanClient";
+import { buildDateHeader } from "./dailyPlanView";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -51,12 +44,6 @@ type InitialSetupOptions = {
   }>;
 };
 
-type DailyPlanState =
-  | { status: "loading" }
-  | { status: "ready"; dailyPlan: DailyPlan }
-  | { status: "affiliation-renewal-needed"; schoolYear: number }
-  | { status: "error" };
-
 function App() {
   const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
   const [schoolEmail, setSchoolEmail] = useState<string | null>(null);
@@ -76,25 +63,33 @@ function App() {
   const [confirmedSetup, setConfirmedSetup] = useState(false);
   const [status, setStatus] = useState<RequestStatus>("checking");
   const [message, setMessage] = useState<string | null>(null);
-  const [selectedSchoolDate, setSelectedSchoolDate] = useState(
-    formatCurrentJstSchoolDate(),
-  );
-  const [dateStrip, setDateStrip] = useState(() =>
-    buildDateStrip(formatCurrentJstSchoolDate(), DATE_PICKER_RADIUS),
-  );
-  const [currentSchoolDate, setCurrentSchoolDate] = useState(
-    formatCurrentJstSchoolDate(),
-  );
-  const [dailyPlanReloadToken, setDailyPlanReloadToken] = useState(0);
-  const [dailyPlanState, setDailyPlanState] = useState<DailyPlanState>({
-    status: "loading",
-  });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAreaRef = useRef<HTMLDivElement | null>(null);
-  const dailyPlanCacheRef = useRef<ReturnType<
-    typeof createDailyPlanCache
-  > | null>(null);
-  const dailyPlanCacheReloadTokenRef = useRef(dailyPlanReloadToken);
+  const [dailyPlanClient] = useState(() =>
+    createDailyPlanClient({
+      datePickerRadius: DATE_PICKER_RADIUS,
+      cacheRadius: DAILY_PLAN_PREFETCH_RADIUS,
+      fetchDailyPlans: async (start, end) => {
+        const response = await fetch(
+          `/api/daily-plans?start=${encodeURIComponent(
+            start,
+          )}&end=${encodeURIComponent(end)}`,
+        );
+
+        return response.json();
+      },
+    }),
+  );
+  const {
+    selectedSchoolDate,
+    currentSchoolDate,
+    dateStrip,
+    dailyPlanState,
+  } = useSyncExternalStore(
+    dailyPlanClient.subscribe,
+    dailyPlanClient.getSnapshot,
+    dailyPlanClient.getSnapshot,
+  );
   const datePickerRef = useRef<HTMLElement | null>(null);
   const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const datePickerScrollFrameRef = useRef<number | null>(null);
@@ -141,85 +136,21 @@ function App() {
   }, []);
 
   useEffect(() => {
+    return dailyPlanClient.subscribe(() => {
+      if (dailyPlanClient.getSnapshot().dailyPlanState.status === "unauthenticated") {
+        setStudentAccount(null);
+        setStatus("idle");
+      }
+    });
+  }, [dailyPlanClient]);
+
+  useEffect(() => {
     if (status !== "authenticated" || !studentAccount) {
       return;
     }
 
-    let cancelled = false;
-
-    async function loadDailyPlan() {
-      if (dailyPlanCacheReloadTokenRef.current !== dailyPlanReloadToken) {
-        dailyPlanCacheRef.current = null;
-        dailyPlanCacheReloadTokenRef.current = dailyPlanReloadToken;
-      }
-
-      const cache = getDailyPlanCache();
-      const cachedDailyPlan = cache.getCachedDailyPlan(selectedSchoolDate);
-
-      if (cachedDailyPlan) {
-        setDailyPlanState({ status: "ready", dailyPlan: cachedDailyPlan });
-      } else {
-        setDailyPlanState({ status: "loading" });
-      }
-
-      const body = await cache.getDailyPlan(selectedSchoolDate);
-
-      if (cancelled) {
-        return;
-      }
-
-      if (body.status === "unauthenticated") {
-        setStudentAccount(null);
-        setStatus("idle");
-        return;
-      }
-
-      if (body.status === "affiliation-renewal-needed") {
-        setDailyPlanState({
-          status: "affiliation-renewal-needed",
-          schoolYear: body.schoolYear,
-        });
-        return;
-      }
-
-      if (body.status !== "ready") {
-        setDailyPlanState({ status: "error" });
-        return;
-      }
-
-      setDailyPlanState({ status: "ready", dailyPlan: body });
-      void cache.prefetchNearLoadedEdge(selectedSchoolDate);
-    }
-
-    loadDailyPlan().catch(() => {
-      if (!cancelled) {
-        setDailyPlanState({ status: "error" });
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedSchoolDate, status, studentAccount, dailyPlanReloadToken]);
-
-  function getDailyPlanCache() {
-    if (!dailyPlanCacheRef.current) {
-      dailyPlanCacheRef.current = createDailyPlanCache({
-        radius: DAILY_PLAN_PREFETCH_RADIUS,
-        fetchDailyPlans: async (start, end) => {
-          const response = await fetch(
-            `/api/daily-plans?start=${encodeURIComponent(
-              start,
-            )}&end=${encodeURIComponent(end)}`,
-          );
-
-          return response.json();
-        },
-      });
-    }
-
-    return dailyPlanCacheRef.current;
-  }
+    void dailyPlanClient.loadSelectedDailyPlan();
+  }, [dailyPlanClient, status, studentAccount]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -254,7 +185,6 @@ function App() {
     const button = dateButtonRefs.current.get(selectedSchoolDate);
 
     if (!button) {
-      setDateStrip(buildDateStrip(selectedSchoolDate, DATE_PICKER_RADIUS));
       return;
     }
 
@@ -284,13 +214,8 @@ function App() {
   }, []);
 
   function selectSchoolDate(schoolDate: string, centerDatePicker: boolean) {
-    if (!dateStrip.some((date) => date.schoolDate === schoolDate)) {
-      setDateStrip(buildDateStrip(schoolDate, DATE_PICKER_RADIUS));
-    }
-
     shouldCenterDatePickerRef.current = centerDatePicker;
-    setSelectedSchoolDate(schoolDate);
-    setCurrentSchoolDate(formatCurrentJstSchoolDate());
+    void dailyPlanClient.selectSchoolDate(schoolDate);
   }
 
   function updateDatePickerCenterState(shouldSelectDate: boolean) {
@@ -405,10 +330,8 @@ function App() {
       return;
     }
 
-    selectSchoolDate(
-      shiftSchoolDate(selectedSchoolDate, deltaX < 0 ? 1 : -1),
-      true,
-    );
+    shouldCenterDatePickerRef.current = true;
+    void dailyPlanClient.shiftSelectedSchoolDate(deltaX < 0 ? 1 : -1);
   }
 
   async function loadInitialSetup() {
@@ -528,10 +451,8 @@ function App() {
     setSetupSchoolEmail(null);
     setVerificationCode("");
     setSetupOptions(null);
-    setDailyPlanState({ status: "loading" });
-    dailyPlanCacheRef.current = null;
+    dailyPlanClient.reset();
     setMenuOpen(false);
-    setCurrentSchoolDate(formatCurrentJstSchoolDate());
     setCompletedPlaceholderTaskIds(new Set());
     setStatus("idle");
     setMessage("ログアウトしました。");
@@ -694,7 +615,7 @@ function App() {
                 <button
                   className="button-secondary"
                   type="button"
-                  onClick={() => setDailyPlanReloadToken((token) => token + 1)}
+                  onClick={() => void dailyPlanClient.reload()}
                 >
                   再読み込み
                 </button>

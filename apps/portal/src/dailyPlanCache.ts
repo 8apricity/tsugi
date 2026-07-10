@@ -52,7 +52,7 @@ export type DailyPlanNoteForCache = {
     | null;
 };
 
-type DailyPlansFetchResult =
+export type DailyPlansFetchResult =
   | {
       status: "ready";
       dailyPlans: Record<string, DailyPlanForCache>;
@@ -63,16 +63,18 @@ type DailyPlansFetchResult =
   | { status: "daily-plan-unavailable" }
   | { status: "affiliation-renewal-needed"; schoolYear: number };
 
+export type FetchDailyPlans = (
+  start: string,
+  end: string,
+) => Promise<DailyPlansFetchResult>;
+
 export function createDailyPlanCache({
   fetchDailyPlans,
   radius,
   edgePrefetchThreshold = 5,
   edgePrefetchDays = 14,
 }: {
-  fetchDailyPlans: (
-    start: string,
-    end: string,
-  ) => Promise<DailyPlansFetchResult>;
+  fetchDailyPlans: FetchDailyPlans;
   radius: number;
   edgePrefetchThreshold?: number;
   edgePrefetchDays?: number;

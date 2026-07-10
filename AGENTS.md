@@ -11,6 +11,8 @@ Use the default Matt Pocock skill triage labels. See `docs/agents/triage-labels.
 ### Domain docs
 
 This repo uses a single-context domain-doc layout. See `docs/agents/domain.md`.
+Before starting work, read the repository-root `CONTEXT.md` to understand the
+domain language, constraints, and established decisions.
 
 ### UI design guidance
 

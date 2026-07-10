@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { InMemoryVerificationCodeStore } from './auth'
 import {
-  InMemoryVerificationCodeStore,
   completeInitialSetup,
   getInitialSetupOptions,
   submitInitialSetupDraft,
@@ -9,7 +9,7 @@ import {
   readSetupSession,
   requestVerificationCode,
   verifyCodeForExistingStudent,
-} from './auth'
+} from './studentAccountAccess'
 
 async function createSetupSession(store: InMemoryVerificationCodeStore) {
   await requestVerificationCode({

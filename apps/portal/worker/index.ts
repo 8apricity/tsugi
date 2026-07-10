@@ -1,24 +1,16 @@
 import {
   D1VerificationCodeStore,
   InMemoryVerificationCodeStore,
-  completeInitialSetup,
-  createTestLoginSession,
-  getInitialSetupOptions,
-  logoutStudentSession,
-  readSetupSession,
-  readStudentSession,
-  requestVerificationCode,
-  submitInitialSetupDraft,
   type SchoolYearClassRecord,
   type SchoolYearRecord,
   type StandardTimetableEntry,
   type StudentAffiliation,
-  verifyCodeForExistingStudent,
   type StudentAccount,
   type TrackRecord,
   type VerificationCodeStore,
 } from "./auth";
 import { readDailyPlan, readDailyPlansRange } from "./dailyPlan";
+import { createStudentAccountAccess } from "./studentAccountAccess";
 
 const verificationCodeStores = new WeakMap<Env, VerificationCodeStore>();
 const sessionCookieName = "tsugi_session";
@@ -106,24 +98,6 @@ async function getVerificationCodeStore(env: Env) {
   return store;
 }
 
-function generateVerificationCode() {
-  const values = new Uint32Array(1);
-  crypto.getRandomValues(values);
-
-  return String(values[0] % 1_000_000).padStart(6, "0");
-}
-
-function generateSessionToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function generateSetupSessionToken() {
-  return generateSessionToken();
-}
-
 async function sendVerificationCode(
   env: Env,
   schoolEmail: string,
@@ -146,6 +120,23 @@ async function sendVerificationCode(
   if (!response.ok) {
     throw new EmailDeliveryError();
   }
+}
+
+async function getStudentAccountAccess(env: Env) {
+  return createStudentAccountAccess({
+    store: await getVerificationCodeStore(env),
+    sendEmail: async ({ schoolEmail, code }) => {
+      try {
+        await sendVerificationCode(env, schoolEmail, code);
+      } catch (error) {
+        if (error instanceof EmailDeliveryError) {
+          throw error;
+        }
+
+        throw new EmailDeliveryError();
+      }
+    },
+  });
 }
 
 function readCookie(request: Request, name: string) {
@@ -218,11 +209,11 @@ export default {
       }
 
       const body = await request.json<{ studentAccountId?: unknown }>();
-      const result = await createTestLoginSession({
+      const result = await (
+        await getStudentAccountAccess(env)
+      ).createTestLoginSession({
         studentAccountId: body.studentAccountId,
         now: Date.now(),
-        sessionToken: generateSessionToken(),
-        store: await getVerificationCodeStore(env),
       });
 
       if (result.status === "not-found") {
@@ -253,22 +244,11 @@ export default {
       const body = await request.json<{ schoolEmailNumber?: unknown }>();
       const schoolEmailNumber = body.schoolEmailNumber;
 
-      const result = await requestVerificationCode({
+      const result = await (
+        await getStudentAccountAccess(env)
+      ).requestVerificationCode({
         schoolEmailNumber,
         now: Date.now(),
-        code: generateVerificationCode(),
-        store: await getVerificationCodeStore(env),
-        sendEmail: async ({ schoolEmail, code }) => {
-          try {
-            await sendVerificationCode(env, schoolEmail, code);
-          } catch (error) {
-            if (error instanceof EmailDeliveryError) {
-              throw error;
-            }
-
-            throw new EmailDeliveryError();
-          }
-        },
       }).catch((error: unknown) => {
         if (error instanceof EmailDeliveryError) {
           return { status: "delivery-failed" } as const;
@@ -309,15 +289,10 @@ export default {
         schoolEmailNumber?: unknown;
         code?: unknown;
       }>();
-      const sessionToken = generateSessionToken();
-      const setupSessionToken = generateSetupSessionToken();
-      const result = await verifyCodeForExistingStudent({
+      const result = await (await getStudentAccountAccess(env)).verifyCode({
         schoolEmailNumber: body.schoolEmailNumber,
         code: body.code,
         now: Date.now(),
-        sessionToken,
-        setupSessionToken,
-        store: await getVerificationCodeStore(env),
       });
 
       if (result.status === "invalid-verification") {
@@ -357,10 +332,11 @@ export default {
     }
 
     if (url.pathname === "/api/auth/session" && request.method === "GET") {
-      const result = await readStudentSession({
+      const result = await (
+        await getStudentAccountAccess(env)
+      ).readStudentSession({
         sessionToken: readCookie(request, sessionCookieName),
         now: Date.now(),
-        store: await getVerificationCodeStore(env),
       });
 
       if (result.status === "unauthenticated") {
@@ -430,20 +406,22 @@ export default {
     }
 
     if (url.pathname === "/api/auth/setup-session" && request.method === "GET") {
-      const result = await readSetupSession({
+      const result = await (
+        await getStudentAccountAccess(env)
+      ).readSetupSession({
         setupSessionToken: readCookie(request, setupSessionCookieName),
         now: Date.now(),
-        store: await getVerificationCodeStore(env),
       });
 
       return Response.json(result);
     }
 
     if (url.pathname === "/api/auth/initial-setup" && request.method === "GET") {
-      const result = await getInitialSetupOptions({
+      const result = await (
+        await getStudentAccountAccess(env)
+      ).getInitialSetupOptions({
         setupSessionToken: readCookie(request, setupSessionCookieName),
         now: Date.now(),
-        store: await getVerificationCodeStore(env),
       });
 
       return Response.json(result, {
@@ -461,36 +439,23 @@ export default {
         trackId?: unknown;
         confirmed?: unknown;
       }>();
-      const sessionToken = generateSessionToken();
-      const store = await getVerificationCodeStore(env);
-      const result = await submitInitialSetupDraft({
+      const result = await (
+        await getStudentAccountAccess(env)
+      ).completeInitialSetup({
         setupSessionToken: readCookie(request, setupSessionCookieName),
         displayName: body.displayName,
         realName: body.realName,
         trackId: body.trackId,
         confirmed: body.confirmed,
         now: Date.now(),
-        store,
       });
 
-      if (result.status === "saved") {
-        const completeResult = await completeInitialSetup({
-          setupSessionToken: readCookie(request, setupSessionCookieName),
-          draft: result.draft,
-          now: Date.now(),
-          sessionToken,
-          store,
-        });
-
-        if (completeResult.status === "invalid-setup-session") {
-          return Response.json(completeResult, { status: 400 });
-        }
-
+      if (result.status === "authenticated") {
         const headers = new Headers();
         headers.append(
           "set-cookie",
           sessionCookie(
-            completeResult.sessionToken,
+            result.sessionToken,
             30 * 24 * 60 * 60,
             url.protocol === "https:",
           ),
@@ -500,7 +465,7 @@ export default {
           setupSessionCookie("", 0, url.protocol === "https:"),
         );
 
-        return Response.json(sessionResponseBody(completeResult.studentAccount), {
+        return Response.json(sessionResponseBody(result.studentAccount), {
           headers,
         });
       }
@@ -509,10 +474,9 @@ export default {
     }
 
     if (url.pathname === "/api/auth/session" && request.method === "DELETE") {
-      await logoutStudentSession({
+      await (await getStudentAccountAccess(env)).logoutStudentSession({
         sessionToken: readCookie(request, sessionCookieName),
         now: Date.now(),
-        store: await getVerificationCodeStore(env),
       });
 
       return new Response(null, {

@@ -1,5 +1,4 @@
 import {
-  readStudentSession,
   type PeriodStandardTimetableEntry,
   type SchoolYearClassRecord,
   type SchoolYearRecord,
@@ -7,6 +6,7 @@ import {
   type TrackRecord,
   type VerificationCodeStore,
 } from './auth'
+import { readStudentSession } from './studentAccountAccess'
 
 type DailyPlanTask = {
   taskId: string

@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import {
-  createTestLoginSession,
-  InMemoryVerificationCodeStore,
-} from './auth'
+import { InMemoryVerificationCodeStore } from './auth'
 import { readDailyPlan, readDailyPlansRange } from './dailyPlan'
+import { createStudentAccountAccess } from './studentAccountAccess'
 
 const studentAccountId = 'test-student-2026-2-3-humanities-1'
 const sessionToken = 'daily-plan-test-session'
@@ -70,11 +68,13 @@ async function createReadyDailyPlanStore() {
     periodNumber: 4,
     lessonName: '現代文',
   })
-  await createTestLoginSession({
+  await createStudentAccountAccess({
+    store,
+    sendEmail: async () => undefined,
+    generateSessionToken: () => sessionToken,
+  }).createTestLoginSession({
     studentAccountId,
     now: Date.UTC(2026, 6, 10),
-    sessionToken,
-    store,
   })
 
   return store

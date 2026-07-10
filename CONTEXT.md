@@ -146,11 +146,11 @@ A target scope outside a student's own current target scopes that the student ch
 _Avoid_: Reference view, public feed, unrestricted access
 
 **Standard Timetable**:
-The baseline recurring timetable for a class and track in a school year. Timetable changes refer back to this baseline with period references such as "Monday period 1".
+The baseline timetable information for a class and track in a school year. A standard timetable contains recurring lesson slots and may also contain floating lesson references such as "★". Track-specific standard timetable values override class-common values, and timetable changes may refer back to this baseline with lesson references.
 _Avoid_: Default calendar, school-wide timetable
 
 **Timetable Change**:
-A date-specific change that modifies part of the standard timetable for a target scope. Timetable changes can be grade-wide, class-specific, track-specific, student-specific, planned in advance, or sudden.
+A date-specific change that modifies the displayed daily lessons derived from the standard timetable for a target scope. A timetable change may use lesson references, which resolve for each recipient's class and track, or directly provide lesson names. Timetable changes can be grade-wide, class-specific, track-specific, student-specific, planned in advance, or sudden.
 _Avoid_: Calendar event, announcement, emergency change
 
 **School Year**:
@@ -158,7 +158,7 @@ The academic year that owns a standard timetable for each class and track.
 _Avoid_: Grade, term, semester
 
 **Change Date**:
-The school date on which a timetable change applies. A change date may replace that day's lesson order with period references from the standard timetable.
+The school date on which a timetable change applies. A change date may set daily lesson names for that school date using lesson references or direct lesson names.
 _Avoid_: Effective period, version
 
 **Timetable Layer**:
@@ -170,27 +170,35 @@ A curriculum grouping under a class that can split the standard timetable. Track
 _Avoid_: Course, subject, class
 
 **Lesson Slot**:
-A position in the standard timetable identified by weekday and period number. A period reference points to a lesson slot and resolves to the lesson assigned to that slot.
+A recurring position in the standard timetable identified by weekday and period number. A lesson slot may have a lesson name, with track-specific values overriding class-common values; a period reference points to a lesson slot and resolves to the lesson name assigned to that slot.
 _Avoid_: Class period, clock time
 
-**Lesson**:
-The class activity displayed for one school date and period number, usually a subject or homeroom activity. A lesson is what students see after applying the standard timetable and timetable changes to a daily plan or other timetable view.
-_Avoid_: Subject, period, course
+**Daily Lesson**:
+The class activity displayed for one school date and period number, usually with a lesson name such as a subject or homeroom activity. A daily lesson is what students see after applying the standard timetable and timetable changes to a daily plan or other timetable view, and may have no lesson name when the period is empty or unset.
+_Avoid_: Lesson, subject, period, course
 
 **Lesson Name**:
-The name of a lesson, such as Mathematics, English, or homeroom. A task may be related to a lesson name without being related to one specific lesson on a school date.
+The displayed name assigned to a daily lesson or lesson slot, such as Mathematics, English, or homeroom. A task may be related to a lesson name without being related to one specific daily lesson on a school date.
 _Avoid_: Subject, course
 
+**Lesson Reference**:
+A shorthand reference defined by the standard timetable that resolves to a lesson name for a class or track. A lesson reference may be a period reference or a floating lesson reference.
+_Avoid_: Lesson slot, subject name, lesson name
+
 **Period Reference**:
-A shorthand reference to a lesson slot in the standard timetable, such as "Monday period 1". Period references are used when describing timetable changes.
-_Avoid_: Subject name, clock time
+A lesson reference to a lesson slot in the standard timetable, such as "Monday period 1". Period references are used when describing timetable changes and resolve to the lesson name assigned to the referenced lesson slot.
+_Avoid_: Lesson slot, subject name, clock time
+
+**Floating Lesson Reference**:
+A lesson reference used in timetable changes that is not bound to a weekday and period number, such as "★". A floating lesson reference resolves to a lesson name for a class or track, with track-specific values overriding class-common values, but only when a timetable change uses it.
+_Avoid_: Lesson slot, period reference, subject name
 
 **Task**:
-A school-life obligation shared inside the school community with a due date and target scope. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete. A task may optionally be related to a lesson, a lesson name, or both. A task can have an individual student as its target scope without becoming a separate personal-task concept.
+A school-life obligation shared inside the school community with a due date and target scope. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete. A task may optionally be related to a daily lesson, a lesson name, or both. A task can have an individual student as its target scope without becoming a separate personal-task concept.
 _Avoid_: Assignment, homework, todo
 
 **Note**:
-Shared information that records a school-life notice or reminder without being a task or timetable change. A note has a target scope and may have no related context or one related context: a school date, a lesson slot, or a task.
+Shared information that records a school-life notice or reminder without being a task or timetable change. A note has a target scope and may have no related context or one related context: a school date, a daily lesson, or a task.
 _Avoid_: Announcement, comment, memo
 
 **Task Completion**:
@@ -251,7 +259,13 @@ Developer: Can a student post a timetable change for a friend's class?
 Domain expert: No. Timetable changes and tasks follow creator scope too; someone in that target scope should create it.
 
 Developer: What does "月1" mean in a timetable change?
-Domain expert: It means the subject or lesson from period 1 on Monday in the standard timetable.
+Domain expert: It is a period reference. It means the lesson name from period 1 on Monday in the standard timetable.
+
+Developer: What does "★" mean in a timetable change?
+Domain expert: It is a floating lesson reference. It is not tied to a weekday and period number, but it resolves to a lesson name for the student's class or track.
+
+Developer: Can a grade-wide timetable change use "★" when different classes have different values for it?
+Domain expert: Yes. The same timetable change resolves "★" for each student's class and track. Use a direct lesson name when every recipient should see the same name.
 
 Developer: Does the standard timetable change each term?
 Domain expert: No. The standard timetable is owned by the school year; term-like differences are timetable changes from that baseline.
@@ -278,13 +292,13 @@ Developer: Is bringing a calculator tomorrow an assignment?
 Domain expert: No. In Tsugi it is a task, because tasks include more than homework.
 
 Developer: Does every task need to be tied to a lesson?
-Domain expert: No. A task has a target scope and due date; a lesson or lesson name is only an optional relation.
+Domain expert: No. A task has a target scope and due date; a daily lesson or lesson name is only an optional relation.
 
 Developer: Can a task be due at a period-level timing such as "before third period"?
 Domain expert: Not as formal task data. A task's due timing is date-level; period-level instructions can be written in a note related to that task.
 
-Developer: Can a task be related to a lesson name without being related to one lesson on one school date?
-Domain expert: Yes. A task may be related to a lesson name, a specific lesson, both, or neither.
+Developer: Can a task be related to a lesson name without being related to one daily lesson on one school date?
+Domain expert: Yes. A task may be related to a lesson name, a specific daily lesson, both, or neither.
 
 Developer: If a student marks a task complete, does that approve the task information?
 Domain expert: No. Task completion is personal progress, while approval is about accepting a proposed change to shared information.

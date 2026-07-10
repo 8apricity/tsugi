@@ -152,24 +152,39 @@ create table standard_timetable_entries (
   standard_timetable_entry_id text primary key,
   class_id text not null references school_year_classes(class_id),
   track_id text references tracks(track_id),
-  weekday integer not null,
-  period_number integer not null,
+  reference_type text not null,
+  weekday integer,
+  period_number integer,
+  reference_label text,
   lesson_name text not null,
 
-  check (weekday between 1 and 7),
-  check (period_number > 0)
+  check (reference_type in ('period', 'floating')),
+  check (weekday is null or weekday between 1 and 7),
+  check (period_number is null or period_number > 0),
+  check (
+    (reference_type = 'period' and weekday is not null and period_number is not null and reference_label is null)
+    or (reference_type = 'floating' and weekday is null and period_number is null and reference_label is not null)
+  )
 );
 
-create unique index standard_timetable_entries_unique_class_common
+create unique index standard_timetable_entries_unique_class_common_period
   on standard_timetable_entries(class_id, weekday, period_number)
-  where track_id is null;
+  where track_id is null and reference_type = 'period';
 
-create unique index standard_timetable_entries_unique_track
+create unique index standard_timetable_entries_unique_track_period
   on standard_timetable_entries(class_id, track_id, weekday, period_number)
-  where track_id is not null;
+  where track_id is not null and reference_type = 'period';
+
+create unique index standard_timetable_entries_unique_class_common_floating
+  on standard_timetable_entries(class_id, reference_label)
+  where track_id is null and reference_type = 'floating';
+
+create unique index standard_timetable_entries_unique_track_floating
+  on standard_timetable_entries(class_id, track_id, reference_label)
+  where track_id is not null and reference_type = 'floating';
 ```
 
-`track_id is null` means the class-common entry. Track-specific entries override class-common entries for the same lesson slot.
+`standard_timetable_entries` stores lesson references. A `period` entry represents a recurring lesson slot; a `floating` entry represents a floating lesson reference, such as `★`, that is not bound to a weekday and period number. `track_id is null` means the class-common value. A track-specific value overrides the class-common value for the same lesson slot or reference label.
 
 ## Shared Information Snapshots
 
@@ -200,16 +215,18 @@ create table timetable_change_snapshots (
   replacement_lesson_name text,
   reference_weekday integer,
   reference_period_number integer,
+  reference_label text,
   created_at text not null,
 
   check (period_number > 0),
-  check (replacement_type in ('lesson_name', 'period_reference', 'cancelled')),
+  check (replacement_type in ('lesson_name', 'period_reference', 'floating_lesson_reference', 'cancelled')),
   check (reference_weekday is null or reference_weekday between 1 and 7),
   check (reference_period_number is null or reference_period_number > 0),
   check (
-    (replacement_type = 'lesson_name' and replacement_lesson_name is not null and reference_weekday is null and reference_period_number is null)
-    or (replacement_type = 'period_reference' and replacement_lesson_name is null and reference_weekday is not null and reference_period_number is not null)
-    or (replacement_type = 'cancelled' and replacement_lesson_name is null and reference_weekday is null and reference_period_number is null)
+    (replacement_type = 'lesson_name' and replacement_lesson_name is not null and reference_weekday is null and reference_period_number is null and reference_label is null)
+    or (replacement_type = 'period_reference' and replacement_lesson_name is null and reference_weekday is not null and reference_period_number is not null and reference_label is null)
+    or (replacement_type = 'floating_lesson_reference' and replacement_lesson_name is null and reference_weekday is null and reference_period_number is null and reference_label is not null)
+    or (replacement_type = 'cancelled' and replacement_lesson_name is null and reference_weekday is null and reference_period_number is null and reference_label is null)
   )
 );
 
@@ -222,11 +239,11 @@ create table note_snapshots (
   related_task_item_id text references shared_information_items(shared_information_item_id),
   created_at text not null,
 
-  check (related_context_type is null or related_context_type in ('school_date', 'lesson_slot', 'task')),
+  check (related_context_type is null or related_context_type in ('school_date', 'daily_lesson', 'task')),
   check (
     (related_context_type is null and related_school_date is null and related_period_number is null and related_task_item_id is null)
     or (related_context_type = 'school_date' and related_school_date is not null and related_period_number is null and related_task_item_id is null)
-    or (related_context_type = 'lesson_slot' and related_school_date is not null and related_period_number is not null and related_task_item_id is null)
+    or (related_context_type = 'daily_lesson' and related_school_date is not null and related_period_number is not null and related_task_item_id is null)
     or (related_context_type = 'task' and related_school_date is null and related_period_number is null and related_task_item_id is not null)
   )
 );
@@ -234,7 +251,7 @@ create table note_snapshots (
 
 Tasks store due timing at school-date level only. If a student needs to record a finer instruction such as "before third period" or "by the start of class", that detail belongs in a note related to the task rather than in formal task due fields.
 
-`related_lesson_school_date` and `related_lesson_period_number` identify a specific lesson in the displayed timetable for one school date. `related_lesson_name` may be stored with or without a specific related lesson; the two are not exclusive. For example, a task created from a daily plan lesson can store both the specific lesson and its lesson name, while a task created from a table-like view may be related only to a lesson name.
+`related_lesson_school_date` and `related_lesson_period_number` identify a specific daily lesson in the displayed timetable for one school date. `related_lesson_name` may be stored with or without a specific related daily lesson; the two are not exclusive. For example, a task created from a daily plan can store both the specific daily lesson and its lesson name, while a task created from a table-like view may be related only to a lesson name.
 
 `timetable_change_snapshots` represents one date and one period. A UI may create several timetable changes in one operation, but the database stores them as separate shared information items.
 

@@ -5,8 +5,6 @@ import {
   createTestLoginSession,
   getInitialSetupOptions,
   logoutStudentSession,
-  readDailyPlan,
-  readDailyPlansRange,
   readSetupSession,
   readStudentSession,
   requestVerificationCode,
@@ -20,6 +18,7 @@ import {
   type TrackRecord,
   type VerificationCodeStore,
 } from "./auth";
+import { readDailyPlan, readDailyPlansRange } from "./dailyPlan";
 
 const verificationCodeStores = new WeakMap<Env, VerificationCodeStore>();
 const sessionCookieName = "tsugi_session";

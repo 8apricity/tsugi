@@ -767,7 +767,13 @@ function App() {
                 </span>
               ) : null}
             </h1>
-            <div className="topbar-spacer" aria-hidden="true" />
+            {timetableEditor.editing ? (
+              <span className="edit-mode-indicator" role="status">
+                編集モード
+              </span>
+            ) : (
+              <div className="topbar-spacer" aria-hidden="true" />
+            )}
           </header>
 
           <div
@@ -961,7 +967,7 @@ function App() {
                   </button>
                 ) : null}
                 <button
-                  className="icon-button edit-mode-button"
+                  className={`icon-button edit-mode-button${timetableEditor.editing ? " active" : ""}`}
                   type="button"
                   aria-label={timetableEditor.editing ? "編集モードを終了" : "時間割を編集"}
                   onClick={() =>

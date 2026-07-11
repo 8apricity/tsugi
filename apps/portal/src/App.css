@@ -412,6 +412,8 @@
   place-items: center;
   padding: 24px;
   background: rgba(31, 41, 51, 0.42);
+  /* Keep dialog scrolling available while blocking pinch zoom in the dialog. */
+  touch-action: pan-y;
 }
 
 .timetable-editor-dialog {

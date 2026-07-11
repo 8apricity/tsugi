@@ -136,6 +136,16 @@ function App() {
     useState<string | null>(null);
 
   useEffect(() => {
+    if (!timetableEditorMessage) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setTimetableEditorMessage(null);
+    }, 4000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [timetableEditorMessage]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadSession() {
@@ -776,6 +786,12 @@ function App() {
             )}
           </header>
 
+          {timetableEditorMessage ? (
+            <div className="timetable-editor-toast" role="status">
+              {timetableEditorMessage}
+            </div>
+          ) : null}
+
           <div
             className="daily-plan-main"
             onPointerDown={handleMainPointerDown}
@@ -953,9 +969,6 @@ function App() {
                 ))}
               </nav>
               <div className="timetable-edit-controls">
-                {timetableEditorMessage ? (
-                  <span role="status">{timetableEditorMessage}</span>
-                ) : null}
                 {timetableEditor.editing ? (
                   <button
                     className="button-secondary"

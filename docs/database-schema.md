@@ -1,22 +1,24 @@
 # Database Schema
 
-This document records the currently implemented Cloudflare D1 / SQLite schema for Tsugi. Future persistence is added only when its application behavior is implemented.
+This document records the current initial database design for Tsugi. It is intended as an implementation guide for Cloudflare D1 / SQLite.
 
-The previous trust-score-based database sketch has been replaced by the current Shared Information Change model. The implemented slice currently covers Timetable Direct Add.
+The previous trust-score-based database sketch has been replaced by the current shared information change model: active shared information, shared information changes, change proposals, direct changes, approvals, and rejections.
 
 ## Scope
 
-Implemented schema includes:
+Initial schema includes:
 
 - Student accounts and school email verification code authentication
 - School years, classes, tracks, and student affiliations
 - Target scopes
 - Standard timetables
-- Timetable Change snapshots
-- Timetable Change Shared Information Items and Direct Shared Information Changes
-- Active Timetable Change slot conflict enforcement
+- Shared information snapshots for tasks, timetable changes, and notes
+- Shared information items and applied changes
+- Change proposals and proposal reviews
+- Task completions
+- Usage events
 
-Current schema excludes:
+Initial schema excludes:
 
 - Collections, requests, test-result collections, aggregate results, and personalised reports
 - Threads
@@ -24,10 +26,6 @@ Current schema excludes:
 - Notifications
 - UI-only display ordering and pinning
 - A separate direct changes table
-- Task and Note persistence
-- Change Proposals, Proposal Reviews, Approvals, and Rejections
-- Task Completions
-- Usage Events
 
 ## Student Accounts
 
@@ -210,6 +208,22 @@ create unique index standard_timetable_entries_unique_track_floating
 Snapshots are immutable value records. They do not store creator, target scope, or review information.
 
 ```sql
+create table task_snapshots (
+  task_snapshot_id text primary key,
+  title text not null,
+  due_date text,
+  related_lesson_school_date text,
+  related_lesson_period_number integer,
+  related_lesson_name text,
+  created_at text not null,
+
+  check (
+    (related_lesson_school_date is null and related_lesson_period_number is null)
+    or (related_lesson_school_date is not null and related_lesson_period_number is not null)
+  ),
+  check (related_lesson_period_number is null or related_lesson_period_number > 0)
+);
+
 create table timetable_change_snapshots (
   timetable_change_snapshot_id text primary key,
   change_date text not null,
@@ -234,7 +248,29 @@ create table timetable_change_snapshots (
     or (replacement_type = 'cancelled' and replacement_lesson_name is null and reference_weekday is null and reference_period_number is null and reference_label is null)
   )
 );
+
+create table note_snapshots (
+  note_snapshot_id text primary key,
+  body text not null,
+  related_context_type text,
+  related_school_date text,
+  related_period_number integer,
+  related_task_item_id text references shared_information_items(shared_information_item_id),
+  created_at text not null,
+
+  check (related_context_type is null or related_context_type in ('school_date', 'daily_lesson', 'task')),
+  check (
+    (related_context_type is null and related_school_date is null and related_period_number is null and related_task_item_id is null)
+    or (related_context_type = 'school_date' and related_school_date is not null and related_period_number is null and related_task_item_id is null)
+    or (related_context_type = 'daily_lesson' and related_school_date is not null and related_period_number is not null and related_task_item_id is null)
+    or (related_context_type = 'task' and related_school_date is null and related_period_number is null and related_task_item_id is not null)
+  )
+);
 ```
+
+Tasks store due timing at school-date level only. If a student needs to record a finer instruction such as "before third period" or "by the start of class", that detail belongs in a note related to the task rather than in formal task due fields.
+
+`related_lesson_school_date` and `related_lesson_period_number` identify a specific daily lesson in the displayed timetable for one school date. `related_lesson_name` may be stored with or without a specific related daily lesson; the two are not exclusive. For example, a task created from a daily plan can store both the specific daily lesson and its lesson name, while a task created from a table-like view may be related only to a lesson name.
 
 `timetable_change_snapshots` represents one date and one period. A UI may create several timetable changes in one operation, but the database stores them as separate shared information items.
 For `floating_lesson_reference`, `floating_lesson_reference_label_id` is authoritative. The current migration also fills `reference_label` with a non-null compatibility token to preserve the original table check; it is not used to resolve the Lesson Name.
@@ -247,11 +283,19 @@ create table shared_information_items (
   kind text not null,
   target_scope_id text not null references target_scopes(target_scope_id),
   latest_change_id text,
-  current_timetable_change_snapshot_id text not null references timetable_change_snapshots(timetable_change_snapshot_id),
+  current_task_snapshot_id text references task_snapshots(task_snapshot_id),
+  current_timetable_change_snapshot_id text references timetable_change_snapshots(timetable_change_snapshot_id),
+  current_note_snapshot_id text references note_snapshots(note_snapshot_id),
   created_by_student_account_id text not null references student_accounts(student_account_id),
   created_at text not null,
   removed_at text,
-  check (kind = 'timetable_change')
+
+  check (kind in ('task', 'timetable_change', 'note')),
+  check (
+    (kind = 'task' and current_task_snapshot_id is not null and current_timetable_change_snapshot_id is null and current_note_snapshot_id is null)
+    or (kind = 'timetable_change' and current_task_snapshot_id is null and current_timetable_change_snapshot_id is not null and current_note_snapshot_id is null)
+    or (kind = 'note' and current_task_snapshot_id is null and current_timetable_change_snapshot_id is null and current_note_snapshot_id is not null)
+  )
 );
 ```
 
@@ -268,24 +312,27 @@ create table shared_information_changes (
   source_id text,
   changed_by_student_account_id text not null references student_accounts(student_account_id),
   changed_at text not null,
+  task_snapshot_id text references task_snapshots(task_snapshot_id),
   timetable_change_snapshot_id text references timetable_change_snapshots(timetable_change_snapshot_id),
+  note_snapshot_id text references note_snapshots(note_snapshot_id),
 
   check (change_kind in ('add', 'update', 'remove')),
   check (source_type in ('proposal', 'direct')),
   check (
-    (change_kind = 'remove' and timetable_change_snapshot_id is null)
-    or (change_kind != 'remove' and timetable_change_snapshot_id is not null)
+    (change_kind = 'remove' and task_snapshot_id is null and timetable_change_snapshot_id is null and note_snapshot_id is null)
+    or (change_kind != 'remove' and (
+      (task_snapshot_id is not null and timetable_change_snapshot_id is null and note_snapshot_id is null)
+      or (task_snapshot_id is null and timetable_change_snapshot_id is not null and note_snapshot_id is null)
+      or (task_snapshot_id is null and timetable_change_snapshot_id is null and note_snapshot_id is not null)
+    ))
   )
 );
 ```
 
-Direct Changes create Shared Information Changes without a separate Direct Changes table. `changed_by_student_account_id` is stored for traceability and future Named Attribution surfaces.
+Accepted proposals and direct changes both create a shared information change. A separate direct changes table is intentionally not used.
+`changed_by_student_account_id` is stored for traceability, but ordinary named attribution is shown only for direct changes. Accepted proposals, approvals, and rejections should not expose the individual students behind them in normal product surfaces.
 
-## Future Persistence (Not Implemented)
-
-The following designs are retained for future implementation discussion only. Their tables are not part of the current D1 schema and must not be created until the corresponding application behavior is implemented.
-
-### Change Proposals
+## Change Proposals
 
 ```sql
 create table change_proposals (
@@ -325,7 +372,7 @@ create table change_proposals (
 Proposal acceptance is automatic when two eligible approvals are present. Proposal rejection is automatic when two eligible rejections are present. The proposer does not count toward the required approvals.
 For update and remove proposals, `kind` and `target_scope_id` must match the referenced shared information item. Updating shared information cannot change its kind or target scope. To represent a different kind or target scope, remove the old item and add a separate new item.
 
-### Proposal Reviews
+## Proposal Reviews
 
 ```sql
 create table proposal_reviews (
@@ -342,7 +389,7 @@ create table proposal_reviews (
 
 Approvals and rejections are stored in the same table so one student can have only one current decision for a proposal. Pending decisions may be changed or removed while the proposal is still pending.
 
-### Task Completions
+## Task Completions
 
 ```sql
 create table task_completions (
@@ -360,7 +407,7 @@ create table task_completions (
 
 Only task items may have task completions. This is validated by application logic.
 
-### Usage Events
+## Usage Events
 
 ```sql
 create table usage_events (

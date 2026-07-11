@@ -769,7 +769,7 @@ function App() {
             </h1>
             {timetableEditor.editing ? (
               <span className="edit-mode-indicator" role="status">
-                編集モード
+                編集中
               </span>
             ) : (
               <div className="topbar-spacer" aria-hidden="true" />

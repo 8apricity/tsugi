@@ -132,8 +132,9 @@ function App() {
     useState<TimetableEditorOptions | null>(null);
   const [timetableEditorForm, setTimetableEditorForm] =
     useState<TimetableEditorForm | null>(null);
-  const [timetableEditorMessage, setTimetableEditorMessage] =
-    useState<string | null>(null);
+  const [timetableEditorMessage, setTimetableEditorMessage] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (!timetableEditorMessage) return;
@@ -182,7 +183,10 @@ function App() {
 
   useEffect(() => {
     return dailyPlanClient.subscribe(() => {
-      if (dailyPlanClient.getSnapshot().dailyPlanState.status === "unauthenticated") {
+      if (
+        dailyPlanClient.getSnapshot().dailyPlanState.status ===
+        "unauthenticated"
+      ) {
         setStudentAccount(null);
         setStatus("idle");
       }
@@ -216,17 +220,13 @@ function App() {
         if (!cancelled) setTimetableEditorOptions(options);
       })
       .catch(() => {
-        if (!cancelled) setTimetableEditorMessage("編集設定を読み込めませんでした。");
+        if (!cancelled)
+          setTimetableEditorMessage("編集設定を読み込めませんでした。");
       });
     return () => {
       cancelled = true;
     };
-  }, [
-    status,
-    studentAccount,
-    timetableEditor.editing,
-    timetableEditorOptions,
-  ]);
+  }, [status, studentAccount, timetableEditor.editing, timetableEditorOptions]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -236,10 +236,7 @@ function App() {
     function closeMenuWhenOutside(event: PointerEvent) {
       const target = event.target;
 
-      if (
-        target instanceof Node &&
-        menuAreaRef.current?.contains(target)
-      ) {
+      if (target instanceof Node && menuAreaRef.current?.contains(target)) {
         return;
       }
 
@@ -573,7 +570,9 @@ function App() {
   function leaveTimetableEditing() {
     if (
       timetableEditorClient.shouldConfirmExit() &&
-      !window.confirm("変更の下書きは削除されます。本当に編集モードを終了しますか。")
+      !window.confirm(
+        "変更の下書きは削除されます。本当に編集モードを終了しますか。",
+      )
     ) {
       return;
     }
@@ -608,7 +607,11 @@ function App() {
       timetableEditorForm.periodNumber,
     );
     setTimetableEditorForm(
-      existing ?? { ...timetableEditorForm, sourceId: undefined, targetScopeType },
+      existing ?? {
+        ...timetableEditorForm,
+        sourceId: undefined,
+        targetScopeType,
+      },
     );
   }
 
@@ -627,7 +630,9 @@ function App() {
       replacement.type === "floating_lesson_reference" &&
       !replacement.floatingLessonReferenceLabelId
     ) {
-      setTimetableEditorMessage("Floating Lesson Referenceを選択してください。");
+      setTimetableEditorMessage(
+        "Floating Lesson Referenceを選択してください。",
+      );
       return;
     }
     timetableEditorClient.saveDraft(
@@ -647,9 +652,14 @@ function App() {
           `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${replacementLabel(draft.replacement)}`,
       )
       .join("\n");
-    if (!window.confirm(`${payload.changes.length}件をDirect Changeとして反映します。\n\n${summary}`)) return;
+    if (
+      !window.confirm(
+        `${payload.changes.length}件をDirect Changeとして確定します。\n\n${summary}`,
+      )
+    )
+      return;
 
-    setTimetableEditorMessage("反映しています。");
+    setTimetableEditorMessage("確定しています。");
     const response = await fetch("/api/timetable-changes/direct", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -659,7 +669,7 @@ function App() {
       setTimetableEditorMessage(
         response.status === 409
           ? "同じTarget Scope・日付・時限にActive Timetable Changeがあります。"
-          : "変更を反映できませんでした。下書きは保持されています。",
+          : "変更を確定できませんでした。",
       );
       return;
     }
@@ -697,7 +707,9 @@ function App() {
         return;
       }
 
-      setMessage("初回設定を完了できませんでした。時間をおいて再度お試しください。");
+      setMessage(
+        "初回設定を完了できませんでした。時間をおいて再度お試しください。",
+      );
       return;
     }
 
@@ -706,7 +718,9 @@ function App() {
       return;
     }
 
-    setMessage("初回設定を保存できませんでした。時間をおいて再度お試しください。");
+    setMessage(
+      "初回設定を保存できませんでした。時間をおいて再度お試しください。",
+    );
   }
 
   if (status === "checking") {
@@ -744,13 +758,15 @@ function App() {
                   <p className="menu-name">{studentAccount.displayName}</p>
                   {dailyPlanState.status === "ready" ? (
                     <p className="menu-affiliation">
-                      {dailyPlanState.dailyPlan.studentAffiliation.schoolYear}年度{" "}
-                      {dailyPlanState.dailyPlan.studentAffiliation.grade}年
-                      {dailyPlanState.dailyPlan.studentAffiliation.classNumber}組{" "}
-                      {dailyPlanState.dailyPlan.studentAffiliation.trackName}
+                      {dailyPlanState.dailyPlan.studentAffiliation.schoolYear}
+                      年度 {dailyPlanState.dailyPlan.studentAffiliation.grade}年
+                      {dailyPlanState.dailyPlan.studentAffiliation.classNumber}
+                      組 {dailyPlanState.dailyPlan.studentAffiliation.trackName}
                     </p>
                   ) : (
-                    <p className="menu-affiliation">Student Affiliation 未読込</p>
+                    <p className="menu-affiliation">
+                      Student Affiliation 未読込
+                    </p>
                   )}
                   <button className="menu-item" type="button" disabled>
                     Settings
@@ -811,7 +827,8 @@ function App() {
                 <h2>Affiliation Renewal が必要です</h2>
                 <p>
                   {dailyPlanState.schoolYear}
-                  年度の Student Affiliation を設定すると Daily Plan を表示できます。
+                  年度の Student Affiliation を設定すると Daily Plan
+                  を表示できます。
                 </p>
               </div>
             ) : null}
@@ -832,7 +849,10 @@ function App() {
 
             {dailyPlanState.status === "ready" ? (
               <>
-                <section className="panel timetable-panel" aria-label="Period list">
+                <section
+                  className="panel timetable-panel"
+                  aria-label="Period list"
+                >
                   <div className="period-list">
                     {dailyPlanState.dailyPlan.periods.map((period) => (
                       <article
@@ -862,10 +882,14 @@ function App() {
                           }
                         }}
                       >
-                        <div className="period-number">{period.periodNumber}</div>
+                        <div className="period-number">
+                          {period.periodNumber}
+                        </div>
                         <div className="period-main">
                           <div className="lesson-line">
-                            <span className="lesson-name">{period.lessonName}</span>
+                            <span className="lesson-name">
+                              {period.lessonName}
+                            </span>
                             {period.hasTasks ? (
                               <span className="task-pill">タスク</span>
                             ) : null}
@@ -883,7 +907,10 @@ function App() {
                   </div>
                 </section>
 
-                <section className="panel daily-section" aria-labelledby="tasks-title">
+                <section
+                  className="panel daily-section"
+                  aria-labelledby="tasks-title"
+                >
                   <h2 id="tasks-title">タスク</h2>
                   <div className="task-list">
                     {dailyPlanState.dailyPlan.tasks.map((task) => {
@@ -916,7 +943,10 @@ function App() {
                   </div>
                 </section>
 
-                <section className="panel daily-section" aria-labelledby="notes-title">
+                <section
+                  className="panel daily-section"
+                  aria-labelledby="notes-title"
+                >
                   <h2 id="notes-title">ノート</h2>
                   <div className="note-list">
                     {dailyPlanState.dailyPlan.notes.map((note) => (
@@ -963,7 +993,10 @@ function App() {
                       {date.weekdayLabel}
                     </span>
                     {timetableEditor.draftDates.includes(date.schoolDate) ? (
-                      <span className="date-draft-mark" aria-label="変更下書きあり" />
+                      <span
+                        className="date-draft-mark"
+                        aria-label="変更下書きあり"
+                      />
                     ) : null}
                   </button>
                 ))}
@@ -976,13 +1009,17 @@ function App() {
                     disabled={timetableEditor.drafts.length === 0}
                     onClick={() => void commitTimetableDrafts()}
                   >
-                    変更を反映 ({timetableEditor.drafts.length})
+                    変更を確定 ({timetableEditor.drafts.length})
                   </button>
                 ) : null}
                 <button
                   className={`icon-button edit-mode-button${timetableEditor.editing ? " active" : ""}`}
                   type="button"
-                  aria-label={timetableEditor.editing ? "編集モードを終了" : "時間割を編集"}
+                  aria-label={
+                    timetableEditor.editing
+                      ? "編集モードを終了"
+                      : "時間割を編集"
+                  }
                   onClick={() =>
                     timetableEditor.editing
                       ? leaveTimetableEditing()
@@ -1005,7 +1042,7 @@ function App() {
               >
                 <form onSubmit={saveTimetableDraft}>
                   <header className="editor-dialog-header">
-                    <h2 id="timetable-editor-title">Timetable Direct Change</h2>
+                    <h2 id="timetable-editor-title">時間割変更</h2>
                     <button
                       className="icon-button"
                       type="button"
@@ -1017,7 +1054,7 @@ function App() {
                   </header>
                   <div className="editor-fields">
                     <label>
-                      Change Date
+                      日付
                       <input
                         type="date"
                         min={schoolYearRange.startsOn}
@@ -1033,7 +1070,7 @@ function App() {
                       />
                     </label>
                     <label>
-                      Period Number
+                      時限
                       <input
                         type="number"
                         min={1}
@@ -1049,11 +1086,13 @@ function App() {
                       />
                     </label>
                     <label className="editor-field-wide">
-                      Target Scope
+                      変更適用範囲
                       <select
                         value={timetableEditorForm.targetScopeType}
                         onChange={(event) =>
-                          changeEditorScope(event.target.value as TargetScopeType)
+                          changeEditorScope(
+                            event.target.value as TargetScopeType,
+                          )
                         }
                       >
                         <option value="grade">Grade</option>
@@ -1065,13 +1104,19 @@ function App() {
                   </div>
 
                   <div className="replacement-options">
-                    <div className="period-reference-grid" aria-label="Period References">
+                    <div
+                      className="period-reference-grid"
+                      aria-label="Period References"
+                    >
                       {Array.from({ length: 7 }, (_, periodIndex) =>
                         Array.from({ length: 6 }, (_, weekdayIndex) => {
                           const selected =
-                            timetableEditorForm.replacement.type === "period_reference" &&
-                            timetableEditorForm.replacement.weekday === weekdayIndex + 1 &&
-                            timetableEditorForm.replacement.periodNumber === periodIndex + 1;
+                            timetableEditorForm.replacement.type ===
+                              "period_reference" &&
+                            timetableEditorForm.replacement.weekday ===
+                              weekdayIndex + 1 &&
+                            timetableEditorForm.replacement.periodNumber ===
+                              periodIndex + 1;
                           return (
                             <button
                               className={selected ? "selected" : ""}
@@ -1088,7 +1133,8 @@ function App() {
                                 })
                               }
                             >
-                              {"月火水木金土"[weekdayIndex]}{periodIndex + 1}
+                              {"月火水木金土"[weekdayIndex]}
+                              {periodIndex + 1}
                             </button>
                           );
                         }),
@@ -1096,40 +1142,44 @@ function App() {
                     </div>
 
                     <div className="floating-reference-list">
-                      {(timetableEditorOptions?.floatingLessonReferenceLabels ?? []).map(
-                        (label) => (
-                          <button
-                            type="button"
-                            className={
-                              timetableEditorForm.replacement.type ===
-                                "floating_lesson_reference" &&
-                              timetableEditorForm.replacement.floatingLessonReferenceLabelId ===
-                                label.floatingLessonReferenceLabelId
-                                ? "selected"
-                                : ""
-                            }
-                            key={label.floatingLessonReferenceLabelId}
-                            onClick={() =>
-                              setTimetableEditorForm({
-                                ...timetableEditorForm,
-                                replacement: {
-                                  type: "floating_lesson_reference",
-                                  floatingLessonReferenceLabelId:
-                                    label.floatingLessonReferenceLabelId,
-                                  referenceLabel: label.referenceLabel,
-                                },
-                              })
-                            }
-                          >
-                            {label.referenceLabel}
-                          </button>
-                        ),
-                      )}
+                      {(
+                        timetableEditorOptions?.floatingLessonReferenceLabels ??
+                        []
+                      ).map((label) => (
+                        <button
+                          type="button"
+                          className={
+                            timetableEditorForm.replacement.type ===
+                              "floating_lesson_reference" &&
+                            timetableEditorForm.replacement
+                              .floatingLessonReferenceLabelId ===
+                              label.floatingLessonReferenceLabelId
+                              ? "selected"
+                              : ""
+                          }
+                          key={label.floatingLessonReferenceLabelId}
+                          onClick={() =>
+                            setTimetableEditorForm({
+                              ...timetableEditorForm,
+                              replacement: {
+                                type: "floating_lesson_reference",
+                                floatingLessonReferenceLabelId:
+                                  label.floatingLessonReferenceLabelId,
+                                referenceLabel: label.referenceLabel,
+                              },
+                            })
+                          }
+                        >
+                          {label.referenceLabel}
+                        </button>
+                      ))}
                     </div>
 
                     <button
                       className={`replacement-cancel-button${
-                        timetableEditorForm.replacement.type === "cancelled" ? " selected" : ""
+                        timetableEditorForm.replacement.type === "cancelled"
+                          ? " selected"
+                          : ""
                       }`}
                       type="button"
                       onClick={() =>
@@ -1139,7 +1189,7 @@ function App() {
                         })
                       }
                     >
-                      Cancelled
+                      休講
                     </button>
 
                     <input
@@ -1170,7 +1220,9 @@ function App() {
                         className="button-secondary"
                         type="button"
                         onClick={() => {
-                          timetableEditorClient.deleteDraft(timetableEditorForm.sourceId ?? "");
+                          timetableEditorClient.deleteDraft(
+                            timetableEditorForm.sourceId ?? "",
+                          );
                           setTimetableEditorForm(null);
                         }}
                       >
@@ -1414,7 +1466,9 @@ function App() {
 }
 
 function scopeLabel(scope: TargetScopeType) {
-  return { grade: "Grade", class: "Class", track: "Track", student: "Student" }[scope];
+  return { grade: "Grade", class: "Class", track: "Track", student: "Student" }[
+    scope
+  ];
 }
 
 function replacementLabel(replacement: TimetableReplacement) {
@@ -1425,7 +1479,7 @@ function replacementLabel(replacement: TimetableReplacement) {
   if (replacement.type === "floating_lesson_reference") {
     return replacement.referenceLabel;
   }
-  return "Cancelled";
+  return "休講";
 }
 
 function defaultReplacement(

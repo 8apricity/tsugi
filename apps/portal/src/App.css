@@ -474,8 +474,7 @@
   grid-column: 1 / -1;
 }
 
-.editor-fields label,
-.direct-lesson-input {
+.editor-fields label {
   display: grid;
   gap: 6px;
   color: var(--color-muted);
@@ -486,7 +485,7 @@
 .editor-fields input,
 .editor-fields select,
 .direct-lesson-input {
-  min-height: 42px;
+  height: 42px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 0 10px;
@@ -494,6 +493,7 @@
   color: var(--color-text);
   /* iOS Safari zooms focused form controls whose text is smaller than 16px. */
   font-size: 16px;
+  box-sizing: border-box;
 }
 
 .period-reference-grid {

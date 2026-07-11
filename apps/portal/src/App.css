@@ -466,8 +466,12 @@
 
 .editor-fields {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.editor-field-wide {
+  grid-column: 1 / -1;
 }
 
 .editor-fields label,
@@ -496,6 +500,37 @@
   display: grid;
   grid-template-columns: repeat(6, minmax(54px, 1fr));
   gap: 6px;
+}
+
+.replacement-options {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.replacement-options legend {
+  padding: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.replacement-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.replacement-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--color-accent);
 }
 
 .period-reference-grid button,

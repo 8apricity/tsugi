@@ -367,6 +367,188 @@ function readDailyPlans(env: Env, cookie = '', start?: string, end?: string) {
   )
 }
 
+function addDirectTimetableChanges(
+  env: Env,
+  cookie: string,
+  changes: Array<Record<string, unknown>>,
+) {
+  return worker.fetch(
+    new Request('https://tsugi.test/api/timetable-changes/direct', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ changes }),
+    }),
+    env,
+  )
+}
+
+describe('Timetable Direct Add API', () => {
+  it('rejects unauthenticated and invalid Direct Add requests', async () => {
+    const env = createDailyPlanTestEnv()
+    const unauthenticated = await addDirectTimetableChanges(env, '', [])
+    expect(unauthenticated.status).toBe(401)
+
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const invalid = await addDirectTimetableChanges(env, cookie, [
+      { sourceId: '10111111-1111-4111-8111-111111111111', targetScopeType: 'track', changeDate: '2027-04-01', periodNumber: 8, replacement: { type: 'cancelled' } },
+    ])
+    expect(invalid.status).toBe(400)
+  })
+
+  it('makes a Track Timetable Change active in the Daily Plan immediately', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await addDirectTimetableChanges(env, cookie, [
+      {
+        sourceId: '11111111-1111-4111-8111-111111111111',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 1,
+        replacement: { type: 'lesson_name', lessonName: '特別授業' },
+      },
+    ])
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'applied',
+      changes: [
+        { sourceId: '11111111-1111-4111-8111-111111111111' },
+      ],
+    })
+
+    const dailyPlanResponse = await readDailyPlan(
+      env,
+      cookie,
+      '2026-07-10',
+    )
+
+    expect(dailyPlanResponse.status).toBe(200)
+    const dailyPlan = (await dailyPlanResponse.json()) as {
+      periods: Array<{ periodNumber: number; lessonName: string }>
+    }
+    expect(dailyPlan.periods[0]).toMatchObject({
+      periodNumber: 1,
+      lessonName: '特別授業',
+    })
+  })
+
+  it('uses the narrowest Timetable Layer and resolves every replacement kind', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const ids = [
+      '21111111-1111-4111-8111-111111111111',
+      '31111111-1111-4111-8111-111111111111',
+      '41111111-1111-4111-8111-111111111111',
+      '51111111-1111-4111-8111-111111111111',
+      '61111111-1111-4111-8111-111111111111',
+      '63111111-1111-4111-8111-111111111111',
+    ]
+
+    const response = await addDirectTimetableChanges(env, cookie, [
+      { sourceId: ids[0], targetScopeType: 'grade', changeDate: '2026-07-10', periodNumber: 1, replacement: { type: 'lesson_name', lessonName: '学年' } },
+      { sourceId: ids[1], targetScopeType: 'class', changeDate: '2026-07-10', periodNumber: 1, replacement: { type: 'lesson_name', lessonName: 'クラス' } },
+      { sourceId: ids[2], targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 1, replacement: { type: 'period_reference', weekday: 1, periodNumber: 1 } },
+      { sourceId: ids[3], targetScopeType: 'student', changeDate: '2026-07-10', periodNumber: 2, replacement: { type: 'floating_lesson_reference', floatingLessonReferenceLabelId: '2026:2:★' } },
+      { sourceId: ids[4], targetScopeType: 'student', changeDate: '2026-07-10', periodNumber: 4, replacement: { type: 'cancelled' } },
+      { sourceId: ids[5], targetScopeType: 'student', changeDate: '2026-07-10', periodNumber: 3, replacement: { type: 'period_reference', weekday: 6, periodNumber: 7 } },
+    ])
+
+    expect(response.status).toBe(201)
+    const planResponse = await readDailyPlan(env, cookie, '2026-07-10')
+    const plan = (await planResponse.json()) as { periods: Array<{ lessonName: string }> }
+    expect(plan.periods.map((period) => period.lessonName)).toEqual([
+      '数Ⅱβ',
+      '自走',
+      '',
+      '',
+      '',
+      '',
+      '',
+    ])
+    expect(
+      (plan as unknown as { periods: Array<{ timetableChangeState?: string }> })
+        .periods[2].timetableChangeState,
+    ).toBe('cancelled')
+
+    const scienceCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-science-1',
+    )
+    const unresolved = await addDirectTimetableChanges(env, scienceCookie, [
+      {
+        sourceId: '62111111-1111-4111-8111-111111111111',
+        targetScopeType: 'student',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+        replacement: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: '2026:2:★',
+        },
+      },
+    ])
+    expect(unresolved.status).toBe(201)
+    const sciencePlanResponse = await readDailyPlan(env, scienceCookie, '2026-07-10')
+    const sciencePlan = (await sciencePlanResponse.json()) as {
+      periods: Array<{ lessonName: string; timetableChangeState?: string }>
+    }
+    expect(sciencePlan.periods[1]).toMatchObject({
+      lessonName: 'エラー',
+      timetableChangeState: 'unresolved-reference',
+    })
+  })
+
+  it('keeps a conflicting batch atomic and accepts an identical retry', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const original = {
+      sourceId: '71111111-1111-4111-8111-111111111111',
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+      replacement: { type: 'lesson_name', lessonName: '適用済み' },
+    }
+
+    expect((await addDirectTimetableChanges(env, cookie, [original])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [original])).status).toBe(201)
+
+    const conflict = await addDirectTimetableChanges(env, cookie, [
+      { sourceId: '81111111-1111-4111-8111-111111111111', targetScopeType: 'class', changeDate: '2026-07-10', periodNumber: 2, replacement: { type: 'lesson_name', lessonName: '保存されない' } },
+      { sourceId: '91111111-1111-4111-8111-111111111111', targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 1, replacement: { type: 'lesson_name', lessonName: '競合' } },
+    ])
+    expect(conflict.status).toBe(409)
+
+    const planResponse = await readDailyPlan(env, cookie, '2026-07-10')
+    const plan = (await planResponse.json()) as { periods: Array<{ lessonName: string }> }
+    expect(plan.periods[0].lessonName).toBe('適用済み')
+    expect(plan.periods[1].lessonName).toBe('')
+  })
+
+  it('rejects a changed idempotency payload and duplicate slots within one batch', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const sourceId = 'b1111111-1111-4111-8111-111111111111'
+    const base = { sourceId, targetScopeType: 'class', changeDate: '2026-07-10', periodNumber: 6 }
+    expect((await addDirectTimetableChanges(env, cookie, [
+      { ...base, replacement: { type: 'lesson_name', lessonName: '最初' } },
+    ])).status).toBe(201)
+    const mismatch = await addDirectTimetableChanges(env, cookie, [
+      { ...base, replacement: { type: 'lesson_name', lessonName: '変更' } },
+    ])
+    expect(mismatch.status).toBe(409)
+    await expect(mismatch.json()).resolves.toEqual({ status: 'idempotency-conflict' })
+
+    const duplicateSlots = await addDirectTimetableChanges(env, cookie, [
+      { sourceId: 'c1111111-1111-4111-8111-111111111111', targetScopeType: 'student', changeDate: '2026-07-11', periodNumber: 1, replacement: { type: 'cancelled' } },
+      { sourceId: 'd1111111-1111-4111-8111-111111111111', targetScopeType: 'student', changeDate: '2026-07-11', periodNumber: 1, replacement: { type: 'lesson_name', lessonName: '重複' } },
+    ])
+    expect(duplicateSlots.status).toBe(400)
+  })
+})
+
 describe('Daily Plan read API', () => {
   afterEach(() => {
     vi.unstubAllGlobals()

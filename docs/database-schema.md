@@ -145,7 +145,22 @@ create unique index target_scope_parts_unique_student
 
 A target scope is a union of its parts. Exclusions and cross-school-year scopes are not part of the initial model.
 
+The schema can represent a union containing multiple target scope parts. The initial Portal Timetable Direct Add flow intentionally creates exactly one part per target scope: the creator's Grade, Class, Track, or Student scope. Multiple-part creation is reserved for later product work.
+
 ## Standard Timetables
+
+Floating Lesson Reference labels are defined once per School Year and Grade so editors can list the labels without inferring them from Class/Track resolution rows. The label ID is authoritative for Standard Timetable resolution and Timetable Change snapshots, so changing display text does not break an existing reference. `reference_label` remains on migrated Standard Timetable rows as compatibility data, but application reads resolve through `floating_lesson_reference_label_id`.
+
+```sql
+create table floating_lesson_reference_labels (
+  floating_lesson_reference_label_id text primary key,
+  school_year integer not null references school_years(school_year),
+  grade integer not null,
+  reference_label text not null,
+  display_order integer not null default 0,
+  unique (school_year, grade, reference_label)
+);
+```
 
 ```sql
 create table standard_timetable_entries (
@@ -156,6 +171,8 @@ create table standard_timetable_entries (
   weekday integer,
   period_number integer,
   reference_label text,
+  floating_lesson_reference_label_id text
+    references floating_lesson_reference_labels(floating_lesson_reference_label_id),
   lesson_name text not null,
 
   check (reference_type in ('period', 'floating')),
@@ -216,6 +233,8 @@ create table timetable_change_snapshots (
   reference_weekday integer,
   reference_period_number integer,
   reference_label text,
+  floating_lesson_reference_label_id text
+    references floating_lesson_reference_labels(floating_lesson_reference_label_id),
   created_at text not null,
 
   check (period_number > 0),
@@ -254,6 +273,7 @@ Tasks store due timing at school-date level only. If a student needs to record a
 `related_lesson_school_date` and `related_lesson_period_number` identify a specific daily lesson in the displayed timetable for one school date. `related_lesson_name` may be stored with or without a specific related daily lesson; the two are not exclusive. For example, a task created from a daily plan can store both the specific daily lesson and its lesson name, while a task created from a table-like view may be related only to a lesson name.
 
 `timetable_change_snapshots` represents one date and one period. A UI may create several timetable changes in one operation, but the database stores them as separate shared information items.
+For `floating_lesson_reference`, `floating_lesson_reference_label_id` is authoritative. The current migration also fills `reference_label` with a non-null compatibility token to preserve the original table check; it is not used to resolve the Lesson Name.
 
 ## Shared Information Items
 

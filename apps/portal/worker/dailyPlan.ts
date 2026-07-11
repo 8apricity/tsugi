@@ -1,4 +1,5 @@
 import {
+  type ActiveTimetableChange,
   type DailyPlanStore,
   type PeriodStandardTimetableEntry,
   type SchoolYearClassRecord,
@@ -59,6 +60,7 @@ export type DailyPlanResult =
       periods: Array<{
         periodNumber: number
         lessonName: string
+        timetableChangeState?: 'resolved' | 'cancelled' | 'unresolved-reference'
         hasTasks: boolean
         notes: DailyPlanNote[]
       }>
@@ -189,6 +191,13 @@ export async function readDailyPlansRange({
     }),
   )
 
+  const activeTimetableChanges =
+    await dailyPlanStore.listActiveTimetableChangesForStudent(
+      sharedContext.studentAffiliation,
+      resolvedStart,
+      resolvedEnd,
+    )
+
   const dailyPlans: Record<
     string,
     Extract<DailyPlanResult, { status: 'ready' }>
@@ -200,6 +209,11 @@ export async function readDailyPlansRange({
       sharedContext,
       entriesByPeriod:
         entriesByWeekday.get(weekdayForSchoolDate(date)) ?? new Map(),
+      changedLessonNames: await resolveChangedLessonNames(
+        activeTimetableChanges.filter((change) => change.changeDate === date),
+        sharedContext.studentAffiliation,
+        dailyPlanStore,
+      ),
     })
   }
 
@@ -236,6 +250,11 @@ async function readDailyPlanForAuthenticatedStudent({
       sharedContext.studentAffiliation.trackId,
       weekday,
     )
+  const activeTimetableChanges = await store.listActiveTimetableChangesForStudent(
+    sharedContext.studentAffiliation,
+    schoolDate,
+    schoolDate,
+  )
 
   return buildReadyDailyPlan({
     schoolDate,
@@ -243,6 +262,11 @@ async function readDailyPlanForAuthenticatedStudent({
     entriesByPeriod: buildEntriesByPeriod(
       standardTimetableEntries,
       sharedContext.studentAffiliation.trackId,
+    ),
+    changedLessonNames: await resolveChangedLessonNames(
+      activeTimetableChanges,
+      sharedContext.studentAffiliation,
+      store,
     ),
   })
 }
@@ -324,6 +348,7 @@ function buildReadyDailyPlan({
   schoolDate,
   sharedContext,
   entriesByPeriod,
+  changedLessonNames = new Map(),
 }: {
   schoolDate: string
   sharedContext: Extract<
@@ -331,6 +356,13 @@ function buildReadyDailyPlan({
     { status: 'ready' }
   >
   entriesByPeriod: Map<number, PeriodStandardTimetableEntry>
+  changedLessonNames?: Map<
+    number,
+    {
+      lessonName: string
+      timetableChangeState: 'resolved' | 'cancelled' | 'unresolved-reference'
+    }
+  >
 }): Extract<DailyPlanResult, { status: 'ready' }> {
   const weekday = weekdayForSchoolDate(schoolDate)
   const placeholderTasks = listPlaceholderDailyPlanTasks(schoolDate)
@@ -360,11 +392,17 @@ function buildReadyDailyPlan({
     },
     periods: Array.from({ length: 7 }, (_, index) => {
       const periodNumber = index + 1
-      const lessonName = entriesByPeriod.get(periodNumber)?.lessonName ?? ''
+      const changedLesson = changedLessonNames.get(periodNumber)
+      const lessonName = changedLesson
+        ? changedLesson.lessonName
+        : entriesByPeriod.get(periodNumber)?.lessonName ?? ''
 
       return {
         periodNumber,
         lessonName,
+        ...(changedLesson
+          ? { timetableChangeState: changedLesson.timetableChangeState }
+          : {}),
         hasTasks: placeholderTasks.some((task) =>
           isPlaceholderTaskRelatedToLesson(task, {
             schoolDate,
@@ -382,6 +420,59 @@ function buildReadyDailyPlan({
     tasks: placeholderTasks,
     notes: placeholderBottomNotes,
   }
+}
+
+async function resolveChangedLessonNames(
+  changes: ActiveTimetableChange[],
+  affiliation: StudentAffiliation,
+  store: DailyPlanStore,
+) {
+  const result = new Map<
+    number,
+    {
+      lessonName: string
+      timetableChangeState: 'resolved' | 'cancelled' | 'unresolved-reference'
+    }
+  >()
+  const layerOrder = { grade: 1, class: 2, track: 3, student: 4 } as const
+
+  for (const change of [...changes].sort(
+    (left, right) =>
+      layerOrder[left.targetScopeType] - layerOrder[right.targetScopeType],
+  )) {
+    const replacement = change.replacement
+    let resolved: {
+      lessonName: string
+      timetableChangeState: 'resolved' | 'cancelled' | 'unresolved-reference'
+    } = { lessonName: '', timetableChangeState: 'cancelled' }
+
+    if (replacement.type === 'lesson_name') {
+      resolved = { lessonName: replacement.lessonName, timetableChangeState: 'resolved' }
+    } else if (replacement.type === 'period_reference') {
+      const entry = await store.findStandardTimetableEntryForPeriodReference(
+        affiliation.classId,
+        affiliation.trackId,
+        replacement.weekday,
+        replacement.periodNumber,
+      )
+      resolved = entry
+        ? { lessonName: entry.lessonName, timetableChangeState: 'resolved' }
+        : { lessonName: '', timetableChangeState: 'cancelled' }
+    } else if (replacement.type === 'floating_lesson_reference') {
+      const entry = await store.findStandardTimetableEntryForFloatingReferenceLabelId(
+        affiliation.classId,
+        affiliation.trackId,
+        replacement.floatingLessonReferenceLabelId,
+      )
+      resolved = entry
+        ? { lessonName: entry.lessonName, timetableChangeState: 'resolved' }
+        : { lessonName: 'エラー', timetableChangeState: 'unresolved-reference' }
+    }
+
+    result.set(change.periodNumber, resolved)
+  }
+
+  return result
 }
 
 const placeholderDailyPlanTasks: DailyPlanTask[] = [

@@ -1,0 +1,247 @@
+import type {
+  ActiveTimetableChange,
+  DirectTimetableChangeStore,
+  StudentAccountAccessStore,
+  TargetScopeType,
+  TimetableChangeReplacement,
+} from './persistence'
+import { readStudentSession } from './studentAccountAccess'
+
+type DirectChangeDraft = {
+  sourceId: unknown
+  targetScopeType: unknown
+  changeDate: unknown
+  periodNumber: unknown
+  replacement: unknown
+}
+
+export type AddDirectTimetableChangesResult =
+  | { status: 'applied'; changes: Array<{ sourceId: string; sharedInformationItemId: string }> }
+  | { status: 'unauthenticated' }
+  | { status: 'invalid-change' }
+  | { status: 'affiliation-renewal-needed'; schoolYear: number }
+  | { status: 'timetable-change-conflict' }
+  | { status: 'idempotency-conflict' }
+
+export async function readDirectTimetableChangeOptions({
+  sessionToken,
+  now,
+  studentAccountStore,
+  store,
+}: {
+  sessionToken: string | null
+  now: number
+  studentAccountStore: StudentAccountAccessStore
+  store: DirectTimetableChangeStore
+}) {
+  const session = await readStudentSession({ sessionToken, now, store: studentAccountStore })
+  if (session.status === 'unauthenticated') return session
+  const schoolYear = await store.findCurrentSchoolYear()
+  if (!schoolYear) return { status: 'unavailable' as const }
+  const affiliation = await store.findCurrentStudentAffiliation(
+    session.studentAccount.studentAccountId,
+    schoolYear.schoolYear,
+  )
+  if (!affiliation) {
+    return { status: 'affiliation-renewal-needed' as const, schoolYear: schoolYear.schoolYear }
+  }
+  return {
+    status: 'ready' as const,
+    schoolYearRange: { startsOn: schoolYear.startsOn, endsOn: schoolYear.endsOn },
+    floatingLessonReferenceLabels: await store.listFloatingLessonReferenceLabels(
+      schoolYear.schoolYear,
+      affiliation.grade,
+    ),
+  }
+}
+
+export async function addDirectTimetableChanges({
+  sessionToken,
+  drafts,
+  now,
+  studentAccountStore,
+  store,
+}: {
+  sessionToken: string | null
+  drafts: unknown
+  now: number
+  studentAccountStore: StudentAccountAccessStore
+  store: DirectTimetableChangeStore
+}): Promise<AddDirectTimetableChangesResult> {
+  const session = await readStudentSession({
+    sessionToken,
+    now,
+    store: studentAccountStore,
+  })
+
+  if (session.status === 'unauthenticated') return session
+
+  const schoolYear = await store.findCurrentSchoolYear()
+
+  if (!schoolYear) return { status: 'invalid-change' }
+
+  const affiliation = await store.findCurrentStudentAffiliation(
+    session.studentAccount.studentAccountId,
+    schoolYear.schoolYear,
+  )
+
+  if (!affiliation) {
+    return {
+      status: 'affiliation-renewal-needed',
+      schoolYear: schoolYear.schoolYear,
+    }
+  }
+
+  if (!Array.isArray(drafts) || drafts.length === 0 || drafts.length > 50) {
+    return { status: 'invalid-change' }
+  }
+
+  const changes: ActiveTimetableChange[] = []
+
+  for (const candidate of drafts as DirectChangeDraft[]) {
+    const replacement = parseReplacement(candidate.replacement)
+
+    if (
+      typeof candidate.sourceId !== 'string' ||
+      !uuidPattern.test(candidate.sourceId) ||
+      !isTargetScopeType(candidate.targetScopeType) ||
+      typeof candidate.changeDate !== 'string' ||
+      !isValidSchoolDate(candidate.changeDate) ||
+      candidate.changeDate < schoolYear.startsOn ||
+      candidate.changeDate > schoolYear.endsOn ||
+      !Number.isInteger(candidate.periodNumber) ||
+      Number(candidate.periodNumber) < 1 ||
+      Number(candidate.periodNumber) > 7 ||
+      !replacement
+    ) {
+      return { status: 'invalid-change' }
+    }
+
+    if (
+      replacement.type === 'floating_lesson_reference' &&
+      !(await store.findFloatingLessonReferenceLabel(
+        replacement.floatingLessonReferenceLabelId,
+        schoolYear.schoolYear,
+        affiliation.grade,
+      ))
+    ) {
+      return { status: 'invalid-change' }
+    }
+
+    const targetScopeType = candidate.targetScopeType
+    changes.push({
+      sourceId: candidate.sourceId,
+      sharedInformationItemId: candidate.sourceId,
+      schoolYear: schoolYear.schoolYear,
+      targetScopeType,
+      targetScopeValue: targetScopeValue(targetScopeType, affiliation),
+      changeDate: candidate.changeDate,
+      periodNumber: Number(candidate.periodNumber),
+      replacement,
+      changedByStudentAccountId: session.studentAccount.studentAccountId,
+      changedAt: now,
+    })
+  }
+
+  const slotKeys = changes.map((change) =>
+    [
+      change.schoolYear,
+      change.targetScopeType,
+      change.targetScopeValue,
+      change.changeDate,
+      change.periodNumber,
+    ].join(':'),
+  )
+  if (
+    new Set(changes.map((change) => change.sourceId)).size !== changes.length ||
+    new Set(slotKeys).size !== changes.length
+  ) {
+    return { status: 'invalid-change' }
+  }
+
+  const result = await store.commitDirectTimetableChanges(changes)
+
+  if (result.status === 'conflict') {
+    return { status: 'timetable-change-conflict' }
+  }
+  if (result.status === 'idempotency-conflict') return result
+
+  return {
+    status: 'applied',
+    changes: result.changes.map(({ sourceId, sharedInformationItemId }) => ({
+      sourceId,
+      sharedInformationItemId,
+    })),
+  }
+}
+
+function targetScopeValue(
+  type: TargetScopeType,
+  affiliation: {
+    grade: number
+    classId: string
+    trackId: string
+    studentAccountId: string
+  },
+) {
+  if (type === 'grade') return String(affiliation.grade)
+  if (type === 'class') return affiliation.classId
+  if (type === 'track') return affiliation.trackId
+  return affiliation.studentAccountId
+}
+
+function parseReplacement(value: unknown): TimetableChangeReplacement | null {
+  if (!value || typeof value !== 'object') return null
+  const replacement = value as Record<string, unknown>
+
+  if (replacement.type === 'cancelled') return { type: 'cancelled' }
+  if (
+    replacement.type === 'lesson_name' &&
+    typeof replacement.lessonName === 'string' &&
+    replacement.lessonName.trim().length > 0 &&
+    replacement.lessonName.trim().length <= 80
+  ) {
+    return { type: 'lesson_name', lessonName: replacement.lessonName.trim() }
+  }
+  if (
+    replacement.type === 'period_reference' &&
+    Number.isInteger(replacement.weekday) &&
+    Number(replacement.weekday) >= 1 &&
+    Number(replacement.weekday) <= 6 &&
+    Number.isInteger(replacement.periodNumber) &&
+    Number(replacement.periodNumber) >= 1 &&
+    Number(replacement.periodNumber) <= 7
+  ) {
+    return {
+      type: 'period_reference',
+      weekday: Number(replacement.weekday),
+      periodNumber: Number(replacement.periodNumber),
+    }
+  }
+  if (
+    replacement.type === 'floating_lesson_reference' &&
+    typeof replacement.floatingLessonReferenceLabelId === 'string' &&
+    replacement.floatingLessonReferenceLabelId.length > 0 &&
+    replacement.floatingLessonReferenceLabelId.length <= 200
+  ) {
+    return {
+      type: 'floating_lesson_reference',
+      floatingLessonReferenceLabelId:
+        replacement.floatingLessonReferenceLabelId,
+    }
+  }
+
+  return null
+}
+
+function isTargetScopeType(value: unknown): value is TargetScopeType {
+  return value === 'grade' || value === 'class' || value === 'track' || value === 'student'
+}
+
+function isValidSchoolDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value
+}
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i

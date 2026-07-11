@@ -9,6 +9,13 @@ import {
 import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader } from "./dailyPlanView";
+import {
+  createTimetableEditorClient,
+  normalizeDirectLessonReplacement,
+  type TargetScopeType,
+  type TimetableChangeDraft,
+  type TimetableReplacement,
+} from "./timetableEditorClient";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -42,6 +49,18 @@ type InitialSetupOptions = {
       tracks: Array<{ trackId: string; trackName: string }>;
     }>;
   }>;
+};
+
+type TimetableEditorOptions = {
+  status: "ready";
+  floatingLessonReferenceLabels: Array<{
+    floatingLessonReferenceLabelId: string;
+    referenceLabel: string;
+  }>;
+};
+
+type TimetableEditorForm = Omit<TimetableChangeDraft, "sourceId"> & {
+  sourceId?: string;
 };
 
 function App() {
@@ -101,6 +120,20 @@ function App() {
   const swipeStartXRef = useRef<number | null>(null);
   const [completedPlaceholderTaskIds, setCompletedPlaceholderTaskIds] =
     useState<Set<string>>(() => new Set());
+  const [timetableEditorClient] = useState(() =>
+    createTimetableEditorClient({ storage: window.sessionStorage }),
+  );
+  const timetableEditor = useSyncExternalStore(
+    timetableEditorClient.subscribe,
+    timetableEditorClient.getSnapshot,
+    timetableEditorClient.getSnapshot,
+  );
+  const [timetableEditorOptions, setTimetableEditorOptions] =
+    useState<TimetableEditorOptions | null>(null);
+  const [timetableEditorForm, setTimetableEditorForm] =
+    useState<TimetableEditorForm | null>(null);
+  const [timetableEditorMessage, setTimetableEditorMessage] =
+    useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +188,35 @@ function App() {
     dailyPlanClient.reset();
     void dailyPlanClient.loadSelectedDailyPlan();
   }, [dailyPlanClient, status, studentAccount]);
+
+  useEffect(() => {
+    if (
+      status !== "authenticated" ||
+      !studentAccount ||
+      !timetableEditor.editing ||
+      timetableEditorOptions
+    ) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/timetable-changes/direct/options")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("options unavailable");
+        const options = (await response.json()) as TimetableEditorOptions;
+        if (!cancelled) setTimetableEditorOptions(options);
+      })
+      .catch(() => {
+        if (!cancelled) setTimetableEditorMessage("編集設定を読み込めませんでした。");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    status,
+    studentAccount,
+    timetableEditor.editing,
+    timetableEditorOptions,
+  ]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -470,6 +532,9 @@ function App() {
     setVerificationCode("");
     setSetupOptions(null);
     dailyPlanClient.reset();
+    timetableEditorClient.discard();
+    setTimetableEditorForm(null);
+    setTimetableEditorOptions(null);
     setMenuOpen(false);
     setCompletedPlaceholderTaskIds(new Set());
     setStatus("idle");
@@ -488,6 +553,109 @@ function App() {
 
       return next;
     });
+  }
+
+  function enterTimetableEditing() {
+    setTimetableEditorMessage(null);
+    timetableEditorClient.enterEditing();
+  }
+
+  function leaveTimetableEditing() {
+    if (
+      timetableEditorClient.shouldConfirmExit() &&
+      !window.confirm("変更の下書きは削除されます。本当に編集モードを終了しますか。")
+    ) {
+      return;
+    }
+    timetableEditorClient.discard();
+    setTimetableEditorForm(null);
+    setTimetableEditorMessage(null);
+  }
+
+  function openTimetableEditor(periodNumber: number) {
+    if (!timetableEditor.editing) return;
+    const targetScopeType = timetableEditor.lastTargetScopeType;
+    const existing = timetableEditorClient.findDraft(
+      targetScopeType,
+      selectedSchoolDate,
+      periodNumber,
+    );
+    setTimetableEditorForm(
+      existing ?? {
+        targetScopeType,
+        changeDate: selectedSchoolDate,
+        periodNumber,
+        replacement: { type: "lesson_name", lessonName: "" },
+      },
+    );
+  }
+
+  function changeEditorScope(targetScopeType: TargetScopeType) {
+    if (!timetableEditorForm) return;
+    const existing = timetableEditorClient.findDraft(
+      targetScopeType,
+      timetableEditorForm.changeDate,
+      timetableEditorForm.periodNumber,
+    );
+    setTimetableEditorForm(
+      existing ?? { ...timetableEditorForm, sourceId: undefined, targetScopeType },
+    );
+  }
+
+  function saveTimetableDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!timetableEditorForm) return;
+    let replacement = timetableEditorForm.replacement;
+    if (replacement.type === "lesson_name") {
+      replacement = normalizeDirectLessonReplacement(replacement.lessonName);
+      if (replacement.type === "lesson_name" && !replacement.lessonName) {
+        setTimetableEditorMessage("Lesson Nameを入力してください。");
+        return;
+      }
+    }
+    if (
+      replacement.type === "floating_lesson_reference" &&
+      !replacement.floatingLessonReferenceLabelId
+    ) {
+      setTimetableEditorMessage("Floating Lesson Referenceを選択してください。");
+      return;
+    }
+    timetableEditorClient.saveDraft(
+      { ...timetableEditorForm, replacement },
+      timetableEditorForm.sourceId,
+    );
+    setTimetableEditorForm(null);
+    setTimetableEditorMessage(null);
+  }
+
+  async function commitTimetableDrafts() {
+    const payload = timetableEditorClient.toCommitPayload();
+    if (payload.changes.length === 0) return;
+    const summary = payload.changes
+      .map(
+        (draft) =>
+          `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${replacementLabel(draft.replacement)}`,
+      )
+      .join("\n");
+    if (!window.confirm(`${payload.changes.length}件をDirect Changeとして反映します。\n\n${summary}`)) return;
+
+    setTimetableEditorMessage("反映しています。");
+    const response = await fetch("/api/timetable-changes/direct", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      setTimetableEditorMessage(
+        response.status === 409
+          ? "同じTarget Scope・日付・時限にActive Timetable Changeがあります。"
+          : "変更を反映できませんでした。下書きは保持されています。",
+      );
+      return;
+    }
+    timetableEditorClient.commitSucceeded();
+    setTimetableEditorMessage(null);
+    await dailyPlanClient.reload();
   }
 
   async function submitInitialSetup(event: FormEvent<HTMLFormElement>) {
@@ -645,7 +813,33 @@ function App() {
                 <section className="panel timetable-panel" aria-label="Period list">
                   <div className="period-list">
                     {dailyPlanState.dailyPlan.periods.map((period) => (
-                      <article className="period-row" key={period.periodNumber}>
+                      <article
+                        className={`period-row ${
+                          timetableEditorClient.isLessonEdited(
+                            selectedSchoolDate,
+                            period.periodNumber,
+                          )
+                            ? "draft-edited"
+                            : ""
+                        } ${timetableEditor.editing ? "editable" : ""}`}
+                        key={period.periodNumber}
+                        role={timetableEditor.editing ? "button" : undefined}
+                        tabIndex={timetableEditor.editing ? 0 : undefined}
+                        aria-label={`${period.periodNumber}限 ${period.lessonName || "空欄"}${
+                          timetableEditorClient.isLessonEdited(
+                            selectedSchoolDate,
+                            period.periodNumber,
+                          )
+                            ? " 変更下書きあり"
+                            : ""
+                        }`}
+                        onClick={() => openTimetableEditor(period.periodNumber)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            openTimetableEditor(period.periodNumber);
+                          }
+                        }}
+                      >
                         <div className="period-number">{period.periodNumber}</div>
                         <div className="period-main">
                           <div className="lesson-line">
@@ -746,10 +940,235 @@ function App() {
                     <span className="date-cell-weekday">
                       {date.weekdayLabel}
                     </span>
+                    {timetableEditor.draftDates.includes(date.schoolDate) ? (
+                      <span className="date-draft-mark" aria-label="変更下書きあり" />
+                    ) : null}
                   </button>
                 ))}
               </nav>
+              <div className="timetable-edit-controls">
+                {timetableEditorMessage ? (
+                  <span role="status">{timetableEditorMessage}</span>
+                ) : null}
+                {timetableEditor.editing ? (
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    disabled={timetableEditor.drafts.length === 0}
+                    onClick={() => void commitTimetableDrafts()}
+                  >
+                    変更を反映 ({timetableEditor.drafts.length})
+                  </button>
+                ) : null}
+                <button
+                  className="icon-button edit-mode-button"
+                  type="button"
+                  aria-label={timetableEditor.editing ? "編集モードを終了" : "時間割を編集"}
+                  onClick={() =>
+                    timetableEditor.editing
+                      ? leaveTimetableEditing()
+                      : enterTimetableEditing()
+                  }
+                >
+                  <span aria-hidden="true">✎</span>
+                </button>
+              </div>
             </footer>
+          ) : null}
+
+          {timetableEditorForm && schoolYearRange ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <section
+                className="timetable-editor-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="timetable-editor-title"
+              >
+                <form onSubmit={saveTimetableDraft}>
+                  <header className="editor-dialog-header">
+                    <h2 id="timetable-editor-title">Timetable Direct Change</h2>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      aria-label="閉じる"
+                      onClick={() => setTimetableEditorForm(null)}
+                    >
+                      ×
+                    </button>
+                  </header>
+                  <div className="editor-fields">
+                    <label>
+                      Target Scope
+                      <select
+                        value={timetableEditorForm.targetScopeType}
+                        onChange={(event) =>
+                          changeEditorScope(event.target.value as TargetScopeType)
+                        }
+                      >
+                        <option value="grade">Grade</option>
+                        <option value="class">Class</option>
+                        <option value="track">Track</option>
+                        <option value="student">Student</option>
+                      </select>
+                    </label>
+                    <label>
+                      Change Date
+                      <input
+                        type="date"
+                        min={schoolYearRange.startsOn}
+                        max={schoolYearRange.endsOn}
+                        required
+                        value={timetableEditorForm.changeDate}
+                        onChange={(event) =>
+                          setTimetableEditorForm({
+                            ...timetableEditorForm,
+                            changeDate: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Period Number
+                      <input
+                        type="number"
+                        min={1}
+                        max={7}
+                        required
+                        value={timetableEditorForm.periodNumber}
+                        onChange={(event) =>
+                          setTimetableEditorForm({
+                            ...timetableEditorForm,
+                            periodNumber: Number(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Replacement
+                      <select
+                        value={timetableEditorForm.replacement.type}
+                        onChange={(event) =>
+                          setTimetableEditorForm({
+                            ...timetableEditorForm,
+                            replacement: defaultReplacement(
+                              event.target.value as TimetableReplacement["type"],
+                            ),
+                          })
+                        }
+                      >
+                        <option value="lesson_name">Lesson Name</option>
+                        <option value="period_reference">Period Reference</option>
+                        <option value="floating_lesson_reference">Floating Lesson Reference</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {timetableEditorForm.replacement.type === "lesson_name" ? (
+                    <label className="direct-lesson-field">
+                      Lesson Name
+                      <input
+                        autoFocus
+                        maxLength={80}
+                        value={timetableEditorForm.replacement.lessonName}
+                        onChange={(event) =>
+                          setTimetableEditorForm({
+                            ...timetableEditorForm,
+                            replacement: {
+                              type: "lesson_name",
+                              lessonName: event.target.value,
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                  ) : null}
+
+                  {timetableEditorForm.replacement.type === "period_reference" ? (
+                    <div className="period-reference-grid" aria-label="Period References">
+                      {Array.from({ length: 7 }, (_, periodIndex) =>
+                        Array.from({ length: 6 }, (_, weekdayIndex) => {
+                          const selected =
+                            timetableEditorForm.replacement.type === "period_reference" &&
+                            timetableEditorForm.replacement.weekday === weekdayIndex + 1 &&
+                            timetableEditorForm.replacement.periodNumber === periodIndex + 1;
+                          return (
+                            <button
+                              className={selected ? "selected" : ""}
+                              type="button"
+                              key={`${weekdayIndex}-${periodIndex}`}
+                              onClick={() =>
+                                setTimetableEditorForm({
+                                  ...timetableEditorForm,
+                                  replacement: {
+                                    type: "period_reference",
+                                    weekday: weekdayIndex + 1,
+                                    periodNumber: periodIndex + 1,
+                                  },
+                                })
+                              }
+                            >
+                              {"月火水木金土"[weekdayIndex]}{periodIndex + 1}
+                            </button>
+                          );
+                        }),
+                      )}
+                    </div>
+                  ) : null}
+
+                  {timetableEditorForm.replacement.type === "floating_lesson_reference" ? (
+                    <div className="floating-reference-list">
+                      {(timetableEditorOptions?.floatingLessonReferenceLabels ?? []).map(
+                        (label) => (
+                          <button
+                            type="button"
+                            className={
+                              timetableEditorForm.replacement.type === "floating_lesson_reference" &&
+                              timetableEditorForm.replacement.floatingLessonReferenceLabelId ===
+                                label.floatingLessonReferenceLabelId
+                                ? "selected"
+                                : ""
+                            }
+                            key={label.floatingLessonReferenceLabelId}
+                            onClick={() =>
+                              setTimetableEditorForm({
+                                ...timetableEditorForm,
+                                replacement: {
+                                  type: "floating_lesson_reference",
+                                  floatingLessonReferenceLabelId:
+                                    label.floatingLessonReferenceLabelId,
+                                  referenceLabel: label.referenceLabel,
+                                },
+                              })
+                            }
+                          >
+                            {label.referenceLabel}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  ) : null}
+
+                  <footer className="editor-dialog-actions">
+                    {timetableEditorForm.sourceId ? (
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => {
+                          timetableEditorClient.deleteDraft(timetableEditorForm.sourceId ?? "");
+                          setTimetableEditorForm(null);
+                        }}
+                      >
+                        下書きを削除
+                      </button>
+                    ) : null}
+                    <button className="button-primary" type="submit">
+                      下書きに保存
+                    </button>
+                  </footer>
+                </form>
+              </section>
+            </div>
           ) : null}
         </section>
       </main>
@@ -977,6 +1396,32 @@ function App() {
       </section>
     </main>
   );
+}
+
+function scopeLabel(scope: TargetScopeType) {
+  return { grade: "Grade", class: "Class", track: "Track", student: "Student" }[scope];
+}
+
+function replacementLabel(replacement: TimetableReplacement) {
+  if (replacement.type === "lesson_name") return replacement.lessonName;
+  if (replacement.type === "period_reference") {
+    return `${"月火水木金土"[replacement.weekday - 1]}${replacement.periodNumber}`;
+  }
+  if (replacement.type === "floating_lesson_reference") {
+    return replacement.referenceLabel;
+  }
+  return "Cancelled";
+}
+
+function defaultReplacement(
+  type: TimetableReplacement["type"],
+): TimetableReplacement {
+  if (type === "lesson_name") return { type, lessonName: "" };
+  if (type === "period_reference") return { type, weekday: 1, periodNumber: 1 };
+  if (type === "floating_lesson_reference") {
+    return { type, floatingLessonReferenceLabelId: "", referenceLabel: "" };
+  }
+  return { type: "cancelled" };
 }
 
 export default App;

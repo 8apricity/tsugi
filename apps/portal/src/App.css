@@ -475,7 +475,7 @@
 }
 
 .editor-fields label,
-.direct-lesson-field {
+.direct-lesson-input {
   display: grid;
   gap: 6px;
   color: var(--color-muted);
@@ -485,7 +485,7 @@
 
 .editor-fields input,
 .editor-fields select,
-.direct-lesson-field input {
+.direct-lesson-input {
   min-height: 42px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -507,34 +507,11 @@
   gap: 10px;
   min-width: 0;
   margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.replacement-options legend {
-  padding: 0;
-  color: var(--color-muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.replacement-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-text);
-  font-weight: 700;
-}
-
-.replacement-option input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--color-accent);
 }
 
 .period-reference-grid button,
-.floating-reference-list button {
+.floating-reference-list button,
+.replacement-cancel-button {
   min-height: 40px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -545,7 +522,8 @@
 }
 
 .period-reference-grid button.selected,
-.floating-reference-list button.selected {
+.floating-reference-list button.selected,
+.replacement-cancel-button.selected {
   border-color: var(--color-accent);
   background: var(--color-accent-soft);
 }
@@ -558,6 +536,11 @@
 
 .floating-reference-list button {
   min-width: 56px;
+  padding: 0 14px;
+}
+
+.replacement-cancel-button {
+  justify-self: start;
   padding: 0 14px;
 }
 

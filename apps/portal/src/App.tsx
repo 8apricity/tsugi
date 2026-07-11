@@ -1051,150 +1051,105 @@ function App() {
                     </label>
                   </div>
 
-                  <fieldset className="replacement-options">
-                    <legend>Replacement</legend>
-                    <label className="replacement-option">
-                      <input
-                        type="radio"
-                        name="replacement"
-                        checked={timetableEditorForm.replacement.type === "period_reference"}
-                        onChange={() =>
-                          setTimetableEditorForm({
-                            ...timetableEditorForm,
-                            replacement: defaultReplacement("period_reference"),
-                          })
-                        }
-                      />
-                      Period Reference
-                    </label>
-                    {timetableEditorForm.replacement.type === "period_reference" ? (
-                      <div className="period-reference-grid" aria-label="Period References">
-                        {Array.from({ length: 7 }, (_, periodIndex) =>
-                          Array.from({ length: 6 }, (_, weekdayIndex) => {
-                            const selected =
-                              timetableEditorForm.replacement.type === "period_reference" &&
-                              timetableEditorForm.replacement.weekday === weekdayIndex + 1 &&
-                              timetableEditorForm.replacement.periodNumber === periodIndex + 1;
-                            return (
-                              <button
-                                className={selected ? "selected" : ""}
-                                type="button"
-                                key={`${weekdayIndex}-${periodIndex}`}
-                                onClick={() =>
-                                  setTimetableEditorForm({
-                                    ...timetableEditorForm,
-                                    replacement: {
-                                      type: "period_reference",
-                                      weekday: weekdayIndex + 1,
-                                      periodNumber: periodIndex + 1,
-                                    },
-                                  })
-                                }
-                              >
-                                {"月火水木金土"[weekdayIndex]}{periodIndex + 1}
-                              </button>
-                            );
-                          }),
-                        )}
-                      </div>
-                    ) : null}
-
-                    <label className="replacement-option">
-                      <input
-                        type="radio"
-                        name="replacement"
-                        checked={timetableEditorForm.replacement.type === "floating_lesson_reference"}
-                        onChange={() =>
-                          setTimetableEditorForm({
-                            ...timetableEditorForm,
-                            replacement: defaultReplacement("floating_lesson_reference"),
-                          })
-                        }
-                      />
-                      Floating Lesson Reference
-                    </label>
-                    {timetableEditorForm.replacement.type === "floating_lesson_reference" ? (
-                      <div className="floating-reference-list">
-                        {(timetableEditorOptions?.floatingLessonReferenceLabels ?? []).map(
-                          (label) => (
+                  <div className="replacement-options">
+                    <div className="period-reference-grid" aria-label="Period References">
+                      {Array.from({ length: 7 }, (_, periodIndex) =>
+                        Array.from({ length: 6 }, (_, weekdayIndex) => {
+                          const selected =
+                            timetableEditorForm.replacement.type === "period_reference" &&
+                            timetableEditorForm.replacement.weekday === weekdayIndex + 1 &&
+                            timetableEditorForm.replacement.periodNumber === periodIndex + 1;
+                          return (
                             <button
+                              className={selected ? "selected" : ""}
                               type="button"
-                              className={
-                                timetableEditorForm.replacement.type ===
-                                  "floating_lesson_reference" &&
-                                timetableEditorForm.replacement.floatingLessonReferenceLabelId ===
-                                  label.floatingLessonReferenceLabelId
-                                  ? "selected"
-                                  : ""
-                              }
-                              key={label.floatingLessonReferenceLabelId}
+                              key={`${weekdayIndex}-${periodIndex}`}
                               onClick={() =>
                                 setTimetableEditorForm({
                                   ...timetableEditorForm,
                                   replacement: {
-                                    type: "floating_lesson_reference",
-                                    floatingLessonReferenceLabelId:
-                                      label.floatingLessonReferenceLabelId,
-                                    referenceLabel: label.referenceLabel,
+                                    type: "period_reference",
+                                    weekday: weekdayIndex + 1,
+                                    periodNumber: periodIndex + 1,
                                   },
                                 })
                               }
                             >
-                              {label.referenceLabel}
+                              {"月火水木金土"[weekdayIndex]}{periodIndex + 1}
                             </button>
-                          ),
-                        )}
-                      </div>
-                    ) : null}
+                          );
+                        }),
+                      )}
+                    </div>
 
-                    <label className="replacement-option">
-                      <input
-                        type="radio"
-                        name="replacement"
-                        checked={timetableEditorForm.replacement.type === "cancelled"}
-                        onChange={() =>
-                          setTimetableEditorForm({
-                            ...timetableEditorForm,
-                            replacement: defaultReplacement("cancelled"),
-                          })
-                        }
-                      />
+                    <div className="floating-reference-list">
+                      {(timetableEditorOptions?.floatingLessonReferenceLabels ?? []).map(
+                        (label) => (
+                          <button
+                            type="button"
+                            className={
+                              timetableEditorForm.replacement.type ===
+                                "floating_lesson_reference" &&
+                              timetableEditorForm.replacement.floatingLessonReferenceLabelId ===
+                                label.floatingLessonReferenceLabelId
+                                ? "selected"
+                                : ""
+                            }
+                            key={label.floatingLessonReferenceLabelId}
+                            onClick={() =>
+                              setTimetableEditorForm({
+                                ...timetableEditorForm,
+                                replacement: {
+                                  type: "floating_lesson_reference",
+                                  floatingLessonReferenceLabelId:
+                                    label.floatingLessonReferenceLabelId,
+                                  referenceLabel: label.referenceLabel,
+                                },
+                              })
+                            }
+                          >
+                            {label.referenceLabel}
+                          </button>
+                        ),
+                      )}
+                    </div>
+
+                    <button
+                      className={`replacement-cancel-button${
+                        timetableEditorForm.replacement.type === "cancelled" ? " selected" : ""
+                      }`}
+                      type="button"
+                      onClick={() =>
+                        setTimetableEditorForm({
+                          ...timetableEditorForm,
+                          replacement: defaultReplacement("cancelled"),
+                        })
+                      }
+                    >
                       Cancelled
-                    </label>
+                    </button>
 
-                    <label className="replacement-option">
-                      <input
-                        type="radio"
-                        name="replacement"
-                        checked={timetableEditorForm.replacement.type === "lesson_name"}
-                        onChange={() =>
-                          setTimetableEditorForm({
-                            ...timetableEditorForm,
-                            replacement: defaultReplacement("lesson_name"),
-                          })
-                        }
-                      />
-                      Lesson Name
-                    </label>
-                    {timetableEditorForm.replacement.type === "lesson_name" ? (
-                      <label className="direct-lesson-field">
-                        Lesson Name
-                        <input
-                          maxLength={80}
-                          value={timetableEditorForm.replacement.lessonName}
-                          onChange={(event) =>
-                            setTimetableEditorForm({
-                              ...timetableEditorForm,
-                              replacement: {
-                                type: "lesson_name",
-                                lessonName: event.target.value,
-                              },
-                            })
-                          }
-                        />
-                      </label>
-                    ) : null}
-                  </fieldset>
+                    <input
+                      className="direct-lesson-input"
+                      aria-label="Lesson Name"
+                      maxLength={80}
+                      placeholder="または、この時間の名前を直接入力"
+                      value={
+                        timetableEditorForm.replacement.type === "lesson_name"
+                          ? timetableEditorForm.replacement.lessonName
+                          : ""
+                      }
+                      onChange={(event) =>
+                        setTimetableEditorForm({
+                          ...timetableEditorForm,
+                          replacement: {
+                            type: "lesson_name",
+                            lessonName: event.target.value,
+                          },
+                        })
+                      }
+                    />
+                  </div>
 
                   <footer className="editor-dialog-actions">
                     {timetableEditorForm.sourceId ? (

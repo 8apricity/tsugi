@@ -1068,7 +1068,6 @@ function App() {
                     <label className="direct-lesson-field">
                       Lesson Name
                       <input
-                        autoFocus
                         maxLength={80}
                         value={timetableEditorForm.replacement.lessonName}
                         onChange={(event) =>

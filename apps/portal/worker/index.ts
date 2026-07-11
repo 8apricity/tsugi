@@ -11,6 +11,10 @@ import {
 } from "./persistence";
 import { readDailyPlan, readDailyPlansRange } from "./dailyPlan";
 import { createStudentAccountAccess } from "./studentAccountAccess";
+import {
+  addDirectTimetableChanges,
+  readDirectTimetableChangeOptions,
+} from "./directTimetableChange";
 
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
@@ -375,6 +379,69 @@ export default {
         return Response.json(result, { status: 503 });
       }
 
+      return Response.json(result);
+    }
+
+    if (
+      url.pathname === "/api/timetable-changes/direct" &&
+      request.method === "POST"
+    ) {
+      const persistence = await getPersistenceAdapters(env);
+      let body: { changes?: unknown };
+
+      try {
+        body = await request.json<{ changes?: unknown }>();
+      } catch {
+        return Response.json({ status: "invalid-change" }, { status: 400 });
+      }
+
+      const result = await addDirectTimetableChanges({
+        sessionToken: readCookie(request, sessionCookieName),
+        drafts: body.changes,
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        store: persistence.directTimetableChange,
+      });
+
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "invalid-change") {
+        return Response.json(result, { status: 400 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (
+        result.status === "timetable-change-conflict" ||
+        result.status === "idempotency-conflict"
+      ) {
+        return Response.json(result, { status: 409 });
+      }
+
+      return Response.json(result, { status: 201 });
+    }
+
+    if (
+      url.pathname === "/api/timetable-changes/direct/options" &&
+      request.method === "GET"
+    ) {
+      const persistence = await getPersistenceAdapters(env);
+      const result = await readDirectTimetableChangeOptions({
+        sessionToken: readCookie(request, sessionCookieName),
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        store: persistence.directTimetableChange,
+      });
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "unavailable") {
+        return Response.json(result, { status: 503 });
+      }
       return Response.json(result);
     }
 

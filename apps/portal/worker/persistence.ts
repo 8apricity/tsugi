@@ -87,11 +87,41 @@ export type PeriodStandardTimetableEntry = StandardTimetableEntryBase & {
 export type FloatingStandardTimetableEntry = StandardTimetableEntryBase & {
   referenceType: 'floating'
   referenceLabel: string
+  floatingLessonReferenceLabelId?: string
 }
 
 export type StandardTimetableEntry =
   | PeriodStandardTimetableEntry
   | FloatingStandardTimetableEntry
+
+export type TargetScopeType = 'grade' | 'class' | 'track' | 'student'
+
+export type FloatingLessonReferenceLabel = {
+  floatingLessonReferenceLabelId: string
+  schoolYear: number
+  grade: number
+  referenceLabel: string
+  displayOrder: number
+}
+
+export type TimetableChangeReplacement =
+  | { type: 'lesson_name'; lessonName: string }
+  | { type: 'period_reference'; weekday: number; periodNumber: number }
+  | { type: 'floating_lesson_reference'; floatingLessonReferenceLabelId: string }
+  | { type: 'cancelled' }
+
+export type ActiveTimetableChange = {
+  sourceId: string
+  sharedInformationItemId: string
+  schoolYear: number
+  targetScopeType: TargetScopeType
+  targetScopeValue: string
+  changeDate: string
+  periodNumber: number
+  replacement: TimetableChangeReplacement
+  changedByStudentAccountId: string
+  changedAt: number
+}
 
 export type CompleteInitialSetupTransactionInput = {
   setupSessionTokenHash: string
@@ -176,6 +206,51 @@ export type DailyPlanStore = {
     trackId: string,
     weekday: number,
   ): Promise<PeriodStandardTimetableEntry[]>
+  findStandardTimetableEntryForPeriodReference(
+    classId: string,
+    trackId: string,
+    weekday: number,
+    periodNumber: number,
+  ): Promise<PeriodStandardTimetableEntry | null>
+  findStandardTimetableEntryForFloatingReference(
+    classId: string,
+    trackId: string,
+    referenceLabel: string,
+  ): Promise<FloatingStandardTimetableEntry | null>
+  findStandardTimetableEntryForFloatingReferenceLabelId(
+    classId: string,
+    trackId: string,
+    floatingLessonReferenceLabelId: string,
+  ): Promise<FloatingStandardTimetableEntry | null>
+  listActiveTimetableChangesForStudent(
+    affiliation: StudentAffiliation,
+    start: string,
+    end: string,
+  ): Promise<ActiveTimetableChange[]>
+}
+
+export type DirectTimetableChangeStore = {
+  findCurrentSchoolYear(): Promise<SchoolYearRecord | null>
+  findCurrentStudentAffiliation(
+    studentAccountId: string,
+    schoolYear: number,
+  ): Promise<StudentAffiliation | null>
+  commitDirectTimetableChanges(
+    changes: ActiveTimetableChange[],
+  ): Promise<
+    | { status: 'applied'; changes: ActiveTimetableChange[] }
+    | { status: 'conflict' }
+    | { status: 'idempotency-conflict' }
+  >
+  listFloatingLessonReferenceLabels(
+    schoolYear: number,
+    grade: number,
+  ): Promise<FloatingLessonReferenceLabel[]>
+  findFloatingLessonReferenceLabel(
+    floatingLessonReferenceLabelId: string,
+    schoolYear: number,
+    grade: number,
+  ): Promise<FloatingLessonReferenceLabel | null>
 }
 
 export type PersistenceSeedStore = {
@@ -191,6 +266,7 @@ export type PersistenceAdapters = {
   studentAccount: StudentAccountAccessStore
   studentAffiliation: StudentAffiliationSetupStore
   dailyPlan: DailyPlanStore
+  directTimetableChange: DirectTimetableChangeStore
   seed: PersistenceSeedStore
 }
 
@@ -209,6 +285,7 @@ export class InMemoryPersistenceAdapters
   private tracks: TrackRecord[] = []
   private studentAffiliations: StudentAffiliation[] = []
   private standardTimetableEntries: StandardTimetableEntry[] = []
+  private activeTimetableChanges: ActiveTimetableChange[] = []
   private initialSetupDrafts = new Map<string, InitialSetupDraft>()
   private failNextAffiliationSave = false
 
@@ -434,6 +511,22 @@ export class InMemoryPersistenceAdapters
     )
   }
 
+  async findStandardTimetableEntryForPeriodReference(
+    classId: string,
+    trackId: string,
+    weekday: number,
+    periodNumber: number,
+  ) {
+    const entries = await this.listStandardTimetableEntriesForWeekday(
+      classId,
+      trackId,
+      weekday,
+    )
+    const matching = entries.filter((entry) => entry.periodNumber === periodNumber)
+
+    return matching.find((entry) => entry.trackId === trackId) ?? matching[0] ?? null
+  }
+
   async findStandardTimetableEntryForFloatingReference(
     classId: string,
     trackId: string,
@@ -446,8 +539,121 @@ export class InMemoryPersistenceAdapters
         (entry.trackId === null || entry.trackId === trackId) &&
         entry.referenceLabel === referenceLabel,
     )
+    return entries.find((entry) => entry.trackId === trackId) ?? entries[0] ?? null
+  }
+
+  async findStandardTimetableEntryForFloatingReferenceLabelId(
+    classId: string,
+    trackId: string,
+    floatingLessonReferenceLabelId: string,
+  ) {
+    const label = (await this.listFloatingLessonReferenceLabels(
+      Number(floatingLessonReferenceLabelId.split(':')[0]),
+      Number(floatingLessonReferenceLabelId.split(':')[1]),
+    )).find(
+      (candidate) =>
+        candidate.floatingLessonReferenceLabelId === floatingLessonReferenceLabelId,
+    )
+    if (!label) return null
+    const entries = this.standardTimetableEntries.filter(
+      (entry): entry is FloatingStandardTimetableEntry =>
+        entry.referenceType === 'floating' &&
+        entry.classId === classId &&
+        (entry.trackId === null || entry.trackId === trackId) &&
+        (entry.floatingLessonReferenceLabelId === floatingLessonReferenceLabelId ||
+          entry.referenceLabel === label.referenceLabel),
+    )
 
     return entries.find((entry) => entry.trackId === trackId) ?? entries[0] ?? null
+  }
+
+  async listActiveTimetableChangesForStudent(
+    affiliation: StudentAffiliation,
+    start: string,
+    end: string,
+  ) {
+    return this.activeTimetableChanges.filter((change) => {
+      if (change.changeDate < start || change.changeDate > end) return false
+      if (change.schoolYear !== affiliation.schoolYear) return false
+
+      return (
+        (change.targetScopeType === 'grade' &&
+          change.targetScopeValue === String(affiliation.grade)) ||
+        (change.targetScopeType === 'class' &&
+          change.targetScopeValue === affiliation.classId) ||
+        (change.targetScopeType === 'track' &&
+          change.targetScopeValue === affiliation.trackId) ||
+        (change.targetScopeType === 'student' &&
+          change.targetScopeValue === affiliation.studentAccountId)
+      )
+    })
+  }
+
+  async commitDirectTimetableChanges(changes: ActiveTimetableChange[]) {
+    const existingBySource = new Map(
+      this.activeTimetableChanges.map((change) => [change.sourceId, change]),
+    )
+    const newChanges: ActiveTimetableChange[] = []
+
+    for (const change of changes) {
+      const existing = existingBySource.get(change.sourceId)
+
+      if (existing) {
+        if (!sameDirectChangePayload(existing, change)) {
+          return { status: 'idempotency-conflict' as const }
+        }
+        continue
+      }
+
+      const conflicts = this.activeTimetableChanges.some(
+        (candidate) =>
+          candidate.schoolYear === change.schoolYear &&
+          candidate.targetScopeType === change.targetScopeType &&
+          candidate.targetScopeValue === change.targetScopeValue &&
+          candidate.changeDate === change.changeDate &&
+          candidate.periodNumber === change.periodNumber,
+      )
+
+      if (conflicts) return { status: 'conflict' as const }
+      newChanges.push(change)
+    }
+
+    this.activeTimetableChanges.push(...newChanges)
+    return { status: 'applied' as const, changes }
+  }
+
+  async listFloatingLessonReferenceLabels(schoolYear: number, grade: number) {
+    const classIds = new Set(
+      this.schoolYearClasses
+        .filter((schoolClass) => schoolClass.schoolYear === schoolYear && schoolClass.grade === grade)
+        .map((schoolClass) => schoolClass.classId),
+    )
+    return [...new Set(
+      this.standardTimetableEntries
+        .filter((entry): entry is FloatingStandardTimetableEntry =>
+          entry.referenceType === 'floating' && classIds.has(entry.classId),
+        )
+        .map((entry) => entry.referenceLabel),
+    )].map((referenceLabel, index) => ({
+      floatingLessonReferenceLabelId: `${schoolYear}:${grade}:${referenceLabel}`,
+      schoolYear,
+      grade,
+      referenceLabel,
+      displayOrder: index,
+    }))
+  }
+
+  async findFloatingLessonReferenceLabel(
+    floatingLessonReferenceLabelId: string,
+    schoolYear: number,
+    grade: number,
+  ) {
+    return (
+      (await this.listFloatingLessonReferenceLabels(schoolYear, grade)).find(
+        (label) =>
+          label.floatingLessonReferenceLabelId === floatingLessonReferenceLabelId,
+      ) ?? null
+    )
   }
 
   async completeInitialSetupTransaction(
@@ -589,11 +795,33 @@ type StandardTimetableEntryRow = {
   lesson_name: string
 }
 
+type ActiveTimetableChangeRow = {
+  source_id: string
+  shared_information_item_id: string
+  school_year: number
+  scope_type: TargetScopeType
+  grade: number | null
+  class_id: string | null
+  track_id: string | null
+  student_account_id: string | null
+  change_date: string
+  period_number: number
+  replacement_type: 'lesson_name' | 'period_reference' | 'floating_lesson_reference' | 'cancelled'
+  replacement_lesson_name: string | null
+  reference_weekday: number | null
+  reference_period_number: number | null
+  reference_label: string | null
+  floating_lesson_reference_label_id: string | null
+  changed_by_student_account_id: string
+  changed_at: string
+}
+
 export class D1PersistenceAdapters
   implements
     StudentAccountAccessStore,
     StudentAffiliationSetupStore,
-    DailyPlanStore
+    DailyPlanStore,
+    DirectTimetableChangeStore
 {
   private readonly db: D1Database
 
@@ -1068,6 +1296,29 @@ export class D1PersistenceAdapters
     return results.map(mapPeriodStandardTimetableEntryRow)
   }
 
+  async findStandardTimetableEntryForPeriodReference(
+    classId: string,
+    trackId: string,
+    weekday: number,
+    periodNumber: number,
+  ) {
+    const row = await this.db
+      .prepare(
+        `select standard_timetable_entry_id, class_id, track_id, reference_type,
+                weekday, period_number, reference_label, lesson_name
+         from standard_timetable_entries
+         where class_id = ? and reference_type = 'period'
+           and weekday = ? and period_number = ?
+           and (track_id is null or track_id = ?)
+         order by track_id is not null desc
+         limit 1`,
+      )
+      .bind(classId, weekday, periodNumber, trackId)
+      .first<StandardTimetableEntryRow>()
+
+    return row ? mapPeriodStandardTimetableEntryRow(row) : null
+  }
+
   async findStandardTimetableEntryForFloatingReference(
     classId: string,
     trackId: string,
@@ -1078,17 +1329,227 @@ export class D1PersistenceAdapters
         `select standard_timetable_entry_id, class_id, track_id, reference_type,
                 weekday, period_number, reference_label, lesson_name
          from standard_timetable_entries
+         where class_id = ? and reference_type = 'floating'
+           and reference_label = ? and (track_id is null or track_id = ?)
+         order by track_id is not null desc limit 1`,
+      )
+      .bind(classId, referenceLabel, trackId)
+      .first<StandardTimetableEntryRow>()
+    return row ? mapFloatingStandardTimetableEntryRow(row) : null
+  }
+
+  async findStandardTimetableEntryForFloatingReferenceLabelId(
+    classId: string,
+    trackId: string,
+    floatingLessonReferenceLabelId: string,
+  ) {
+    const row = await this.db
+      .prepare(
+        `select standard_timetable_entry_id, class_id, track_id, reference_type,
+                weekday, period_number, reference_label, lesson_name
+         from standard_timetable_entries
          where class_id = ?
            and reference_type = 'floating'
-           and reference_label = ?
+           and floating_lesson_reference_label_id = ?
            and (track_id is null or track_id = ?)
          order by track_id is not null desc
          limit 1`,
       )
-      .bind(classId, referenceLabel, trackId)
+      .bind(classId, floatingLessonReferenceLabelId, trackId)
       .first<StandardTimetableEntryRow>()
 
     return row ? mapFloatingStandardTimetableEntryRow(row) : null
+  }
+
+  async listActiveTimetableChangesForStudent(
+    affiliation: StudentAffiliation,
+    start: string,
+    end: string,
+  ) {
+    const { results } = await this.db
+      .prepare(
+        `select c.source_id, i.shared_information_item_id, s.school_year,
+                p.scope_type, p.grade, p.class_id, p.track_id, p.student_account_id,
+                t.change_date, t.period_number, t.replacement_type,
+                t.replacement_lesson_name, t.reference_weekday,
+                t.reference_period_number, t.reference_label,
+                t.floating_lesson_reference_label_id,
+                c.changed_by_student_account_id, c.changed_at
+         from shared_information_items i
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         join timetable_change_snapshots t
+           on t.timetable_change_snapshot_id = i.current_timetable_change_snapshot_id
+         join shared_information_changes c
+           on c.shared_information_change_id = i.latest_change_id
+         where i.kind = 'timetable_change' and i.removed_at is null
+           and s.school_year = ? and t.change_date between ? and ?
+           and ((p.scope_type = 'grade' and p.grade = ?)
+             or (p.scope_type = 'class' and p.class_id = ?)
+             or (p.scope_type = 'track' and p.track_id = ?)
+             or (p.scope_type = 'student' and p.student_account_id = ?))`,
+      )
+      .bind(
+        affiliation.schoolYear,
+        start,
+        end,
+        affiliation.grade,
+        affiliation.classId,
+        affiliation.trackId,
+        affiliation.studentAccountId,
+      )
+      .all<ActiveTimetableChangeRow>()
+
+    return results.map(mapActiveTimetableChangeRow)
+  }
+
+  async commitDirectTimetableChanges(changes: ActiveTimetableChange[]) {
+    const existing = await this.findDirectChangesBySourceIds(
+      changes.map((change) => change.sourceId),
+    )
+    const existingBySource = new Map(existing.map((change) => [change.sourceId, change]))
+
+    for (const change of changes) {
+      const previous = existingBySource.get(change.sourceId)
+      if (previous && !sameDirectChangePayload(previous, change)) {
+        return { status: 'idempotency-conflict' as const }
+      }
+    }
+
+    const pending = changes.filter((change) => !existingBySource.has(change.sourceId))
+    if (pending.length === 0) return { status: 'applied' as const, changes: existing }
+
+    const slotKeys = pending.map(activeTimetableChangeSlotKey)
+    const placeholders = slotKeys.map(() => '?').join(', ')
+    const occupied = await this.db
+      .prepare(
+        `select count(*) as count from active_timetable_change_slots
+         where timetable_change_slot_key in (${placeholders})`,
+      )
+      .bind(...slotKeys)
+      .first<{ count: number }>()
+
+    if ((occupied?.count ?? 0) > 0) return { status: 'conflict' as const }
+
+    const statements: D1PreparedStatement[] = []
+    for (const change of pending) {
+      const targetScopeId = `${change.sourceId}:scope`
+      const snapshotId = `${change.sourceId}:snapshot`
+      const sharedChangeId = `${change.sourceId}:change`
+      const createdAt = new Date(change.changedAt).toISOString()
+      const part = targetScopeColumns(change)
+
+      statements.push(
+        this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.schoolYear, createdAt),
+        this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScopeType, part.grade, part.classId, part.trackId, part.studentAccountId),
+        this.db.prepare(`insert into timetable_change_snapshots (timetable_change_snapshot_id, change_date, period_number, replacement_type, replacement_lesson_name, reference_weekday, reference_period_number, reference_label, floating_lesson_reference_label_id, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(snapshotId, change.changeDate, change.periodNumber, change.replacement.type, change.replacement.type === 'lesson_name' ? change.replacement.lessonName : null, change.replacement.type === 'period_reference' ? change.replacement.weekday : null, change.replacement.type === 'period_reference' ? change.replacement.periodNumber : null, change.replacement.type === 'floating_lesson_reference' ? change.replacement.floatingLessonReferenceLabelId : null, change.replacement.type === 'floating_lesson_reference' ? change.replacement.floatingLessonReferenceLabelId : null, createdAt),
+        this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_timetable_change_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'timetable_change', ?, null, ?, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
+        this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, timetable_change_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
+        this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
+        this.db.prepare(`insert into active_timetable_change_slots (timetable_change_slot_key, shared_information_item_id) values (?, ?)`).bind(activeTimetableChangeSlotKey(change), change.sharedInformationItemId),
+      )
+    }
+
+    try {
+      await this.db.batch(statements)
+    } catch {
+      const retried = await this.findDirectChangesBySourceIds(
+        changes.map((change) => change.sourceId),
+      )
+      if (
+        retried.length === changes.length &&
+        changes.every((change) => {
+          const previous = retried.find((item) => item.sourceId === change.sourceId)
+          return previous ? sameDirectChangePayload(previous, change) : false
+        })
+      ) {
+        return { status: 'applied' as const, changes: retried }
+      }
+      return { status: 'conflict' as const }
+    }
+
+    return { status: 'applied' as const, changes }
+  }
+
+  private async findDirectChangesBySourceIds(sourceIds: string[]) {
+    if (sourceIds.length === 0) return []
+    const placeholders = sourceIds.map(() => '?').join(', ')
+    const { results } = await this.db
+      .prepare(
+        `select c.source_id, i.shared_information_item_id, s.school_year,
+                p.scope_type, p.grade, p.class_id, p.track_id, p.student_account_id,
+                t.change_date, t.period_number, t.replacement_type,
+                t.replacement_lesson_name, t.reference_weekday,
+                t.reference_period_number, t.reference_label,
+                t.floating_lesson_reference_label_id,
+                c.changed_by_student_account_id, c.changed_at
+         from shared_information_changes c
+         join shared_information_items i on i.shared_information_item_id = c.shared_information_item_id
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         join timetable_change_snapshots t on t.timetable_change_snapshot_id = c.timetable_change_snapshot_id
+         where c.source_type = 'direct' and c.source_id in (${placeholders})`,
+      )
+      .bind(...sourceIds)
+      .all<ActiveTimetableChangeRow>()
+    return results.map(mapActiveTimetableChangeRow)
+  }
+
+  async listFloatingLessonReferenceLabels(schoolYear: number, grade: number) {
+    const { results } = await this.db
+      .prepare(
+        `select floating_lesson_reference_label_id, school_year, grade,
+                reference_label, display_order
+         from floating_lesson_reference_labels
+         where school_year = ? and grade = ?
+         order by display_order asc, reference_label asc`,
+      )
+      .bind(schoolYear, grade)
+      .all<{
+        floating_lesson_reference_label_id: string
+        school_year: number
+        grade: number
+        reference_label: string
+        display_order: number
+      }>()
+    return results.map((row) => ({
+      floatingLessonReferenceLabelId: row.floating_lesson_reference_label_id,
+      schoolYear: row.school_year,
+      grade: row.grade,
+      referenceLabel: row.reference_label,
+      displayOrder: row.display_order,
+    }))
+  }
+
+  async findFloatingLessonReferenceLabel(
+    floatingLessonReferenceLabelId: string,
+    schoolYear: number,
+    grade: number,
+  ) {
+    const row = await this.db
+      .prepare(
+        `select floating_lesson_reference_label_id, school_year, grade,
+                reference_label, display_order
+         from floating_lesson_reference_labels
+         where floating_lesson_reference_label_id = ? and school_year = ? and grade = ?`,
+      )
+      .bind(floatingLessonReferenceLabelId, schoolYear, grade)
+      .first<{
+        floating_lesson_reference_label_id: string
+        school_year: number
+        grade: number
+        reference_label: string
+        display_order: number
+      }>()
+    return row
+      ? {
+          floatingLessonReferenceLabelId: row.floating_lesson_reference_label_id,
+          schoolYear: row.school_year,
+          grade: row.grade,
+          referenceLabel: row.reference_label,
+          displayOrder: row.display_order,
+        }
+      : null
   }
 
   async saveInitialSetupDraft(
@@ -1289,6 +1750,7 @@ export function createInMemoryPersistenceAdapters(): PersistenceAdapters {
     studentAccount: implementation,
     studentAffiliation: implementation,
     dailyPlan: implementation,
+    directTimetableChange: implementation,
     seed: implementation,
   }
 }
@@ -1300,6 +1762,7 @@ export function createD1PersistenceAdapters(db: D1Database): PersistenceAdapters
     studentAccount: implementation,
     studentAffiliation: implementation,
     dailyPlan: implementation,
+    directTimetableChange: implementation,
     seed: implementation,
   }
 }
@@ -1389,4 +1852,85 @@ function mapFloatingStandardTimetableEntryRow(
     referenceLabel: row.reference_label,
     lessonName: row.lesson_name,
   }
+}
+
+function mapActiveTimetableChangeRow(
+  row: ActiveTimetableChangeRow,
+): ActiveTimetableChange {
+  const targetScopeValue =
+    row.scope_type === 'grade'
+      ? String(row.grade)
+      : row.scope_type === 'class'
+        ? String(row.class_id)
+        : row.scope_type === 'track'
+          ? String(row.track_id)
+          : String(row.student_account_id)
+  let replacement: TimetableChangeReplacement
+
+  if (row.replacement_type === 'lesson_name') {
+    replacement = { type: 'lesson_name', lessonName: row.replacement_lesson_name ?? '' }
+  } else if (row.replacement_type === 'period_reference') {
+    replacement = {
+      type: 'period_reference',
+      weekday: row.reference_weekday ?? 0,
+      periodNumber: row.reference_period_number ?? 0,
+    }
+  } else if (row.replacement_type === 'floating_lesson_reference') {
+    replacement = {
+      type: 'floating_lesson_reference',
+      floatingLessonReferenceLabelId:
+        row.floating_lesson_reference_label_id ?? row.reference_label ?? '',
+    }
+  } else {
+    replacement = { type: 'cancelled' }
+  }
+
+  return {
+    sourceId: row.source_id,
+    sharedInformationItemId: row.shared_information_item_id,
+    schoolYear: row.school_year,
+    targetScopeType: row.scope_type,
+    targetScopeValue,
+    changeDate: row.change_date,
+    periodNumber: row.period_number,
+    replacement,
+    changedByStudentAccountId: row.changed_by_student_account_id,
+    changedAt: Date.parse(row.changed_at),
+  }
+}
+
+function targetScopeColumns(change: ActiveTimetableChange) {
+  return {
+    grade: change.targetScopeType === 'grade' ? Number(change.targetScopeValue) : null,
+    classId: change.targetScopeType === 'class' ? change.targetScopeValue : null,
+    trackId: change.targetScopeType === 'track' ? change.targetScopeValue : null,
+    studentAccountId:
+      change.targetScopeType === 'student' ? change.targetScopeValue : null,
+  }
+}
+
+function activeTimetableChangeSlotKey(change: ActiveTimetableChange) {
+  return [
+    change.schoolYear,
+    change.targetScopeType,
+    change.targetScopeValue,
+    change.changeDate,
+    change.periodNumber,
+  ].join(':')
+}
+
+function sameDirectChangePayload(
+  left: ActiveTimetableChange,
+  right: ActiveTimetableChange,
+) {
+  return (
+    left.sourceId === right.sourceId &&
+    left.schoolYear === right.schoolYear &&
+    left.targetScopeType === right.targetScopeType &&
+    left.targetScopeValue === right.targetScopeValue &&
+    left.changeDate === right.changeDate &&
+    left.periodNumber === right.periodNumber &&
+    JSON.stringify(left.replacement) === JSON.stringify(right.replacement) &&
+    left.changedByStudentAccountId === right.changedByStudentAccountId
+  )
 }

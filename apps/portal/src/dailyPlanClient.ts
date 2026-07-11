@@ -2,10 +2,13 @@ import {
   createDailyPlanCache,
   type DailyPlanForCache,
   type FetchDailyPlans,
+  type SchoolYearRange,
 } from "./dailyPlanCache";
 import {
   buildDateStrip,
+  buildSchoolYearDateStrip,
   formatCurrentJstSchoolDate,
+  isAfterLastDailyLesson,
   shiftSchoolDate,
 } from "./dailyPlanView";
 
@@ -19,30 +22,37 @@ export type DailyPlanClientState =
 export type DailyPlanClientSnapshot = {
   selectedSchoolDate: string;
   currentSchoolDate: string;
+  schoolYearRange: SchoolYearRange | null;
   dateStrip: ReturnType<typeof buildDateStrip>;
   dailyPlanState: DailyPlanClientState;
 };
 
 export function createDailyPlanClient({
-  initialSchoolDate = formatCurrentJstSchoolDate(),
+  initialSchoolDate,
   currentSchoolDate = formatCurrentJstSchoolDate,
+  now = () => new Date(),
   datePickerRadius = 180,
   cacheRadius = 7,
   fetchDailyPlans,
 }: {
   initialSchoolDate?: string;
   currentSchoolDate?: () => string;
+  now?: () => Date;
   datePickerRadius?: number;
   cacheRadius?: number;
   fetchDailyPlans: FetchDailyPlans;
 }) {
   const listeners = new Set<() => void>();
+  const resolvedInitialSchoolDate = initialSchoolDate ?? currentSchoolDate();
   let cache = createCache();
   let loadGeneration = 0;
+  let shouldResolveInitialSchoolDate = true;
+  let schoolYearRange: SchoolYearRange | null = null;
   let snapshot: DailyPlanClientSnapshot = {
-    selectedSchoolDate: initialSchoolDate,
+    selectedSchoolDate: resolvedInitialSchoolDate,
     currentSchoolDate: currentSchoolDate(),
-    dateStrip: buildDateStrip(initialSchoolDate, datePickerRadius),
+    schoolYearRange: null,
+    dateStrip: buildDateStrip(resolvedInitialSchoolDate, datePickerRadius),
     dailyPlanState: { status: "loading" },
   };
 
@@ -59,6 +69,14 @@ export function createDailyPlanClient({
   }
 
   function selectSchoolDate(schoolDate: string) {
+    if (
+      schoolYearRange &&
+      (schoolDate < schoolYearRange.startsOn || schoolDate > schoolYearRange.endsOn)
+    ) {
+      return Promise.resolve(snapshot.dailyPlanState);
+    }
+
+    shouldResolveInitialSchoolDate = false;
     update({
       selectedSchoolDate: schoolDate,
       currentSchoolDate: currentSchoolDate(),
@@ -125,8 +143,53 @@ export function createDailyPlanClient({
         return state;
       }
 
+      schoolYearRange = result.schoolYearRange;
+      const dateStrip = buildSchoolYearDateStrip(
+        schoolYearRange.startsOn,
+        schoolYearRange.endsOn,
+      );
+      const boundedSchoolDate = boundSchoolDateToRange(
+        schoolDate,
+        schoolYearRange,
+      );
+
+      if (boundedSchoolDate !== schoolDate) {
+        update({
+          selectedSchoolDate: boundedSchoolDate,
+          schoolYearRange,
+          dateStrip,
+          dailyPlanState: { status: "loading" },
+        });
+        return loadSelectedDailyPlan();
+      }
+
+      if (
+        shouldResolveInitialSchoolDate &&
+        schoolDate === snapshot.currentSchoolDate
+      ) {
+        shouldResolveInitialSchoolDate = false;
+        const targetSchoolDate = isAfterLastDailyLesson(now(), result.periods)
+          ? shiftSchoolDate(snapshot.currentSchoolDate, 1)
+          : snapshot.currentSchoolDate;
+        const boundedTargetSchoolDate = boundSchoolDateToRange(
+          targetSchoolDate,
+          schoolYearRange,
+        );
+
+        if (boundedTargetSchoolDate !== schoolDate) {
+          update({
+            selectedSchoolDate: boundedTargetSchoolDate,
+            schoolYearRange,
+            dateStrip,
+            dailyPlanState: { status: "loading" },
+          });
+          return loadSelectedDailyPlan();
+        }
+      }
+      shouldResolveInitialSchoolDate = false;
+
       const state = { status: "ready", dailyPlan: result } as const;
-      update({ dailyPlanState: state });
+      update({ dailyPlanState: state, schoolYearRange, dateStrip });
       void cache.prefetchNearLoadedEdge(schoolDate).catch(() => undefined);
       return state;
     } catch {
@@ -150,8 +213,14 @@ export function createDailyPlanClient({
   function reset() {
     loadGeneration += 1;
     cache = createCache();
+    schoolYearRange = null;
+    shouldResolveInitialSchoolDate = true;
+    const nextCurrentSchoolDate = currentSchoolDate();
     update({
-      currentSchoolDate: currentSchoolDate(),
+      selectedSchoolDate: nextCurrentSchoolDate,
+      currentSchoolDate: nextCurrentSchoolDate,
+      schoolYearRange: null,
+      dateStrip: buildDateStrip(nextCurrentSchoolDate, datePickerRadius),
       dailyPlanState: { status: "loading" },
     });
   }
@@ -170,4 +239,19 @@ export function createDailyPlanClient({
     reload,
     reset,
   };
+}
+
+function boundSchoolDateToRange(
+  schoolDate: string,
+  schoolYearRange: SchoolYearRange,
+) {
+  if (schoolDate < schoolYearRange.startsOn) {
+    return schoolYearRange.startsOn;
+  }
+
+  if (schoolDate > schoolYearRange.endsOn) {
+    return schoolYearRange.endsOn;
+  }
+
+  return schoolDate;
 }

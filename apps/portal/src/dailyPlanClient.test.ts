@@ -15,6 +15,10 @@ function dailyPlan(schoolDate: string): DailyPlanForCache {
       trackId: "track-1",
       trackName: "文科",
     },
+    schoolYearRange: {
+      startsOn: "2026-04-01",
+      endsOn: "2027-03-31",
+    },
     periods: [],
     tasks: [],
     notes: [],
@@ -192,6 +196,122 @@ describe("Daily Plan client module", () => {
     });
     expect(client.getSnapshot().dailyPlanState).toEqual({
       status: "unauthenticated",
+    });
+  });
+
+  it("selects tomorrow after the last lesson and exposes only the School Year", async () => {
+    const fetchDailyPlans = vi.fn(async (start: string, end: string) => ({
+      status: "ready" as const,
+      dailyPlans: Object.fromEntries(
+        ["2026-07-10", "2026-07-11"]
+          .filter((date) => start <= date && date <= end)
+          .map((date) => [
+            date,
+            {
+              ...dailyPlan(date),
+              periods: [
+                { periodNumber: 1, lessonName: "数学", hasTasks: false, notes: [] },
+                { periodNumber: 2, lessonName: "", hasTasks: false, notes: [] },
+              ],
+              schoolYearRange: {
+                startsOn: "2026-07-09",
+                endsOn: "2026-07-12",
+              },
+            },
+          ]),
+      ),
+    }));
+    const client = createDailyPlanClient({
+      initialSchoolDate: "2026-07-10",
+      currentSchoolDate: () => "2026-07-10",
+      now: () => new Date("2026-07-10T00:10:00.000Z"),
+      cacheRadius: 1,
+      fetchDailyPlans,
+    });
+
+    await client.loadSelectedDailyPlan();
+
+    expect(client.getSnapshot().selectedSchoolDate).toBe("2026-07-11");
+    expect(
+      client.getSnapshot().dateStrip.map(({ schoolDate }) => schoolDate),
+    ).toEqual(["2026-07-09", "2026-07-10", "2026-07-11", "2026-07-12"]);
+  });
+
+  it("reset restores today's initial Daily Plan selection", async () => {
+    const client = createDailyPlanClient({
+      initialSchoolDate: "2026-07-10",
+      currentSchoolDate: () => "2026-07-10",
+      fetchDailyPlans: async () => readyResult("2026-07-10"),
+    });
+
+    await client.selectSchoolDate("2026-07-12");
+    client.reset();
+
+    expect(client.getSnapshot().selectedSchoolDate).toBe("2026-07-10");
+  });
+
+  it("does not select a date outside the School Year", async () => {
+    const client = createDailyPlanClient({
+      initialSchoolDate: "2026-07-10",
+      currentSchoolDate: () => "2026-07-10",
+      fetchDailyPlans: async () => ({
+        status: "ready",
+        dailyPlans: {
+          "2026-07-10": {
+            ...dailyPlan("2026-07-10"),
+            schoolYearRange: {
+              startsOn: "2026-07-09",
+              endsOn: "2026-07-10",
+            },
+          },
+        },
+      }),
+    });
+
+    await client.loadSelectedDailyPlan();
+    await client.shiftSelectedSchoolDate(1);
+
+    expect(client.getSnapshot().selectedSchoolDate).toBe("2026-07-10");
+  });
+
+  it("bounds the initial selection after the School Year range loads", async () => {
+    const fetchDailyPlans = vi.fn(async (start: string, end: string) => {
+      const requestedDate = start === end ? start : "2026-03-31";
+      const plan = dailyPlan(requestedDate);
+
+      return {
+        status: "ready" as const,
+        dailyPlans: {
+          [requestedDate]: {
+            ...plan,
+            schoolYearRange: {
+              startsOn: "2026-04-01",
+              endsOn: "2027-03-31",
+            },
+          },
+          "2026-04-01": {
+            ...dailyPlan("2026-04-01"),
+            schoolYearRange: {
+              startsOn: "2026-04-01",
+              endsOn: "2027-03-31",
+            },
+          },
+        },
+      };
+    });
+    const client = createDailyPlanClient({
+      initialSchoolDate: "2026-03-31",
+      currentSchoolDate: () => "2026-03-31",
+      cacheRadius: 0,
+      fetchDailyPlans,
+    });
+
+    await client.loadSelectedDailyPlan();
+
+    expect(client.getSnapshot().selectedSchoolDate).toBe("2026-04-01");
+    expect(client.getSnapshot().dailyPlanState).toMatchObject({
+      status: "ready",
+      dailyPlan: { schoolDate: "2026-04-01" },
     });
   });
 });

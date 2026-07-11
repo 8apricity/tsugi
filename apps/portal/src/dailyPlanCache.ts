@@ -1,5 +1,10 @@
 import { shiftSchoolDate } from "./dailyPlanView";
 
+export type SchoolYearRange = {
+  startsOn: string;
+  endsOn: string;
+};
+
 export type DailyPlanForCache = {
   status: "ready";
   schoolDate: string;
@@ -12,6 +17,7 @@ export type DailyPlanForCache = {
     trackId: string;
     trackName: string;
   };
+  schoolYearRange: SchoolYearRange;
   periods: Array<{
     periodNumber: number;
     lessonName: string;

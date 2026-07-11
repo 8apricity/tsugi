@@ -6,6 +6,15 @@ const relativeDateLabels = new Map([
   [1, "明日"],
   [2, "明後日"],
 ]);
+const dailyLessonEndSeconds = new Map([
+  [1, 9 * 3_600 + 10 * 60],
+  [2, 10 * 3_600 + 10 * 60],
+  [3, 11 * 3_600 + 10 * 60],
+  [4, 12 * 3_600 + 10 * 60],
+  [5, 13 * 3_600 + 45 * 60],
+  [6, 14 * 3_600 + 45 * 60],
+  [7, 15 * 3_600 + 45 * 60],
+]);
 
 export function formatDateHeader(schoolDate: string, currentSchoolDate: string) {
   const dateHeader = buildDateHeader(schoolDate, currentSchoolDate);
@@ -37,13 +46,51 @@ export function buildDateStrip(selectedSchoolDate: string, radius = 5) {
   return Array.from({ length: radius * 2 + 1 }, (_, index) => {
     const date = addDays(selectedDate, index - radius);
 
-    return {
-      schoolDate: formatSchoolDate(date),
-      label: `${date.getUTCDate()} ${weekdayLabels[date.getUTCDay()]}`,
-      day: date.getUTCDate(),
-      weekdayLabel: weekdayLabels[date.getUTCDay()],
-    };
+    return buildDateStripItem(date);
   });
+}
+
+export function buildSchoolYearDateStrip(startsOn: string, endsOn: string) {
+  const start = parseSchoolDate(startsOn);
+  const end = parseSchoolDate(endsOn);
+  const dayCount = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
+
+  return Array.from({ length: Math.max(0, dayCount) }, (_, index) => {
+    const date = addDays(start, index);
+
+    return buildDateStripItem(date);
+  });
+}
+
+export function isAfterLastDailyLesson(
+  now: Date,
+  dailyLessons: Array<{ periodNumber: number; lessonName: string }>,
+) {
+  const lastScheduledDailyLesson = dailyLessons
+    .filter((dailyLesson) => dailyLesson.lessonName.trim() !== "")
+    .sort((left, right) => right.periodNumber - left.periodNumber)[0];
+  const endSeconds = lastScheduledDailyLesson
+    ? dailyLessonEndSeconds.get(lastScheduledDailyLesson.periodNumber)
+    : undefined;
+
+  if (endSeconds === undefined) {
+    return false;
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+  const currentSeconds =
+    Number(valueByType.get("hour")) * 3_600 +
+    Number(valueByType.get("minute")) * 60 +
+    Number(valueByType.get("second"));
+
+  return currentSeconds >= endSeconds;
 }
 
 export function shiftSchoolDate(schoolDate: string, days: number) {
@@ -80,4 +127,13 @@ function formatSchoolDate(date: Date) {
     String(date.getUTCMonth() + 1).padStart(2, "0"),
     String(date.getUTCDate()).padStart(2, "0"),
   ].join("-");
+}
+
+function buildDateStripItem(date: Date) {
+  return {
+    schoolDate: formatSchoolDate(date),
+    label: `${date.getUTCDate()} ${weekdayLabels[date.getUTCDay()]}`,
+    day: date.getUTCDate(),
+    weekdayLabel: weekdayLabels[date.getUTCDay()],
+  };
 }

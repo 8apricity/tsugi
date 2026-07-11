@@ -14,6 +14,10 @@ function dailyPlan(schoolDate: string): DailyPlanForCache {
       trackId: "track-1",
       trackName: "文科",
     },
+    schoolYearRange: {
+      startsOn: "2026-04-01",
+      endsOn: "2027-03-31",
+    },
     periods: [],
     tasks: [],
     notes: [],

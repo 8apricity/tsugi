@@ -206,6 +206,10 @@ describe('Daily Plan module', () => {
     expect(result.dailyPlans['2026-07-10']).toMatchObject({
       schoolDate: '2026-07-10',
       weekday: 5,
+      schoolYearRange: {
+        startsOn: '2026-04-01',
+        endsOn: '2027-03-31',
+      },
     })
   })
 })

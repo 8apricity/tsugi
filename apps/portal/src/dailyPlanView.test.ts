@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildDateStrip, formatDateHeader, shiftSchoolDate } from "./dailyPlanView";
+import {
+  buildDateStrip,
+  buildSchoolYearDateStrip,
+  formatDateHeader,
+  isAfterLastDailyLesson,
+  shiftSchoolDate,
+} from "./dailyPlanView";
 
 describe("Daily Plan date display", () => {
   it("formats the selected School Date with a nearby relative label", () => {
@@ -47,5 +53,41 @@ describe("Daily Plan date display", () => {
   it("shifts a School Date by day count", () => {
     expect(shiftSchoolDate("2026-07-09", -1)).toBe("2026-07-08");
     expect(shiftSchoolDate("2026-07-09", 1)).toBe("2026-07-10");
+  });
+
+  it("builds the selectable range from the School Year boundaries", () => {
+    expect(buildSchoolYearDateStrip("2026-04-01", "2026-04-03")).toEqual([
+      { schoolDate: "2026-04-01", label: "1 水", day: 1, weekdayLabel: "水" },
+      { schoolDate: "2026-04-02", label: "2 木", day: 2, weekdayLabel: "木" },
+      { schoolDate: "2026-04-03", label: "3 金", day: 3, weekdayLabel: "金" },
+    ]);
+  });
+
+  it("treats the end of the last scheduled lesson as after school", () => {
+    const sixPeriodDay = [1, 2, 3, 4, 5, 6, 7].map((periodNumber) => ({
+      periodNumber,
+      lessonName: periodNumber <= 6 ? "授業" : "",
+    }));
+
+    expect(
+      isAfterLastDailyLesson(
+        new Date("2026-07-10T05:44:59.000Z"),
+        sixPeriodDay,
+      ),
+    ).toBe(false);
+    expect(
+      isAfterLastDailyLesson(
+        new Date("2026-07-10T05:45:00.000Z"),
+        sixPeriodDay,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat a day without lessons as after school", () => {
+    expect(
+      isAfterLastDailyLesson(new Date("2026-07-10T09:00:00.000Z"), [
+        { periodNumber: 1, lessonName: "" },
+      ]),
+    ).toBe(false);
   });
 });

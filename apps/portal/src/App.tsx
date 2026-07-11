@@ -83,6 +83,7 @@ function App() {
   const {
     selectedSchoolDate,
     currentSchoolDate,
+    schoolYearRange,
     dateStrip,
     dailyPlanState,
   } = useSyncExternalStore(
@@ -95,6 +96,7 @@ function App() {
   const datePickerScrollFrameRef = useRef<number | null>(null);
   const datePickerScrollEndTimerRef = useRef<number | null>(null);
   const shouldCenterDatePickerRef = useRef(true);
+  const centeredDateStripBoundsRef = useRef<[string, string] | null>(null);
   const suppressDatePickerScrollRef = useRef(false);
   const swipeStartXRef = useRef<number | null>(null);
   const [completedPlaceholderTaskIds, setCompletedPlaceholderTaskIds] =
@@ -149,6 +151,8 @@ function App() {
       return;
     }
 
+    shouldCenterDatePickerRef.current = true;
+    dailyPlanClient.reset();
     void dailyPlanClient.loadSelectedDailyPlan();
   }, [dailyPlanClient, status, studentAccount]);
 
@@ -178,7 +182,20 @@ function App() {
   }, [menuOpen]);
 
   useEffect(() => {
-    if (status !== "authenticated" || !shouldCenterDatePickerRef.current) {
+    const dateStripBounds: [string, string] = [
+      dateStrip[0]?.schoolDate ?? "",
+      dateStrip.at(-1)?.schoolDate ?? "",
+    ];
+    const centeredBounds = centeredDateStripBoundsRef.current;
+    const dateStripRangeChanged =
+      !centeredBounds ||
+      centeredBounds[0] !== dateStripBounds[0] ||
+      centeredBounds[1] !== dateStripBounds[1];
+
+    if (
+      status !== "authenticated" ||
+      (!shouldCenterDatePickerRef.current && !dateStripRangeChanged)
+    ) {
       return;
     }
 
@@ -189,6 +206,7 @@ function App() {
     }
 
     shouldCenterDatePickerRef.current = false;
+    centeredDateStripBoundsRef.current = dateStripBounds;
     suppressDatePickerScrollRef.current = true;
     button.scrollIntoView({
       behavior: "auto",
@@ -320,7 +338,7 @@ function App() {
     const startX = swipeStartXRef.current;
     swipeStartXRef.current = null;
 
-    if (startX === null) {
+    if (startX === null || !schoolYearRange) {
       return;
     }
 
@@ -699,36 +717,40 @@ function App() {
             ) : null}
           </div>
 
-          <footer className="date-strip-footer">
-            <nav
-              className="date-strip"
-              aria-label="Date selection"
-              ref={datePickerRef}
-              onPointerDown={handleDatePickerPointerDown}
-              onScroll={handleDatePickerScroll}
-            >
-              {dateStrip.map((date) => (
-                <button
-                  className={`date-cell ${
-                    date.schoolDate === selectedSchoolDate ? "selected" : ""
-                  }`}
-                  key={date.schoolDate}
-                  type="button"
-                  ref={(element) => {
-                    if (element) {
-                      dateButtonRefs.current.set(date.schoolDate, element);
-                    } else {
-                      dateButtonRefs.current.delete(date.schoolDate);
-                    }
-                  }}
-                  onClick={() => handleDateTap(date.schoolDate)}
-                >
-                  <span className="date-cell-day">{date.day}</span>
-                  <span className="date-cell-weekday">{date.weekdayLabel}</span>
-                </button>
-              ))}
-            </nav>
-          </footer>
+          {schoolYearRange ? (
+            <footer className="date-strip-footer">
+              <nav
+                className="date-strip"
+                aria-label="Date selection"
+                ref={datePickerRef}
+                onPointerDown={handleDatePickerPointerDown}
+                onScroll={handleDatePickerScroll}
+              >
+                {dateStrip.map((date) => (
+                  <button
+                    className={`date-cell ${
+                      date.schoolDate === selectedSchoolDate ? "selected" : ""
+                    }`}
+                    key={date.schoolDate}
+                    type="button"
+                    ref={(element) => {
+                      if (element) {
+                        dateButtonRefs.current.set(date.schoolDate, element);
+                      } else {
+                        dateButtonRefs.current.delete(date.schoolDate);
+                      }
+                    }}
+                    onClick={() => handleDateTap(date.schoolDate)}
+                  >
+                    <span className="date-cell-day">{date.day}</span>
+                    <span className="date-cell-weekday">
+                      {date.weekdayLabel}
+                    </span>
+                  </button>
+                ))}
+              </nav>
+            </footer>
+          ) : null}
         </section>
       </main>
     );

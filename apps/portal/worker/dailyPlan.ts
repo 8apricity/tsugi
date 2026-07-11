@@ -52,6 +52,10 @@ export type DailyPlanResult =
         trackId: string
         trackName: string
       }
+      schoolYearRange: {
+        startsOn: string
+        endsOn: string
+      }
       periods: Array<{
         periodNumber: number
         lessonName: string
@@ -349,6 +353,10 @@ function buildReadyDailyPlan({
       classNumber: sharedContext.schoolClass.classNumber,
       trackId: sharedContext.studentAffiliation.trackId,
       trackName: sharedContext.track.trackName,
+    },
+    schoolYearRange: {
+      startsOn: sharedContext.currentSchoolYear.startsOn,
+      endsOn: sharedContext.currentSchoolYear.endsOn,
     },
     periods: Array.from({ length: 7 }, (_, index) => {
       const periodNumber = index + 1

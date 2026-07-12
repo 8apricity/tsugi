@@ -2331,7 +2331,10 @@ function PeriodWheelPicker({
   value: number;
   onChange: (periodNumber: number) => void;
 }) {
+  const scrollSettleDelay = 120;
+  const closeDelay = 400;
   const [open, setOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [pendingValue, setPendingValue] = useState(value);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
@@ -2340,10 +2343,12 @@ function PeriodWheelPicker({
   const confirmTimerRef = useRef<number | null>(null);
   const suppressScrollRef = useRef(false);
   const lastPointerTypeRef = useRef("mouse");
+  const triggerDragCleanupRef = useRef<(() => void) | null>(null);
   const triggerDragRef = useRef<{
     pointerId: number;
     startY: number;
     startScrollTop: number | null;
+    moved: boolean;
   } | null>(null);
 
   function clearTimer(timerRef: { current: number | null }) {
@@ -2352,7 +2357,13 @@ function PeriodWheelPicker({
     timerRef.current = null;
   }
 
+  function clearTriggerDragListeners() {
+    triggerDragCleanupRef.current?.();
+    triggerDragCleanupRef.current = null;
+  }
+
   function updatePendingValue(periodNumber: number) {
+    if (pendingValueRef.current === periodNumber) return;
     pendingValueRef.current = periodNumber;
     setPendingValue(periodNumber);
   }
@@ -2396,6 +2407,9 @@ function PeriodWheelPicker({
   function closePicker() {
     clearTimer(scrollSettleTimerRef);
     clearTimer(confirmTimerRef);
+    clearTriggerDragListeners();
+    triggerDragRef.current = null;
+    setDragging(false);
     setOpen(false);
   }
 
@@ -2411,12 +2425,15 @@ function PeriodWheelPicker({
     const periodNumber = centeredPeriod();
     updatePendingValue(periodNumber);
     scrollPeriodIntoCenter(periodNumber);
-    confirmSelectionAfter(1000);
+    confirmSelectionAfter(closeDelay - scrollSettleDelay);
   }
 
   function scheduleScrollSettle() {
     clearTimer(scrollSettleTimerRef);
-    scrollSettleTimerRef.current = window.setTimeout(settleScroll, 120);
+    scrollSettleTimerRef.current = window.setTimeout(
+      settleScroll,
+      scrollSettleDelay,
+    );
   }
 
   function openPicker() {
@@ -2449,6 +2466,9 @@ function PeriodWheelPicker({
         window.clearTimeout(confirmTimerRef.current);
         confirmTimerRef.current = null;
       }
+      clearTriggerDragListeners();
+      triggerDragRef.current = null;
+      setDragging(false);
       setOpen(false);
     }
 
@@ -2460,6 +2480,7 @@ function PeriodWheelPicker({
     () => () => {
       clearTimer(scrollSettleTimerRef);
       clearTimer(confirmTimerRef);
+      clearTriggerDragListeners();
     },
     [],
   );
@@ -2469,8 +2490,10 @@ function PeriodWheelPicker({
     const picker = pickerRef.current;
     if (!drag || !picker) return;
     if (drag.startScrollTop === null) drag.startScrollTop = picker.scrollTop;
+    if (Math.abs(drag.startY - clientY) >= 1) drag.moved = true;
     suppressScrollRef.current = false;
     picker.scrollTop = drag.startScrollTop + drag.startY - clientY;
+    updatePendingValue(centeredPeriod());
   }
 
   return (
@@ -2496,7 +2519,7 @@ function PeriodWheelPicker({
         );
         updatePendingValue(next);
         scrollPeriodIntoCenter(next);
-        confirmSelectionAfter(1000);
+        confirmSelectionAfter(closeDelay);
       }}
     >
       <button
@@ -2507,28 +2530,48 @@ function PeriodWheelPicker({
         aria-expanded={open}
         aria-controls={open ? "period-wheel-options" : undefined}
         onPointerDown={(event) => {
+          event.preventDefault();
           lastPointerTypeRef.current = event.pointerType;
           openPicker();
-          if (event.pointerType !== "touch") return;
-          event.currentTarget.setPointerCapture(event.pointerId);
+          setDragging(true);
           triggerDragRef.current = {
             pointerId: event.pointerId,
             startY: event.clientY,
             startScrollTop: null,
+            moved: false,
           };
-        }}
-        onPointerMove={(event) => {
-          if (triggerDragRef.current?.pointerId !== event.pointerId) return;
-          event.preventDefault();
-          dragFromTrigger(event.clientY);
-        }}
-        onPointerUp={(event) => {
-          if (triggerDragRef.current?.pointerId !== event.pointerId) return;
-          triggerDragRef.current = null;
-          scheduleScrollSettle();
-        }}
-        onPointerCancel={() => {
-          triggerDragRef.current = null;
+          clearTriggerDragListeners();
+
+          function moveFromTrigger(moveEvent: PointerEvent) {
+            if (moveEvent.pointerId !== event.pointerId) return;
+            moveEvent.preventDefault();
+            dragFromTrigger(moveEvent.clientY);
+          }
+
+          function finishTriggerDrag(endEvent: PointerEvent) {
+            const drag = triggerDragRef.current;
+            if (endEvent.pointerId !== event.pointerId || !drag) return;
+            clearTriggerDragListeners();
+            triggerDragRef.current = null;
+            setDragging(false);
+            if (
+              endEvent.type === "pointerup" &&
+              (endEvent.pointerType === "touch" || drag.moved)
+            ) {
+              scheduleScrollSettle();
+            }
+          }
+
+          document.addEventListener("pointermove", moveFromTrigger, {
+            passive: false,
+          });
+          document.addEventListener("pointerup", finishTriggerDrag);
+          document.addEventListener("pointercancel", finishTriggerDrag);
+          triggerDragCleanupRef.current = () => {
+            document.removeEventListener("pointermove", moveFromTrigger);
+            document.removeEventListener("pointerup", finishTriggerDrag);
+            document.removeEventListener("pointercancel", finishTriggerDrag);
+          };
         }}
         onClick={openPicker}
       >
@@ -2541,20 +2584,26 @@ function PeriodWheelPicker({
           <div
             ref={pickerRef}
             id="period-wheel-options"
-            className="period-wheel-viewport"
+            className={`period-wheel-viewport${dragging ? " dragging" : ""}`}
             role="listbox"
             aria-label="時限"
             aria-activedescendant={`period-option-${pendingValue}`}
             onPointerDown={(event) => {
               lastPointerTypeRef.current = event.pointerType;
               suppressScrollRef.current = false;
+              if (event.pointerType === "touch") setDragging(true);
               clearTimer(confirmTimerRef);
             }}
             onWheel={() => {
               suppressScrollRef.current = false;
             }}
             onPointerUp={(event) => {
-              if (event.pointerType === "touch") scheduleScrollSettle();
+              if (event.pointerType !== "touch") return;
+              setDragging(false);
+              scheduleScrollSettle();
+            }}
+            onPointerCancel={() => {
+              setDragging(false);
             }}
             onScroll={() => {
               if (suppressScrollRef.current) return;
@@ -2582,7 +2631,9 @@ function PeriodWheelPicker({
                     updatePendingValue(periodNumber);
                     scrollPeriodIntoCenter(periodNumber);
                     confirmSelectionAfter(
-                      lastPointerTypeRef.current === "touch" ? 1000 : 200,
+                      lastPointerTypeRef.current === "touch"
+                        ? closeDelay
+                        : 200,
                     );
                   }}
                 >

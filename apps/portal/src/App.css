@@ -597,6 +597,10 @@ body.page-scroll-locked {
   touch-action: pan-y;
 }
 
+.period-wheel-viewport.dragging {
+  scroll-snap-type: none;
+}
+
 .period-wheel-viewport::-webkit-scrollbar {
   display: none;
 }

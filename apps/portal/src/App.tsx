@@ -1723,21 +1723,12 @@ function App() {
                   <div className="timetable-layer-stack">
                     <LayerRow
                       label="デフォルト"
-                      value={
-                        layerPreview.standardTimetable
-                          ?.lessonName || "空欄"
-                      }
-                      detail={
-                        layerPreview.standardTimetable
-                          ? `${weekdayLabel(
-                              layerPreview.standardTimetable
-                                .periodReference.weekday,
-                            )}${
-                              layerPreview.standardTimetable
-                                .periodReference.periodNumber
-                            }のStandard Timetable`
-                          : "Standard Timetableに設定なし"
-                      }
+                      value={`${
+                        buildDateHeader(
+                          timetableLayerDialog.schoolDate,
+                          currentSchoolDate,
+                        ).weekdayLabel
+                      }${timetableLayerDialog.periodNumber}`}
                     />
                     {layerPreview.layers.map((layer) => {
                       const existingDraft = timetableEditorClient.findDraft(
@@ -2856,10 +2847,6 @@ function isStoredReference(replacement: TimetableReplacement) {
 function formatSchoolDateForDialog(schoolDate: string) {
   const [, month, day] = schoolDate.split("-");
   return `${Number(month)}月${Number(day)}日`;
-}
-
-function weekdayLabel(weekday: number) {
-  return "月火水木金土日"[weekday - 1] ?? "";
 }
 
 function formatRelativeTime(timestamp: number) {

@@ -18,18 +18,26 @@ export type TimetableLayerKey = {
 
 type TimetableChangeDraftBase = TimetableLayerKey & {
   sourceId: string
-  replacement: TimetableReplacement
 }
 
 export type TimetableChangeDraft = TimetableChangeDraftBase & (
   | {
       changeKind: 'add'
+      replacement: TimetableReplacement
       sharedInformationItemId?: never
       expectedLatestChangeId?: never
       serverReplacement?: never
     }
   | {
       changeKind: 'update'
+      replacement: TimetableReplacement
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+      serverReplacement: TimetableReplacement
+    }
+  | {
+      changeKind: 'remove'
+      replacement?: never
       sharedInformationItemId: string
       expectedLatestChangeId: string
       serverReplacement: TimetableReplacement
@@ -66,10 +74,7 @@ export type TimetableLayerState = {
 }
 
 type StorageLike = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>
-type DesiredStateInput = Pick<
-  TimetableChangeDraft,
-  'targetScopeType' | 'changeDate' | 'periodNumber' | 'replacement'
->
+type DesiredStateInput = TimetableLayerKey & { replacement: TimetableReplacement }
 
 const storageKey = 'tsugi:timetable-direct-add-drafts:v1'
 const maximumDraftKeys = 50
@@ -211,7 +216,7 @@ export function createTimetableEditorClient({
 
       const sourceId = existing?.sourceId ?? createId()
       const operation = existing
-        ? existing.changeKind === 'update'
+        ? existing.changeKind === 'update' || existing.changeKind === 'remove'
           ? {
               changeKind: 'update' as const,
               sharedInformationItemId: existing.sharedInformationItemId,
@@ -231,6 +236,36 @@ export function createTimetableEditorClient({
       drafts.push({ ...input, ...operation, sourceId })
       if (serverLayer) reconciledKeys.add(key)
       lastTargetScopeType = input.targetScopeType
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
+    removeDesiredState(keyInput: TimetableLayerKey) {
+      const { targetScopeType } = keyInput
+      const key = draftKey(keyInput)
+      const existing = drafts.find((draft) => draftKey(draft) === key)
+      const serverLayer = loadedServerLayers.get(key)
+      if (serverLayer?.state !== 'active') {
+        return { status: 'not-active' as const }
+      }
+      if (!existing && drafts.length >= maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+      const sourceId = existing?.sourceId ?? createId()
+      drafts = drafts.filter((draft) => draftKey(draft) !== key)
+      drafts.push({
+        ...keyInput,
+        changeKind: 'remove',
+        sourceId,
+        sharedInformationItemId: serverLayer.sharedInformationItemId,
+        expectedLatestChangeId: serverLayer.latestChangeId,
+        serverReplacement: serverLayer.replacement,
+      })
+      reconciledKeys.add(key)
+      conflictKeys.delete(key)
+      stickyConflictKeys.delete(key)
+      lastTargetScopeType = targetScopeType
       editing = true
       lastCommitFailed = false
       publish()
@@ -292,6 +327,15 @@ export function createTimetableEditorClient({
             candidate.changeDate === state.schoolDate &&
             candidate.periodNumber === state.periodNumber,
         )
+        if (draft?.changeKind === 'remove') {
+          return {
+            targetScopeType: layer.targetScopeType,
+            state: 'unchanged' as const,
+            desired: true,
+            removalPlanned: true,
+            conflicted: conflictKeys.has(draftKey(draft)),
+          }
+        }
         const replacement = draft?.replacement ??
           (layer.state === 'active' ? layer.replacement : undefined)
         if (replacement) {
@@ -315,25 +359,21 @@ export function createTimetableEditorClient({
     },
     toCommitPayload() {
       return {
-        changes: drafts.map(({
-          sourceId,
-          changeKind,
-          sharedInformationItemId,
-          expectedLatestChangeId,
-          targetScopeType,
-          changeDate,
-          periodNumber,
-          replacement,
-        }) => ({
-          changeKind,
-          sourceId,
-          ...(changeKind === 'update'
-            ? { sharedInformationItemId, expectedLatestChangeId }
+        changes: drafts.map((draft) => ({
+          changeKind: draft.changeKind,
+          sourceId: draft.sourceId,
+          ...(draft.changeKind === 'update' || draft.changeKind === 'remove'
+            ? {
+                sharedInformationItemId: draft.sharedInformationItemId,
+                expectedLatestChangeId: draft.expectedLatestChangeId,
+              }
             : {}),
-          targetScopeType,
-          changeDate,
-          periodNumber,
-          replacement,
+          targetScopeType: draft.targetScopeType,
+          changeDate: draft.changeDate,
+          periodNumber: draft.periodNumber,
+          ...(draft.changeKind === 'remove'
+            ? {}
+            : { replacement: draft.replacement }),
         })),
       }
     },
@@ -445,19 +485,19 @@ function restoreTimetableChangeDraft(value: unknown): TimetableChangeDraft | nul
     typeof draft.sourceId !== 'string' ||
     (draft.changeKind !== undefined &&
       draft.changeKind !== 'add' &&
-      draft.changeKind !== 'update') ||
+      draft.changeKind !== 'update' &&
+      draft.changeKind !== 'remove') ||
     !isTargetScopeType(draft.targetScopeType) ||
     typeof draft.changeDate !== 'string' ||
     typeof draft.periodNumber !== 'number' ||
     !Number.isInteger(draft.periodNumber) ||
-    !isReplacement(draft.replacement)
+    (draft.changeKind !== 'remove' && !isReplacement(draft.replacement))
   ) return null
   const base = {
     sourceId: draft.sourceId,
     targetScopeType: draft.targetScopeType,
     changeDate: draft.changeDate,
     periodNumber: draft.periodNumber,
-    replacement: draft.replacement,
   }
   if (draft.changeKind === 'update') {
     return typeof draft.sharedInformationItemId === 'string' &&
@@ -466,6 +506,20 @@ function restoreTimetableChangeDraft(value: unknown): TimetableChangeDraft | nul
       ? {
           ...base,
           changeKind: 'update',
+          replacement: draft.replacement as TimetableReplacement,
+          sharedInformationItemId: draft.sharedInformationItemId,
+          expectedLatestChangeId: draft.expectedLatestChangeId,
+          serverReplacement: draft.serverReplacement,
+        }
+      : null
+  }
+  if (draft.changeKind === 'remove') {
+    return typeof draft.sharedInformationItemId === 'string' &&
+      typeof draft.expectedLatestChangeId === 'string' &&
+      isReplacement(draft.serverReplacement)
+      ? {
+          ...base,
+          changeKind: 'remove',
           sharedInformationItemId: draft.sharedInformationItemId,
           expectedLatestChangeId: draft.expectedLatestChangeId,
           serverReplacement: draft.serverReplacement,
@@ -475,7 +529,7 @@ function restoreTimetableChangeDraft(value: unknown): TimetableChangeDraft | nul
   return draft.sharedInformationItemId === undefined &&
       draft.expectedLatestChangeId === undefined &&
       draft.serverReplacement === undefined
-    ? { ...base, changeKind: 'add' }
+    ? { ...base, changeKind: 'add', replacement: draft.replacement as TimetableReplacement }
     : null
 }
 

@@ -469,6 +469,236 @@ describe('Timetable Direct Add API', () => {
     expect(plan.periods[0].lessonName).toBe('変更後')
   })
 
+  it('removes an active layer, preserves cancelled distinction, retries safely, and reuses the slot with a new item', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const gradeId = '04333333-3333-4333-8333-333333333333'
+    const trackId = '04444444-4444-4444-8444-444444444444'
+    const removeId = '04555555-5555-4555-8555-555555555555'
+    expect((await addDirectTimetableChanges(env, cookie, [
+      {
+        sourceId: gradeId,
+        targetScopeType: 'grade',
+        changeDate: '2026-07-10',
+        periodNumber: 1,
+        replacement: { type: 'lesson_name', lessonName: '学年変更' },
+      },
+      {
+        sourceId: trackId,
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 1,
+        replacement: { type: 'cancelled' },
+      },
+    ])).status).toBe(201)
+
+    const cancelled = (await (await readTimetableChangeLayers(
+      env, cookie, '2026-07-10', 1,
+    )).json()) as { finalDailyLesson: { timetableChangeState: string } }
+    expect(cancelled.finalDailyLesson.timetableChangeState).toBe('cancelled')
+
+    const remove = {
+      changeKind: 'remove',
+      sourceId: removeId,
+      sharedInformationItemId: trackId,
+      expectedLatestChangeId: `${trackId}:change`,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+    }
+    expect((await addDirectTimetableChanges(env, cookie, [remove])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [remove])).status).toBe(201)
+
+    const removed = (await (await readTimetableChangeLayers(
+      env, cookie, '2026-07-10', 1,
+    )).json()) as {
+      layers: Array<{ targetScopeType: string; state: string }>
+      finalDailyLesson: { lessonName: string; timetableChangeState: string }
+    }
+    expect(removed.layers.find(({ targetScopeType }) => targetScopeType === 'track')).toEqual({
+      targetScopeType: 'track',
+      state: 'unchanged',
+    })
+    expect(removed.finalDailyLesson).toEqual({
+      lessonName: '学年変更',
+      timetableChangeState: 'resolved',
+    })
+    const plan = (await (await readDailyPlan(env, cookie, '2026-07-10')).json()) as {
+      periods: Array<{ lessonName: string }>
+    }
+    expect(plan.periods[0].lessonName).toBe('学年変更')
+
+    const stale = await addDirectTimetableChanges(env, cookie, [{
+      ...remove,
+      sourceId: '04666666-6666-4666-8666-666666666666',
+    }])
+    expect(stale.status).toBe(409)
+
+    const replacementItemId = '04777777-7777-4777-8777-777777777777'
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      sourceId: replacementItemId,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+      replacement: { type: 'lesson_name', lessonName: '再追加' },
+    }])).status).toBe(201)
+    const reused = (await (await readTimetableChangeLayers(
+      env, cookie, '2026-07-10', 1,
+    )).json()) as { layers: Array<Record<string, unknown>> }
+    expect(reused.layers.find((layer) => layer.targetScopeType === 'track')).toMatchObject({
+      sharedInformationItemId: replacementItemId,
+      replacement: { type: 'lesson_name', lessonName: '再追加' },
+    })
+
+    const standardFallbackItemId = '24111111-1111-4111-8111-111111111111'
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      sourceId: standardFallbackItemId,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 4,
+      replacement: { type: 'lesson_name', lessonName: '標準を上書き' },
+    }])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      changeKind: 'remove',
+      sourceId: '24222222-2222-4222-8222-222222222222',
+      sharedInformationItemId: standardFallbackItemId,
+      expectedLatestChangeId: `${standardFallbackItemId}:change`,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 4,
+    }])).status).toBe(201)
+    const standardFallback = (await (await readTimetableChangeLayers(
+      env, cookie, '2026-07-10', 4,
+    )).json()) as { finalDailyLesson: { lessonName: string; timetableChangeState: string } }
+    expect(standardFallback.finalDailyLesson).toEqual({
+      lessonName: '現代文',
+      timetableChangeState: 'unchanged',
+    })
+    const fallbackPlan = (await (await readDailyPlan(
+      env, cookie, '2026-07-10',
+    )).json()) as { periods: Array<{ lessonName: string }> }
+    expect(fallbackPlan.periods[3].lessonName).toBe('現代文')
+  })
+
+  it('rejects a stale remove while the item remains active at its newer change', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const itemId = '24333333-3333-4333-8333-333333333333'
+    const updateId = '24444444-4444-4444-8444-444444444444'
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      sourceId: itemId,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 6,
+      replacement: { type: 'lesson_name', lessonName: '変更前' },
+    }])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      changeKind: 'update',
+      sourceId: updateId,
+      sharedInformationItemId: itemId,
+      expectedLatestChangeId: `${itemId}:change`,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 6,
+      replacement: { type: 'lesson_name', lessonName: '変更後' },
+    }])).status).toBe(201)
+
+    const stale = await addDirectTimetableChanges(env, cookie, [{
+      changeKind: 'remove',
+      sourceId: '24555555-5555-4555-8555-555555555555',
+      sharedInformationItemId: itemId,
+      expectedLatestChangeId: `${itemId}:change`,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 6,
+    }])
+    expect(stale.status).toBe(409)
+    const layers = (await (await readTimetableChangeLayers(
+      env, cookie, '2026-07-10', 6,
+    )).json()) as { layers: Array<Record<string, unknown>> }
+    expect(layers.layers.find((layer) => layer.targetScopeType === 'track')).toMatchObject({
+      sharedInformationItemId: itemId,
+      latestChangeId: `${updateId}:change`,
+      replacement: { type: 'lesson_name', lessonName: '変更後' },
+    })
+  })
+
+  it('applies mixed add, update, and remove atomically and rolls all back on a remove conflict', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const removeItemId = '04888888-8888-4888-8888-888888888888'
+    const updateItemId = '04999999-9999-4999-8999-999999999999'
+    expect((await addDirectTimetableChanges(env, cookie, [
+      {
+        sourceId: removeItemId,
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+        replacement: { type: 'lesson_name', lessonName: '削除元' },
+      },
+      {
+        sourceId: updateItemId,
+        targetScopeType: 'class',
+        changeDate: '2026-07-10',
+        periodNumber: 3,
+        replacement: { type: 'lesson_name', lessonName: '更新元' },
+      },
+    ])).status).toBe(201)
+
+    expect((await addDirectTimetableChanges(env, cookie, [
+      {
+        changeKind: 'remove',
+        sourceId: '14111111-1111-4111-8111-111111111111',
+        sharedInformationItemId: removeItemId,
+        expectedLatestChangeId: `${removeItemId}:change`,
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+      },
+      {
+        changeKind: 'update',
+        sourceId: '14222222-2222-4222-8222-222222222222',
+        sharedInformationItemId: updateItemId,
+        expectedLatestChangeId: `${updateItemId}:change`,
+        targetScopeType: 'class',
+        changeDate: '2026-07-10',
+        periodNumber: 3,
+        replacement: { type: 'lesson_name', lessonName: '更新後' },
+      },
+      {
+        sourceId: '14333333-3333-4333-8333-333333333333',
+        targetScopeType: 'student',
+        changeDate: '2026-07-10',
+        periodNumber: 4,
+        replacement: { type: 'lesson_name', lessonName: '追加' },
+      },
+    ])).status).toBe(201)
+
+    const conflict = await addDirectTimetableChanges(env, cookie, [
+      {
+        changeKind: 'remove',
+        sourceId: '14444444-4444-4444-8444-444444444444',
+        sharedInformationItemId: removeItemId,
+        expectedLatestChangeId: `${removeItemId}:change`,
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+      },
+      {
+        sourceId: '14555555-5555-4555-8555-555555555555',
+        targetScopeType: 'student',
+        changeDate: '2026-07-10',
+        periodNumber: 5,
+        replacement: { type: 'lesson_name', lessonName: '保存されない' },
+      },
+    ])
+    expect(conflict.status).toBe(409)
+    const plan = (await (await readDailyPlan(env, cookie, '2026-07-10')).json()) as {
+      periods: Array<{ lessonName: string }>
+    }
+    expect(plan.periods[4].lessonName).toBe('')
+  })
+
   it('applies mixed add/update atomically and rolls every operation back on stale update', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')

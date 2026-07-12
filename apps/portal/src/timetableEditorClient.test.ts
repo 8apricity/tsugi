@@ -285,6 +285,124 @@ describe('Timetable editor client', () => {
     })
   })
 
+  it('derives remove only for an active layer and previews the next applicable layer', () => {
+    const editor = createTimetableEditorClient({ storage: memoryStorage() })
+    const server = layerState([
+      {
+        targetScopeType: 'grade',
+        state: 'active',
+        sharedInformationItemId: 'grade-item',
+        latestChangeId: 'grade-change',
+        replacement: { type: 'lesson_name', lessonName: '体育' },
+        changedAt: 1,
+      },
+      { targetScopeType: 'class', state: 'unchanged' },
+      {
+        targetScopeType: 'track',
+        state: 'active',
+        sharedInformationItemId: 'track-item',
+        latestChangeId: 'track-change',
+        replacement: { type: 'cancelled' },
+        changedAt: 2,
+      },
+      { targetScopeType: 'student', state: 'unchanged' },
+    ])
+    editor.reconcileLayerState(server)
+
+    expect(editor.removeDesiredState({
+      targetScopeType: 'class', changeDate: '2026-07-10', periodNumber: 2,
+    })).toEqual({
+      status: 'not-active',
+    })
+    expect(editor.removeDesiredState({
+      targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 2,
+    })).toMatchObject({
+      status: 'saved',
+    })
+    expect(editor.findDraft('track', '2026-07-10', 2)).toMatchObject({
+      changeKind: 'remove',
+      sharedInformationItemId: 'track-item',
+      expectedLatestChangeId: 'track-change',
+    })
+    expect(editor.toCommitPayload().changes).toEqual([
+      expect.objectContaining({
+        changeKind: 'remove',
+        sharedInformationItemId: 'track-item',
+        expectedLatestChangeId: 'track-change',
+      }),
+    ])
+    expect(editor.toCommitPayload().changes[0]).not.toHaveProperty('replacement')
+
+    expect(editor.previewLayerState(server, () => null)).toMatchObject({
+      layers: [
+        { targetScopeType: 'grade', state: 'active', desired: false },
+        { targetScopeType: 'class', state: 'unchanged', desired: false },
+        {
+          targetScopeType: 'track',
+          state: 'unchanged',
+          desired: true,
+          removalPlanned: true,
+        },
+        { targetScopeType: 'student', state: 'unchanged', desired: false },
+      ],
+      finalDailyLesson: { lessonName: '体育', timetableChangeState: 'resolved' },
+    })
+
+    expect(editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'lesson_name', lessonName: '化学' },
+    })).toMatchObject({ status: 'saved' })
+    expect(editor.toCommitPayload().changes[0]).toMatchObject({
+      changeKind: 'update',
+      sharedInformationItemId: 'track-item',
+      expectedLatestChangeId: 'track-change',
+      replacement: { type: 'lesson_name', lessonName: '化学' },
+    })
+  })
+
+  it('persists, restores, cancels, and retains a remove draft through conflict', () => {
+    const storage = memoryStorage()
+    const server = layerState([
+      { targetScopeType: 'grade', state: 'unchanged' },
+      { targetScopeType: 'class', state: 'unchanged' },
+      {
+        targetScopeType: 'track',
+        state: 'active',
+        sharedInformationItemId: 'track-item',
+        latestChangeId: 'track-change',
+        replacement: { type: 'lesson_name', lessonName: '物理' },
+        changedAt: 2,
+      },
+      { targetScopeType: 'student', state: 'unchanged' },
+    ])
+    const initial = createTimetableEditorClient({ storage })
+    initial.reconcileLayerState(server)
+    initial.removeDesiredState({
+      targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 2,
+    })
+
+    const restored = createTimetableEditorClient({ storage })
+    restored.reconcileLayerState(server)
+    expect(restored.findDraft('track', '2026-07-10', 2)).toMatchObject({
+      changeKind: 'remove',
+      serverReplacement: { type: 'lesson_name', lessonName: '物理' },
+      conflicted: false,
+    })
+    restored.commitFailed([
+      { targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 2 },
+    ])
+    expect(restored.findDraft('track', '2026-07-10', 2)).toMatchObject({
+      changeKind: 'remove',
+      conflicted: true,
+    })
+    expect(restored.restoreServerState('track', '2026-07-10', 2)).toEqual({
+      status: 'removed-noop',
+    })
+    expect(restored.getSnapshot()).toMatchObject({ draftCount: 0, conflictCount: 0 })
+  })
+
   it('persists only safe draft data, restores it, cancels one draft, and retains drafts after failure', () => {
     const storage = memoryStorage()
     const editor = createTimetableEditorClient({ storage })

@@ -127,10 +127,25 @@ export type ActiveTimetableChange = TimetableLayerKey & {
   changedAt: number
 }
 
-export type DirectTimetableChangeOperation = ActiveTimetableChange &
+type DirectTimetableChangeOperationBase = Omit<ActiveTimetableChange, 'replacement'>
+
+export type DirectTimetableChangeOperation = DirectTimetableChangeOperationBase &
   (
-    | { changeKind: 'add'; expectedLatestChangeId?: never }
-    | { changeKind: 'update'; expectedLatestChangeId: string }
+    | {
+        changeKind: 'add'
+        replacement: TimetableChangeReplacement
+        expectedLatestChangeId?: never
+      }
+    | {
+        changeKind: 'update'
+        replacement: TimetableChangeReplacement
+        expectedLatestChangeId: string
+      }
+    | {
+        changeKind: 'remove'
+        replacement?: never
+        expectedLatestChangeId: string
+      }
   )
 
 export type CompleteInitialSetupTransactionInput = {
@@ -248,7 +263,7 @@ export type DirectTimetableChangeStore = {
   commitDirectTimetableChanges(
     changes: DirectTimetableChangeOperation[],
   ): Promise<
-    | { status: 'applied'; changes: ActiveTimetableChange[] }
+    | { status: 'applied'; changes: DirectTimetableChangeOperation[] }
     | { status: 'conflict'; conflictingSourceIds: string[] }
     | { status: 'idempotency-conflict'; conflictingSourceIds: string[] }
   >
@@ -638,7 +653,7 @@ export class InMemoryPersistenceAdapters
 
     const conflictingSourceIds = pending
       .filter((change) => {
-        const active = change.changeKind === 'update'
+        const active = change.changeKind !== 'add'
         ? this.activeTimetableChanges.find(
             (candidate) => candidate.sharedInformationItemId === change.sharedInformationItemId,
           )
@@ -660,20 +675,20 @@ export class InMemoryPersistenceAdapters
       this.directTimetableChangeOperations.set(change.sourceId, change)
       if (change.changeKind === 'add') {
         this.activeTimetableChanges.push(change)
-      } else {
+      } else if (change.changeKind === 'update') {
         const index = this.activeTimetableChanges.findIndex(
           (candidate) => candidate.sharedInformationItemId === change.sharedInformationItemId,
         )
         this.activeTimetableChanges[index] = change
+      } else {
+        this.activeTimetableChanges = this.activeTimetableChanges.filter(
+          (candidate) => candidate.sharedInformationItemId !== change.sharedInformationItemId,
+        )
       }
     }
     return {
       status: 'applied' as const,
-      changes: changes.map((change) =>
-        this.activeTimetableChanges.find(
-          (active) => active.sharedInformationItemId === change.sharedInformationItemId,
-        ) ?? change,
-      ),
+      changes,
     }
   }
 
@@ -851,7 +866,7 @@ type StandardTimetableEntryRow = {
 }
 
 type ActiveTimetableChangeRow = {
-  change_kind?: 'add' | 'update'
+  change_kind?: 'add' | 'update' | 'remove'
   expected_latest_change_id?: string | null
   source_id: string
   shared_information_change_id: string
@@ -1484,9 +1499,9 @@ export class D1PersistenceAdapters
     const pending = changes.filter((change) => !existingBySource.has(change.sourceId))
     if (pending.length === 0) return { status: 'applied' as const, changes: existing }
 
-    const updates = pending.filter((change) => change.changeKind === 'update')
+    const itemChanges = pending.filter((change) => change.changeKind !== 'add')
     const activeUpdates = await this.findActiveTimetableChangesByItemIds(
-      updates.map((change) => change.sharedInformationItemId),
+      itemChanges.map((change) => change.sharedInformationItemId),
     )
     const activeByItem = new Map(
       activeUpdates.map((change) => [change.sharedInformationItemId, change]),
@@ -1526,19 +1541,20 @@ export class D1PersistenceAdapters
       const snapshotId = `${change.sourceId}:snapshot`
       const sharedChangeId = `${change.sourceId}:change`
       const createdAt = new Date(change.changedAt).toISOString()
+      const replacement = change.changeKind === 'remove' ? null : change.replacement
       const snapshotValues = [
         snapshotId,
         change.changeDate,
         change.periodNumber,
-        change.replacement.type,
-        change.replacement.type === 'lesson_name' ? change.replacement.lessonName : null,
-        change.replacement.type === 'period_reference' ? change.replacement.weekday : null,
-        change.replacement.type === 'period_reference' ? change.replacement.periodNumber : null,
-        change.replacement.type === 'floating_lesson_reference'
-          ? change.replacement.floatingLessonReferenceLabelId
+        replacement?.type,
+        replacement?.type === 'lesson_name' ? replacement.lessonName : null,
+        replacement?.type === 'period_reference' ? replacement.weekday : null,
+        replacement?.type === 'period_reference' ? replacement.periodNumber : null,
+        replacement?.type === 'floating_lesson_reference'
+          ? replacement.floatingLessonReferenceLabelId
           : null,
-        change.replacement.type === 'floating_lesson_reference'
-          ? change.replacement.floatingLessonReferenceLabelId
+        replacement?.type === 'floating_lesson_reference'
+          ? replacement.floatingLessonReferenceLabelId
           : null,
         createdAt,
       ]
@@ -1555,7 +1571,7 @@ export class D1PersistenceAdapters
           this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
           this.db.prepare(`insert into active_timetable_change_slots (timetable_change_slot_key, shared_information_item_id) values (?, ?)`).bind(activeTimetableChangeSlotKey(change), change.sharedInformationItemId),
         )
-      } else {
+      } else if (change.changeKind === 'update') {
         statements.push(
           this.db.prepare(
             `insert into timetable_change_snapshots (
@@ -1581,6 +1597,39 @@ export class D1PersistenceAdapters
           ),
           this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, timetable_change_snapshot_id) values (?, ?, 'update', 'direct', ?, ?, ?, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
           this.db.prepare(`update shared_information_items set latest_change_id = ?, current_timetable_change_snapshot_id = ? where shared_information_item_id = ? and latest_change_id = ? and removed_at is null`).bind(sharedChangeId, snapshotId, change.sharedInformationItemId, change.expectedLatestChangeId),
+        )
+      } else {
+        statements.push(
+          this.db.prepare(
+            `insert into shared_information_changes (
+               shared_information_change_id, shared_information_item_id,
+               change_kind, source_type, source_id,
+               changed_by_student_account_id, changed_at,
+               timetable_change_snapshot_id
+             ) values (
+               ?,
+               (select i.shared_information_item_id
+                from shared_information_items i
+                join active_timetable_change_slots a
+                  on a.shared_information_item_id = i.shared_information_item_id
+                where i.shared_information_item_id = ?
+                  and i.kind = 'timetable_change'
+                  and i.latest_change_id = ?
+                  and i.removed_at is null
+                  and a.timetable_change_slot_key = ?),
+               'remove', 'direct', ?, ?, ?, null
+             )`,
+          ).bind(
+            sharedChangeId,
+            change.sharedInformationItemId,
+            change.expectedLatestChangeId,
+            activeTimetableChangeSlotKey(change),
+            change.sourceId,
+            change.changedByStudentAccountId,
+            createdAt,
+          ),
+          this.db.prepare(`update shared_information_items set latest_change_id = ?, removed_at = ? where shared_information_item_id = ? and latest_change_id = ? and removed_at is null`).bind(sharedChangeId, createdAt, change.sharedInformationItemId, change.expectedLatestChangeId),
+          this.db.prepare(`delete from active_timetable_change_slots where shared_information_item_id = ? and timetable_change_slot_key = ?`).bind(change.sharedInformationItemId, activeTimetableChangeSlotKey(change)),
         )
       }
     }
@@ -1663,7 +1712,7 @@ export class D1PersistenceAdapters
          join shared_information_items i on i.shared_information_item_id = c.shared_information_item_id
          join target_scopes s on s.target_scope_id = i.target_scope_id
          join target_scope_parts p on p.target_scope_id = s.target_scope_id
-         join timetable_change_snapshots t on t.timetable_change_snapshot_id = c.timetable_change_snapshot_id
+         join timetable_change_snapshots t on t.timetable_change_snapshot_id = coalesce(c.timetable_change_snapshot_id, i.current_timetable_change_snapshot_id)
          where c.source_type = 'direct' and c.source_id in (${placeholders})`,
       )
       .bind(...sourceIds)
@@ -2086,7 +2135,10 @@ function targetScopeColumns(change: ActiveTimetableChange) {
   }
 }
 
-function activeTimetableChangeSlotKey(change: ActiveTimetableChange) {
+function activeTimetableChangeSlotKey(change: Pick<
+  ActiveTimetableChange,
+  'schoolYear' | 'targetScopeType' | 'targetScopeValue' | 'changeDate' | 'periodNumber'
+>) {
   return [
     change.schoolYear,
     change.targetScopeType,
@@ -2096,9 +2148,9 @@ function activeTimetableChangeSlotKey(change: ActiveTimetableChange) {
   ].join(':')
 }
 
-function sameDirectChangePayload(
-  left: ActiveTimetableChange,
-  right: ActiveTimetableChange,
+function sameDirectChangeBase(
+  left: Omit<ActiveTimetableChange, 'replacement'>,
+  right: Omit<ActiveTimetableChange, 'replacement'>,
 ) {
   return (
     left.sourceId === right.sourceId &&
@@ -2107,7 +2159,6 @@ function sameDirectChangePayload(
     left.targetScopeValue === right.targetScopeValue &&
     left.changeDate === right.changeDate &&
     left.periodNumber === right.periodNumber &&
-    JSON.stringify(left.replacement) === JSON.stringify(right.replacement) &&
     left.changedByStudentAccountId === right.changedByStudentAccountId
   )
 }
@@ -2116,14 +2167,23 @@ function mapStoredDirectOperation(
   row: ActiveTimetableChangeRow,
 ): DirectTimetableChangeOperation {
   const active = mapActiveTimetableChangeRow(row)
-  return row.change_kind === 'update'
+  const { replacement: activeReplacement, ...base } = active
+  return row.change_kind === 'remove'
     ? {
-        ...active,
+        ...base,
+        changeKind: 'remove',
+        expectedLatestChangeId: row.expected_latest_change_id ?? '',
+      }
+    : row.change_kind === 'update'
+    ? {
+        ...base,
+        replacement: activeReplacement,
         changeKind: 'update',
         expectedLatestChangeId: row.expected_latest_change_id ?? '',
       }
     : {
-        ...active,
+        ...base,
+        replacement: activeReplacement,
         changeKind: 'add',
       }
 }
@@ -2136,6 +2196,9 @@ function sameDirectOperationPayload(
     left.changeKind === right.changeKind &&
     left.sharedInformationItemId === right.sharedInformationItemId &&
     left.expectedLatestChangeId === right.expectedLatestChangeId &&
-    sameDirectChangePayload(left, right)
+    sameDirectChangeBase(left, right) &&
+    (left.changeKind === 'remove' || right.changeKind === 'remove'
+      ? left.changeKind === right.changeKind
+      : JSON.stringify(left.replacement) === JSON.stringify(right.replacement))
   )
 }

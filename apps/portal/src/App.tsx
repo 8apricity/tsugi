@@ -13,7 +13,6 @@ import {
   createTimetableEditorClient,
   normalizeDirectLessonReplacement,
   type TargetScopeType,
-  type TimetableChangeDraft,
   type TimetableLayerState,
   type TimetableLayerKey,
   type TimetableReplacement,
@@ -67,10 +66,8 @@ type TimetableEditorOptions = {
   }>;
 };
 
-type TimetableEditorForm = Pick<
-  TimetableChangeDraft,
-  "targetScopeType" | "changeDate" | "periodNumber" | "replacement"
-> & {
+type TimetableEditorForm = TimetableLayerKey & {
+  replacement: TimetableReplacement;
   sourceId?: string;
 };
 
@@ -725,7 +722,18 @@ function App() {
       (layer) => layer.targetScopeType === targetScopeType,
     );
     setTimetableEditorForm(
-      existing ??
+      existing
+        ? {
+            targetScopeType: existing.targetScopeType,
+            changeDate: existing.changeDate,
+            periodNumber: existing.periodNumber,
+            sourceId: existing.sourceId,
+            replacement:
+              existing.changeKind === "remove"
+                ? existing.serverReplacement
+                : existing.replacement,
+          }
+        :
         (serverLayer?.state === "active"
           ? {
               targetScopeType,
@@ -740,6 +748,29 @@ function App() {
               replacement: { type: "lesson_name", lessonName: "" },
             }),
     );
+  }
+
+  function planTimetableRemoval() {
+    if (!timetableEditorForm) return;
+    const result = timetableEditorClient.removeDesiredState({
+      targetScopeType: timetableEditorForm.targetScopeType,
+      changeDate: timetableEditorForm.changeDate,
+      periodNumber: timetableEditorForm.periodNumber,
+    });
+    if (result.status === "not-active") {
+      setTimetableEditorMessage(
+        "適用中のTimetable Changeがないため削除できません。",
+      );
+      return;
+    }
+    if (result.status === "limit-reached") {
+      setTimetableEditorMessage(
+        "下書きは50件までです。既存の下書きを変更または取り消してください。",
+      );
+      return;
+    }
+    setTimetableEditorForm(null);
+    setTimetableEditorMessage(null);
   }
 
   function navigateLayerDialog(schoolDate: string, periodNumber: number) {
@@ -802,7 +833,7 @@ function App() {
     const summary = payload.changes
       .map(
         (draft) =>
-          `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${replacementLabel(draft.replacement)}`,
+          `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement!)}`,
       )
       .join("\n");
     if (
@@ -1402,7 +1433,9 @@ function App() {
                         key={layer.targetScopeType}
                         label={scopeLabel(layer.targetScopeType)}
                         value={
-                          layer.state === "active"
+                          "removalPlanned" in layer && layer.removalPlanned
+                            ? "削除予定"
+                            : layer.state === "active"
                             ? replacementLabel(layer.replacement)
                             : "変更なし"
                         }
@@ -1410,7 +1443,9 @@ function App() {
                           layer.desired
                             ? layer.conflicted
                               ? "競合・確認が必要"
-                              : "保存前の希望状態"
+                              : "removalPlanned" in layer && layer.removalPlanned
+                                ? "削除の下書き"
+                                : "保存前の希望状態"
                             : layer.state === "active" && "changedAt" in layer
                             ? `最終更新 ${formatRelativeTime(layer.changedAt)}`
                             : undefined
@@ -1625,6 +1660,21 @@ function App() {
                         }}
                       >
                         下書きを取り消す
+                      </button>
+                    ) : null}
+                    {timetableLayerDialog?.state.status === "ready" &&
+                    timetableLayerDialog.state.layers.some(
+                      (layer) =>
+                        layer.targetScopeType ===
+                          timetableEditorForm.targetScopeType &&
+                        layer.state === "active",
+                    ) ? (
+                      <button
+                        className="replacement-remove-button"
+                        type="button"
+                        onClick={planTimetableRemoval}
+                      >
+                        Timetable Changeを削除
                       </button>
                     ) : null}
                     <button className="button-primary" type="submit">

@@ -146,13 +146,15 @@ export async function applyDirectTimetableChanges({
   const changes: DirectTimetableChangeOperation[] = []
 
   for (const candidate of drafts as DirectChangeDraft[]) {
-    const replacement = parseReplacement(candidate.replacement)
     const changeKind = candidate.changeKind ?? 'add'
+    const replacement = changeKind === 'remove'
+      ? null
+      : parseReplacement(candidate.replacement)
 
     if (
       typeof candidate.sourceId !== 'string' ||
       !uuidPattern.test(candidate.sourceId) ||
-      (changeKind !== 'add' && changeKind !== 'update') ||
+      (changeKind !== 'add' && changeKind !== 'update' && changeKind !== 'remove') ||
       !isTargetScopeType(candidate.targetScopeType) ||
       typeof candidate.changeDate !== 'string' ||
       !isValidSchoolDate(candidate.changeDate) ||
@@ -161,13 +163,15 @@ export async function applyDirectTimetableChanges({
       !Number.isInteger(candidate.periodNumber) ||
       Number(candidate.periodNumber) < 1 ||
       Number(candidate.periodNumber) > 7 ||
-      !replacement
+      (changeKind === 'remove'
+        ? candidate.replacement !== undefined
+        : !replacement)
     ) {
       return { status: 'invalid-change' }
     }
 
     if (
-      changeKind === 'update' &&
+      changeKind !== 'add' &&
       (typeof candidate.sharedInformationItemId !== 'string' ||
         !uuidPattern.test(candidate.sharedInformationItemId) ||
         typeof candidate.expectedLatestChangeId !== 'string' ||
@@ -178,7 +182,7 @@ export async function applyDirectTimetableChanges({
     }
 
     if (
-      replacement.type === 'floating_lesson_reference' &&
+      replacement?.type === 'floating_lesson_reference' &&
       !(await store.findFloatingLessonReferenceLabel(
         replacement.floatingLessonReferenceLabelId,
         schoolYear.schoolYear,
@@ -197,7 +201,6 @@ export async function applyDirectTimetableChanges({
       targetScopeValue: targetScopeValue(targetScopeType, affiliation),
       changeDate: candidate.changeDate,
       periodNumber: Number(candidate.periodNumber),
-      replacement,
       changedByStudentAccountId: session.studentAccount.studentAccountId,
       changedAt: now,
     }
@@ -206,12 +209,21 @@ export async function applyDirectTimetableChanges({
         ? {
             ...common,
             changeKind,
+            replacement: replacement!,
             sharedInformationItemId: candidate.sharedInformationItemId as string,
             expectedLatestChangeId: candidate.expectedLatestChangeId as string,
           }
+        : changeKind === 'remove'
+          ? {
+              ...common,
+              changeKind,
+              sharedInformationItemId: candidate.sharedInformationItemId as string,
+              expectedLatestChangeId: candidate.expectedLatestChangeId as string,
+            }
         : {
             ...common,
             changeKind,
+            replacement: replacement!,
             sharedInformationItemId: candidate.sourceId,
           },
     )

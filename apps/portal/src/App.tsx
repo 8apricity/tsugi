@@ -2367,6 +2367,7 @@ function PeriodWheelPicker({
 }) {
   const wheelSettleDelay = 120;
   const closeDelay = 400;
+  const snapDuration = 100;
   const [open, setOpen] = useState(false);
   const [pendingValue, setPendingValue] = useState(value);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -2377,6 +2378,7 @@ function PeriodWheelPicker({
   const scrollSettleTimerRef = useRef<number | null>(null);
   const confirmTimerRef = useRef<number | null>(null);
   const optionClickReleaseTimerRef = useRef<number | null>(null);
+  const snapAnimationFrameRef = useRef<number | null>(null);
   const suppressScrollRef = useRef(false);
   const triggerDragCleanupRef = useRef<(() => void) | null>(null);
   const triggerDragRef = useRef<{
@@ -2395,6 +2397,12 @@ function PeriodWheelPicker({
   function clearTriggerDragListeners() {
     triggerDragCleanupRef.current?.();
     triggerDragCleanupRef.current = null;
+  }
+
+  function cancelSnapAnimation() {
+    if (snapAnimationFrameRef.current === null) return;
+    window.cancelAnimationFrame(snapAnimationFrameRef.current);
+    snapAnimationFrameRef.current = null;
   }
 
   function updatePendingValue(periodNumber: number) {
@@ -2440,6 +2448,43 @@ function PeriodWheelPicker({
     });
   }
 
+  function animatePeriodIntoCenter(
+    periodNumber: number,
+    onComplete?: () => void,
+  ) {
+    const picker = pickerRef.current;
+    if (!picker) return;
+    const viewport: HTMLDivElement = picker;
+    const period = viewport.querySelector<HTMLElement>(
+      `[data-period="${periodNumber}"]`,
+    );
+    if (!period) return;
+
+    cancelSnapAnimation();
+    const startTop = viewport.scrollTop;
+    const targetTop =
+      period.offsetTop - (viewport.clientHeight - period.clientHeight) / 2;
+    const distance = targetTop - startTop;
+    if (Math.abs(distance) <= 1) {
+      onComplete?.();
+      return;
+    }
+
+    const startedAt = performance.now();
+    function animate(now: number) {
+      const progress = Math.min(1, (now - startedAt) / snapDuration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      viewport.scrollTop = startTop + distance * eased;
+      if (progress < 1) {
+        snapAnimationFrameRef.current = window.requestAnimationFrame(animate);
+      } else {
+        snapAnimationFrameRef.current = null;
+        onComplete?.();
+      }
+    }
+    snapAnimationFrameRef.current = window.requestAnimationFrame(animate);
+  }
+
   function periodNeedsCentering(periodNumber: number) {
     const picker = pickerRef.current;
     const period = picker?.querySelector<HTMLElement>(
@@ -2459,6 +2504,7 @@ function PeriodWheelPicker({
     clearTimer(scrollSettleTimerRef);
     clearTimer(confirmTimerRef);
     clearTimer(optionClickReleaseTimerRef);
+    cancelSnapAnimation();
     clearTriggerDragListeners();
     triggerDragRef.current = null;
     setOpen(false);
@@ -2483,7 +2529,7 @@ function PeriodWheelPicker({
       return;
     }
     suppressScrollRef.current = true;
-    scrollPeriodIntoCenter(periodNumber);
+    animatePeriodIntoCenter(periodNumber);
     confirmSelectionAfter(closeDelay);
   }
 
@@ -2527,6 +2573,7 @@ function PeriodWheelPicker({
       }
       clearTriggerDragListeners();
       clearTimer(optionClickReleaseTimerRef);
+      cancelSnapAnimation();
       triggerDragRef.current = null;
       setOpen(false);
     }
@@ -2540,6 +2587,7 @@ function PeriodWheelPicker({
       clearTimer(scrollSettleTimerRef);
       clearTimer(confirmTimerRef);
       clearTimer(optionClickReleaseTimerRef);
+      cancelSnapAnimation();
       clearTriggerDragListeners();
     },
     [],
@@ -2591,6 +2639,7 @@ function PeriodWheelPicker({
         aria-controls={open ? "period-wheel-options" : undefined}
         onPointerDown={(event) => {
           event.preventDefault();
+          cancelSnapAnimation();
           interactionRef.current.beginTriggerContact();
           openPicker();
           triggerDragRef.current = {
@@ -2652,6 +2701,7 @@ function PeriodWheelPicker({
             aria-label="時限"
             aria-activedescendant={`period-option-${pendingValue}`}
             onPointerDown={(event) => {
+              cancelSnapAnimation();
               suppressScrollRef.current = false;
               clearTimer(confirmTimerRef);
               viewportMovedRef.current = false;
@@ -2660,6 +2710,7 @@ function PeriodWheelPicker({
               }
             }}
             onTouchStart={() => {
+              cancelSnapAnimation();
               interactionRef.current.beginContact();
               viewportMovedRef.current = false;
               clearTimer(confirmTimerRef);
@@ -2677,6 +2728,7 @@ function PeriodWheelPicker({
               clearTimer(scrollSettleTimerRef);
             }}
             onWheel={() => {
+              cancelSnapAnimation();
               suppressScrollRef.current = false;
             }}
             onPointerUp={(event) => {
@@ -2725,9 +2777,8 @@ function PeriodWheelPicker({
                       closePicker();
                       return;
                     }
-                    suppressScrollRef.current = false;
-                    scrollPeriodIntoCenter(periodNumber);
-                    if (!supportsNativeScrollEnd()) scheduleScrollSettle();
+                    suppressScrollRef.current = true;
+                    animatePeriodIntoCenter(periodNumber, closePicker);
                   }}
                 >
                   {periodNumber}限

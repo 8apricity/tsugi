@@ -6,6 +6,7 @@ import type {
   TimetableChangeReplacement,
 } from './persistence'
 import { readStudentSession } from './studentAccountAccess'
+import { isValidSchoolDate } from './timetable'
 
 type DirectChangeDraft = {
   sourceId: unknown
@@ -132,6 +133,7 @@ export async function addDirectTimetableChanges({
     changes.push({
       sourceId: candidate.sourceId,
       sharedInformationItemId: candidate.sourceId,
+      latestChangeId: `${candidate.sourceId}:change`,
       schoolYear: schoolYear.schoolYear,
       targetScopeType,
       targetScopeValue: targetScopeValue(targetScopeType, affiliation),
@@ -236,12 +238,6 @@ function parseReplacement(value: unknown): TimetableChangeReplacement | null {
 
 function isTargetScopeType(value: unknown): value is TargetScopeType {
   return value === 'grade' || value === 'class' || value === 'track' || value === 'student'
-}
-
-function isValidSchoolDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-  const date = new Date(`${value}T00:00:00.000Z`)
-  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i

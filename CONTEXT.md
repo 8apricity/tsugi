@@ -42,7 +42,7 @@ The student's actual name, used only where a named response needs to identify wh
 _Avoid_: Display name, nickname
 
 **Named Attribution**:
-Showing a student's display name as the source of ordinary Tsugi activity. Direct changes use named attribution, while change proposals, approvals, and rejections do not show the individual students behind them.
+Showing a student's display name as the source of Tsugi activity in edit history. Ordinary shared-information views do not show attribution. Direct Change history shows the student who made the change to students inside the Target Scope; future Change Proposal history may also show the students who proposed, approved, or rejected it there. Reference Scope inspection does not expose those student names.
 _Avoid_: Real-name attribution, anonymous identity, reputation
 
 **Student Affiliation**:

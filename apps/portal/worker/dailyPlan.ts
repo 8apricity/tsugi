@@ -9,6 +9,13 @@ import {
   type TrackRecord,
 } from './persistence'
 import { readStudentSession } from './studentAccountAccess'
+import {
+  isValidSchoolDate,
+  resolveTimetableChangeReplacement,
+  selectStandardTimetableEntry,
+  timetableLayerOrder,
+  weekdayForSchoolDate,
+} from './timetable'
 
 type DailyPlanTask = {
   taskId: string
@@ -332,13 +339,17 @@ function buildEntriesByPeriod(
   trackId: string,
 ) {
   const entriesByPeriod = new Map<number, PeriodStandardTimetableEntry>()
+  const periodNumbers = new Set(
+    standardTimetableEntries.map((entry) => entry.periodNumber),
+  )
 
-  for (const entry of standardTimetableEntries) {
-    const existing = entriesByPeriod.get(entry.periodNumber)
-
-    if (!existing || entry.trackId === trackId) {
-      entriesByPeriod.set(entry.periodNumber, entry)
-    }
+  for (const periodNumber of periodNumbers) {
+    const entry = selectStandardTimetableEntry(
+      standardTimetableEntries,
+      trackId,
+      periodNumber,
+    )
+    if (entry) entriesByPeriod.set(periodNumber, entry)
   }
 
   return entriesByPeriod
@@ -434,42 +445,15 @@ async function resolveChangedLessonNames(
       timetableChangeState: 'resolved' | 'cancelled' | 'unresolved-reference'
     }
   >()
-  const layerOrder = { grade: 1, class: 2, track: 3, student: 4 } as const
-
   for (const change of [...changes].sort(
     (left, right) =>
-      layerOrder[left.targetScopeType] - layerOrder[right.targetScopeType],
+      timetableLayerOrder.indexOf(left.targetScopeType) -
+      timetableLayerOrder.indexOf(right.targetScopeType),
   )) {
-    const replacement = change.replacement
-    let resolved: {
-      lessonName: string
-      timetableChangeState: 'resolved' | 'cancelled' | 'unresolved-reference'
-    } = { lessonName: '', timetableChangeState: 'cancelled' }
-
-    if (replacement.type === 'lesson_name') {
-      resolved = { lessonName: replacement.lessonName, timetableChangeState: 'resolved' }
-    } else if (replacement.type === 'period_reference') {
-      const entry = await store.findStandardTimetableEntryForPeriodReference(
-        affiliation.classId,
-        affiliation.trackId,
-        replacement.weekday,
-        replacement.periodNumber,
-      )
-      resolved = entry
-        ? { lessonName: entry.lessonName, timetableChangeState: 'resolved' }
-        : { lessonName: '', timetableChangeState: 'cancelled' }
-    } else if (replacement.type === 'floating_lesson_reference') {
-      const entry = await store.findStandardTimetableEntryForFloatingReferenceLabelId(
-        affiliation.classId,
-        affiliation.trackId,
-        replacement.floatingLessonReferenceLabelId,
-      )
-      resolved = entry
-        ? { lessonName: entry.lessonName, timetableChangeState: 'resolved' }
-        : { lessonName: 'エラー', timetableChangeState: 'unresolved-reference' }
-    }
-
-    result.set(change.periodNumber, resolved)
+    result.set(
+      change.periodNumber,
+      await resolveTimetableChangeReplacement(change.replacement, affiliation, store),
+    )
   }
 
   return result
@@ -582,32 +566,6 @@ function formatJstSchoolDate(now: number) {
   const valueByType = new Map(parts.map((part) => [part.type, part.value]))
 
   return `${valueByType.get('year')}-${valueByType.get('month')}-${valueByType.get('day')}`
-}
-
-function isValidSchoolDate(value: string) {
-  const match = value.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/)
-
-  if (!match) {
-    return false
-  }
-
-  const [, year, month, day] = match
-  const date = new Date(
-    Date.UTC(Number(year), Number(month) - 1, Number(day)),
-  )
-
-  return (
-    date.getUTCFullYear() === Number(year) &&
-    date.getUTCMonth() === Number(month) - 1 &&
-    date.getUTCDate() === Number(day)
-  )
-}
-
-function weekdayForSchoolDate(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
-  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay()
-
-  return weekday === 0 ? 7 : weekday
 }
 
 function listSchoolDatesInRange(start: string, end: string) {

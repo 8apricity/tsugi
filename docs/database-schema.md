@@ -330,7 +330,7 @@ create table shared_information_changes (
 ```
 
 Accepted proposals and direct changes both create a shared information change. A separate direct changes table is intentionally not used.
-`changed_by_student_account_id` is stored for traceability, but ordinary named attribution is shown only for direct changes. Accepted proposals, approvals, and rejections should not expose the individual students behind them in normal product surfaces.
+`changed_by_student_account_id` is stored for traceability. Ordinary shared-information views do not show student attribution. Edit history shows the student behind a direct change only to students inside the Target Scope; future proposal history may also show the proposer and the students who approved or rejected it there. Reference Scope inspection does not expose those student names.
 
 ## Change Proposals
 

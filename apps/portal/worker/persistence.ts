@@ -113,6 +113,7 @@ export type TimetableChangeReplacement =
 export type ActiveTimetableChange = {
   sourceId: string
   sharedInformationItemId: string
+  latestChangeId: string
   schoolYear: number
   targetScopeType: TargetScopeType
   targetScopeValue: string
@@ -797,6 +798,7 @@ type StandardTimetableEntryRow = {
 
 type ActiveTimetableChangeRow = {
   source_id: string
+  shared_information_change_id: string
   shared_information_item_id: string
   school_year: number
   scope_type: TargetScopeType
@@ -1368,7 +1370,8 @@ export class D1PersistenceAdapters
   ) {
     const { results } = await this.db
       .prepare(
-        `select c.source_id, i.shared_information_item_id, s.school_year,
+        `select c.source_id, c.shared_information_change_id,
+                i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id, p.student_account_id,
                 t.change_date, t.period_number, t.replacement_type,
                 t.replacement_lesson_name, t.reference_weekday,
@@ -1476,7 +1479,8 @@ export class D1PersistenceAdapters
     const placeholders = sourceIds.map(() => '?').join(', ')
     const { results } = await this.db
       .prepare(
-        `select c.source_id, i.shared_information_item_id, s.school_year,
+        `select c.source_id, c.shared_information_change_id,
+                i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id, p.student_account_id,
                 t.change_date, t.period_number, t.replacement_type,
                 t.replacement_lesson_name, t.reference_weekday,
@@ -1888,6 +1892,7 @@ function mapActiveTimetableChangeRow(
   return {
     sourceId: row.source_id,
     sharedInformationItemId: row.shared_information_item_id,
+    latestChangeId: row.shared_information_change_id,
     schoolYear: row.school_year,
     targetScopeType: row.scope_type,
     targetScopeValue,

@@ -382,6 +382,24 @@ function addDirectTimetableChanges(
   )
 }
 
+function readTimetableChangeLayers(
+  env: Env,
+  cookie = '',
+  date = '2026-07-10',
+  periodNumber = 1,
+) {
+  const url = new URL('https://tsugi.test/api/timetable-changes/layers')
+  url.searchParams.set('date', date)
+  url.searchParams.set('period', String(periodNumber))
+
+  return worker.fetch(
+    new Request(url, {
+      headers: cookie ? { cookie } : {},
+    }),
+    env,
+  )
+}
+
 describe('Timetable Direct Add API', () => {
   it('rejects unauthenticated and invalid Direct Add requests', async () => {
     const env = createDailyPlanTestEnv()
@@ -546,6 +564,348 @@ describe('Timetable Direct Add API', () => {
       { sourceId: 'd1111111-1111-4111-8111-111111111111', targetScopeType: 'student', changeDate: '2026-07-11', periodNumber: 1, replacement: { type: 'lesson_name', lessonName: '重複' } },
     ])
     expect(duplicateSlots.status).toBe(400)
+  })
+})
+
+describe('Timetable Layer read API', () => {
+  it('returns the Standard Timetable, every applicable layer, and the final Daily Lesson', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const ids = [
+      '21111111-1111-4111-8111-111111111111',
+      '31111111-1111-4111-8111-111111111111',
+      '41111111-1111-4111-8111-111111111111',
+      '51111111-1111-4111-8111-111111111111',
+    ]
+
+    expect(
+      (
+        await addDirectTimetableChanges(env, cookie, [
+          {
+            sourceId: ids[0],
+            targetScopeType: 'grade',
+            changeDate: '2026-07-10',
+            periodNumber: 1,
+            replacement: { type: 'lesson_name', lessonName: '学年行事' },
+          },
+          {
+            sourceId: ids[1],
+            targetScopeType: 'class',
+            changeDate: '2026-07-10',
+            periodNumber: 1,
+            replacement: { type: 'cancelled' },
+          },
+          {
+            sourceId: ids[2],
+            targetScopeType: 'track',
+            changeDate: '2026-07-10',
+            periodNumber: 1,
+            replacement: {
+              type: 'period_reference',
+              weekday: 2,
+              periodNumber: 2,
+            },
+          },
+          {
+            sourceId: ids[3],
+            targetScopeType: 'student',
+            changeDate: '2026-07-10',
+            periodNumber: 1,
+            replacement: {
+              type: 'floating_lesson_reference',
+              floatingLessonReferenceLabelId: '2026:2:★',
+            },
+          },
+        ])
+      ).status,
+    ).toBe(201)
+
+    const response = await readTimetableChangeLayers(env, cookie)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      status: 'ready',
+      schoolDate: '2026-07-10',
+      periodNumber: 1,
+      standardTimetable: {
+        periodReference: { weekday: 5, periodNumber: 1 },
+        lessonName: '地理',
+      },
+      layers: [
+        {
+          targetScopeType: 'grade',
+          state: 'active',
+          sharedInformationItemId: ids[0],
+          latestChangeId: `${ids[0]}:change`,
+          replacement: { type: 'lesson_name', lessonName: '学年行事' },
+          changedAt: expect.any(Number),
+        },
+        {
+          targetScopeType: 'class',
+          state: 'active',
+          sharedInformationItemId: ids[1],
+          latestChangeId: `${ids[1]}:change`,
+          replacement: { type: 'cancelled' },
+          changedAt: expect.any(Number),
+        },
+        {
+          targetScopeType: 'track',
+          state: 'active',
+          sharedInformationItemId: ids[2],
+          latestChangeId: `${ids[2]}:change`,
+          replacement: {
+            type: 'period_reference',
+            weekday: 2,
+            periodNumber: 2,
+          },
+          changedAt: expect.any(Number),
+        },
+        {
+          targetScopeType: 'student',
+          state: 'active',
+          sharedInformationItemId: ids[3],
+          latestChangeId: `${ids[3]}:change`,
+          replacement: {
+            type: 'floating_lesson_reference',
+            floatingLessonReferenceLabelId: '2026:2:★',
+            referenceLabel: '★',
+          },
+          changedAt: expect.any(Number),
+        },
+      ],
+      finalDailyLesson: {
+        lessonName: '自走',
+        timetableChangeState: 'resolved',
+      },
+    })
+  })
+
+  it('represents missing Standard Timetable and inactive layers without attribution', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+
+    const response = await readTimetableChangeLayers(
+      env,
+      cookie,
+      '2026-07-10',
+      2,
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      status: 'ready',
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+      standardTimetable: null,
+      layers: [
+        { targetScopeType: 'grade', state: 'unchanged' },
+        { targetScopeType: 'class', state: 'unchanged' },
+        { targetScopeType: 'track', state: 'unchanged' },
+        { targetScopeType: 'student', state: 'unchanged' },
+      ],
+      finalDailyLesson: {
+        lessonName: '',
+        timetableChangeState: 'unchanged',
+      },
+    })
+  })
+
+  it('resolves the final Daily Lesson for every replacement kind', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const changes = [
+      {
+        sourceId: '61111111-1111-4111-8111-111111111111',
+        targetScopeType: 'grade',
+        changeDate: '2026-07-10',
+        periodNumber: 1,
+        replacement: { type: 'lesson_name', lessonName: '学年行事' },
+      },
+      {
+        sourceId: '71111111-1111-4111-8111-111111111111',
+        targetScopeType: 'class',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+        replacement: { type: 'cancelled' },
+      },
+      {
+        sourceId: '81111111-1111-4111-8111-111111111111',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 3,
+        replacement: {
+          type: 'period_reference',
+          weekday: 2,
+          periodNumber: 2,
+        },
+      },
+      {
+        sourceId: '91111111-1111-4111-8111-111111111111',
+        targetScopeType: 'student',
+        changeDate: '2026-07-10',
+        periodNumber: 4,
+        replacement: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: '2026:2:★',
+        },
+      },
+    ]
+    expect((await addDirectTimetableChanges(env, cookie, changes)).status).toBe(
+      201,
+    )
+
+    const lessonName = await readTimetableChangeLayers(env, cookie, '2026-07-10', 1)
+    const cancelled = await readTimetableChangeLayers(env, cookie, '2026-07-10', 2)
+    const periodReference = await readTimetableChangeLayers(
+      env,
+      cookie,
+      '2026-07-10',
+      3,
+    )
+    const floatingReference = await readTimetableChangeLayers(
+      env,
+      cookie,
+      '2026-07-10',
+      4,
+    )
+
+    const finalDailyLesson = async (response: Response) =>
+      (
+        (await response.json()) as {
+          finalDailyLesson: {
+            lessonName: string
+            timetableChangeState: string
+          }
+        }
+      ).finalDailyLesson
+
+    expect(await finalDailyLesson(lessonName)).toEqual({
+      lessonName: '学年行事',
+      timetableChangeState: 'resolved',
+    })
+    expect(await finalDailyLesson(cancelled)).toEqual({
+      lessonName: '',
+      timetableChangeState: 'cancelled',
+    })
+    expect(await finalDailyLesson(periodReference)).toEqual({
+      lessonName: '古典',
+      timetableChangeState: 'resolved',
+    })
+    expect(await finalDailyLesson(floatingReference)).toEqual({
+      lessonName: '自走',
+      timetableChangeState: 'resolved',
+    })
+  })
+
+  it('returns only Timetable Layers applicable to the current Student Affiliation', async () => {
+    const env = createDailyPlanTestEnv()
+    const humanitiesCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const scienceCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-science-1',
+    )
+    const otherClassCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+    const priorYearCookie = await testLoginCookie(
+      env,
+      'test-student-2025-2-3-humanities-1',
+    )
+    expect(
+      (
+        await addDirectTimetableChanges(env, humanitiesCookie, [
+          {
+            sourceId: 'a2111111-1111-4111-8111-111111111111',
+            targetScopeType: 'grade',
+            changeDate: '2026-07-10',
+            periodNumber: 5,
+            replacement: { type: 'lesson_name', lessonName: '学年' },
+          },
+          {
+            sourceId: 'a3111111-1111-4111-8111-111111111111',
+            targetScopeType: 'class',
+            changeDate: '2026-07-10',
+            periodNumber: 5,
+            replacement: { type: 'lesson_name', lessonName: 'クラス' },
+          },
+          {
+            sourceId: 'a4111111-1111-4111-8111-111111111111',
+            targetScopeType: 'track',
+            changeDate: '2026-07-10',
+            periodNumber: 5,
+            replacement: { type: 'lesson_name', lessonName: '文科' },
+          },
+          {
+            sourceId: 'a5111111-1111-4111-8111-111111111111',
+            targetScopeType: 'student',
+            changeDate: '2026-07-10',
+            periodNumber: 5,
+            replacement: { type: 'lesson_name', lessonName: '個人' },
+          },
+        ])
+      ).status,
+    ).toBe(201)
+
+    const science = (await (
+      await readTimetableChangeLayers(env, scienceCookie, '2026-07-10', 5)
+    ).json()) as { layers: Array<{ targetScopeType: string; state: string }> }
+    expect(science.layers.map(({ targetScopeType, state }) => [targetScopeType, state])).toEqual([
+      ['grade', 'active'],
+      ['class', 'active'],
+      ['track', 'unchanged'],
+      ['student', 'unchanged'],
+    ])
+
+    const otherClass = (await (
+      await readTimetableChangeLayers(env, otherClassCookie, '2026-07-10', 5)
+    ).json()) as { layers: Array<{ targetScopeType: string; state: string }> }
+    expect(
+      otherClass.layers.map(({ targetScopeType, state }) => [targetScopeType, state]),
+    ).toEqual([
+      ['grade', 'active'],
+      ['class', 'unchanged'],
+      ['track', 'unchanged'],
+      ['student', 'unchanged'],
+    ])
+    expect(
+      (
+        await readTimetableChangeLayers(
+          env,
+          priorYearCookie,
+          '2026-07-10',
+          5,
+        )
+      ).status,
+    ).toBe(409)
+  })
+
+  it('rejects unauthenticated and invalid layer requests', async () => {
+    const env = createDailyPlanTestEnv()
+    expect((await readTimetableChangeLayers(env)).status).toBe(401)
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    expect(
+      (await readTimetableChangeLayers(env, cookie, '2026-02-30', 1)).status,
+    ).toBe(400)
+    expect(
+      (await readTimetableChangeLayers(env, cookie, '2027-04-01', 1)).status,
+    ).toBe(400)
+    expect(
+      (await readTimetableChangeLayers(env, cookie, '2026-07-10', 8)).status,
+    ).toBe(400)
   })
 })
 

@@ -15,6 +15,7 @@ import {
   addDirectTimetableChanges,
   readDirectTimetableChangeOptions,
 } from "./directTimetableChange";
+import { readTimetableChangeLayers } from "./timetableChangeLayers";
 
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
@@ -420,6 +421,34 @@ export default {
       }
 
       return Response.json(result, { status: 201 });
+    }
+
+    if (
+      url.pathname === "/api/timetable-changes/layers" &&
+      request.method === "GET"
+    ) {
+      const persistence = await getPersistenceAdapters(env);
+      const result = await readTimetableChangeLayers({
+        sessionToken: readCookie(request, sessionCookieName),
+        schoolDate: url.searchParams.get("date"),
+        periodNumber: url.searchParams.get("period"),
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        store: persistence.dailyPlan,
+      });
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "invalid-selection") {
+        return Response.json(result, { status: 400 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "unavailable") {
+        return Response.json(result, { status: 503 });
+      }
+      return Response.json(result);
     }
 
     if (

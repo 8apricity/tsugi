@@ -63,6 +63,45 @@ type TimetableEditorForm = Omit<TimetableChangeDraft, "sourceId"> & {
   sourceId?: string;
 };
 
+type TimetableLayerState = {
+  status: "ready";
+  schoolDate: string;
+  periodNumber: number;
+  standardTimetable: {
+    periodReference: { weekday: number; periodNumber: number };
+    lessonName: string;
+  } | null;
+  layers: Array<
+    | { targetScopeType: TargetScopeType; state: "unchanged" }
+    | {
+        targetScopeType: TargetScopeType;
+        state: "active";
+        sharedInformationItemId: string;
+        latestChangeId: string;
+        replacement: TimetableReplacement;
+        changedAt: number;
+      }
+  >;
+  finalDailyLesson: {
+    lessonName: string;
+    timetableChangeState:
+      | "unchanged"
+      | "resolved"
+      | "cancelled"
+      | "unresolved-reference";
+  };
+};
+
+type TimetableLayerDialog = {
+  schoolDate: string;
+  periodNumber: number;
+  requestId: number;
+  state:
+    | { status: "loading" }
+    | { status: "error" }
+    | TimetableLayerState;
+};
+
 function App() {
   const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
   const [schoolEmail, setSchoolEmail] = useState<string | null>(null);
@@ -132,6 +171,11 @@ function App() {
     useState<TimetableEditorOptions | null>(null);
   const [timetableEditorForm, setTimetableEditorForm] =
     useState<TimetableEditorForm | null>(null);
+  const [timetableLayerDialog, setTimetableLayerDialog] =
+    useState<TimetableLayerDialog | null>(null);
+  const layerDialogSchoolDate = timetableLayerDialog?.schoolDate;
+  const layerDialogPeriodNumber = timetableLayerDialog?.periodNumber;
+  const layerDialogRequestId = timetableLayerDialog?.requestId;
   const [timetableEditorMessage, setTimetableEditorMessage] = useState<
     string | null
   >(null);
@@ -227,6 +271,58 @@ function App() {
       cancelled = true;
     };
   }, [status, studentAccount, timetableEditor.editing, timetableEditorOptions]);
+
+  useEffect(() => {
+    if (
+      layerDialogSchoolDate === undefined ||
+      layerDialogPeriodNumber === undefined ||
+      layerDialogRequestId === undefined
+    )
+      return;
+    const schoolDate = layerDialogSchoolDate;
+    const periodNumber = layerDialogPeriodNumber;
+    const requestId = layerDialogRequestId;
+    const controller = new AbortController();
+    fetch(
+      `/api/timetable-changes/layers?date=${encodeURIComponent(
+        schoolDate,
+      )}&period=${periodNumber}`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("layers unavailable");
+        return (await response.json()) as TimetableLayerState;
+      })
+      .then((state) =>
+        setTimetableLayerDialog((current) =>
+          current?.schoolDate === schoolDate &&
+          current.periodNumber === periodNumber &&
+          current.requestId === requestId
+            ? { schoolDate, periodNumber, requestId, state }
+            : current,
+        ),
+      )
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setTimetableLayerDialog((current) =>
+          current?.schoolDate === schoolDate &&
+          current.periodNumber === periodNumber &&
+          current.requestId === requestId
+            ? {
+                schoolDate,
+                periodNumber,
+                requestId,
+                state: { status: "error" },
+              }
+            : current,
+        );
+      });
+    return () => controller.abort();
+  }, [
+    layerDialogSchoolDate,
+    layerDialogPeriodNumber,
+    layerDialogRequestId,
+  ]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -541,6 +637,7 @@ function App() {
     dailyPlanClient.reset();
     timetableEditorClient.discard();
     setTimetableEditorForm(null);
+    setTimetableLayerDialog(null);
     setTimetableEditorOptions(null);
     setMenuOpen(false);
     setCompletedPlaceholderTaskIds(new Set());
@@ -582,7 +679,15 @@ function App() {
   }
 
   function openTimetableEditor(periodNumber: number) {
-    if (!timetableEditor.editing) return;
+    if (!timetableEditor.editing) {
+      setTimetableLayerDialog({
+        schoolDate: selectedSchoolDate,
+        periodNumber,
+        requestId: 0,
+        state: { status: "loading" },
+      });
+      return;
+    }
     const targetScopeType = timetableEditor.lastTargetScopeType;
     const existing = timetableEditorClient.findDraft(
       targetScopeType,
@@ -856,7 +961,7 @@ function App() {
                   <div className="period-list">
                     {dailyPlanState.dailyPlan.periods.map((period) => (
                       <article
-                        className={`period-row ${
+                        className={`period-row inspectable ${
                           timetableEditorClient.isLessonEdited(
                             selectedSchoolDate,
                             period.periodNumber,
@@ -865,8 +970,8 @@ function App() {
                             : ""
                         } ${timetableEditor.editing ? "editable" : ""}`}
                         key={period.periodNumber}
-                        role={timetableEditor.editing ? "button" : undefined}
-                        tabIndex={timetableEditor.editing ? 0 : undefined}
+                        role="button"
+                        tabIndex={0}
                         aria-label={`${period.periodNumber}限 ${period.lessonName || "空欄"}${
                           timetableEditorClient.isLessonEdited(
                             selectedSchoolDate,
@@ -1030,6 +1135,104 @@ function App() {
                 </button>
               </div>
             </footer>
+          ) : null}
+
+          {timetableLayerDialog ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <section
+                className="timetable-editor-dialog timetable-layer-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="timetable-layer-title"
+              >
+                <header className="editor-dialog-header">
+                  <div>
+                    <h2 id="timetable-layer-title">時間割の適用状態</h2>
+                    <p className="layer-dialog-selection">
+                      {formatSchoolDateForDialog(timetableLayerDialog.schoolDate)}
+                      ・{timetableLayerDialog.periodNumber}限
+                    </p>
+                  </div>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="閉じる"
+                    onClick={() => setTimetableLayerDialog(null)}
+                  >
+                    ×
+                  </button>
+                </header>
+
+                {timetableLayerDialog.state.status === "loading" ? (
+                  <p className="layer-dialog-status" aria-live="polite">
+                    適用状態を読み込んでいます。
+                  </p>
+                ) : timetableLayerDialog.state.status === "error" ? (
+                  <div className="layer-dialog-status" role="alert">
+                    <p>適用状態を読み込めませんでした。</p>
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() =>
+                        setTimetableLayerDialog({
+                          schoolDate: timetableLayerDialog.schoolDate,
+                          periodNumber: timetableLayerDialog.periodNumber,
+                          requestId: timetableLayerDialog.requestId + 1,
+                          state: { status: "loading" },
+                        })
+                      }
+                    >
+                      再読み込み
+                    </button>
+                  </div>
+                ) : (
+                  <div className="timetable-layer-stack">
+                    <LayerRow
+                      label="デフォルト"
+                      value={
+                        timetableLayerDialog.state.standardTimetable
+                          ?.lessonName || "空欄"
+                      }
+                      detail={
+                        timetableLayerDialog.state.standardTimetable
+                          ? `${weekdayLabel(
+                              timetableLayerDialog.state.standardTimetable
+                                .periodReference.weekday,
+                            )}${
+                              timetableLayerDialog.state.standardTimetable
+                                .periodReference.periodNumber
+                            }のStandard Timetable`
+                          : "Standard Timetableに設定なし"
+                      }
+                    />
+                    {timetableLayerDialog.state.layers.map((layer) => (
+                      <LayerRow
+                        key={layer.targetScopeType}
+                        label={scopeLabel(layer.targetScopeType)}
+                        value={
+                          layer.state === "active"
+                            ? replacementLabel(layer.replacement)
+                            : "変更なし"
+                        }
+                        detail={
+                          layer.state === "active"
+                            ? `最終更新 ${formatRelativeTime(layer.changedAt)}`
+                            : undefined
+                        }
+                      />
+                    ))}
+                    <div className="layer-result-row">
+                      <span>最終結果</span>
+                      <strong>
+                        {finalDailyLessonLabel(
+                          timetableLayerDialog.state.finalDailyLesson,
+                        )}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
           ) : null}
 
           {timetableEditorForm && schoolYearRange ? (
@@ -1463,6 +1666,55 @@ function App() {
       </section>
     </main>
   );
+}
+
+function LayerRow({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+}) {
+  return (
+    <>
+      <div className="timetable-layer-row">
+        <span className="timetable-layer-label">{label}</span>
+        <strong>{value}</strong>
+        <small>{detail}</small>
+      </div>
+      <div className="layer-flow-arrow" aria-hidden="true">
+        ↓
+      </div>
+    </>
+  );
+}
+
+function formatSchoolDateForDialog(schoolDate: string) {
+  const [, month, day] = schoolDate.split("-");
+  return `${Number(month)}月${Number(day)}日`;
+}
+
+function weekdayLabel(weekday: number) {
+  return "月火水木金土日"[weekday - 1] ?? "";
+}
+
+function formatRelativeTime(timestamp: number) {
+  const elapsed = Math.max(0, Date.now() - timestamp);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "たった今";
+  if (minutes < 60) return `${minutes}分前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}時間前`;
+  return `${Math.floor(hours / 24)}日前`;
+}
+
+function finalDailyLessonLabel(
+  lesson: TimetableLayerState["finalDailyLesson"],
+) {
+  if (lesson.timetableChangeState === "cancelled") return "休講";
+  return lesson.lessonName || "空欄";
 }
 
 function scopeLabel(scope: TargetScopeType) {

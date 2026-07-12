@@ -2265,7 +2265,9 @@ function LayerRow({
   );
   return (
     <>
-      <div className={`layer-row-shell${menuActions.length ? " has-menu" : ""}`}>
+      <div
+        className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
+      >
         {onClick ? (
           <button
             className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}

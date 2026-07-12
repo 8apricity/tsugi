@@ -1623,22 +1623,15 @@ function App() {
                       )
                     }
                   />
-                  <select
-                    aria-label="period"
+                  <PeriodWheelPicker
                     value={timetableLayerDialog.periodNumber}
-                    onChange={(event) =>
+                    onChange={(periodNumber) =>
                       navigateLayerDialog(
                         timetableLayerDialog.schoolDate,
-                        Number(event.target.value),
+                        periodNumber,
                       )
                     }
-                  >
-                    {Array.from({ length: 7 }, (_, index) => (
-                      <option value={index + 1} key={index + 1}>
-                        {index + 1}限
-                      </option>
-                    ))}
-                  </select>
+                  />
                   <button
                     type="button"
                     className="icon-button"
@@ -2326,6 +2319,95 @@ function LayerRow({
         ↓
       </div>
     </>
+  );
+}
+
+function PeriodWheelPicker({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (periodNumber: number) => void;
+}) {
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const scrollEndTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const picker = pickerRef.current;
+    const selected = picker?.querySelector<HTMLElement>(
+      `[data-period="${value}"]`,
+    );
+    if (!picker || !selected) return;
+
+    picker.scrollTo({
+      top: selected.offsetTop - (picker.clientHeight - selected.clientHeight) / 2,
+    });
+  }, [value]);
+
+  useEffect(
+    () => () => {
+      if (scrollEndTimerRef.current !== null) {
+        window.clearTimeout(scrollEndTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  function selectCenteredPeriod() {
+    const picker = pickerRef.current;
+    if (!picker) return;
+    const pickerCenter = picker.scrollTop + picker.clientHeight / 2;
+    const periods = Array.from(
+      picker.querySelectorAll<HTMLElement>("[data-period]"),
+    );
+    const centered = periods.reduce((closest, period) =>
+      Math.abs(period.offsetTop + period.clientHeight / 2 - pickerCenter) <
+      Math.abs(closest.offsetTop + closest.clientHeight / 2 - pickerCenter)
+        ? period
+        : closest,
+    );
+    const periodNumber = Number(centered.dataset.period);
+    if (periodNumber !== value) onChange(periodNumber);
+  }
+
+  return (
+    <div
+      ref={pickerRef}
+      className="period-wheel-picker"
+      role="radiogroup"
+      aria-label="時限"
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        onChange(
+          Math.min(7, Math.max(1, value + (event.key === "ArrowDown" ? 1 : -1))),
+        );
+      }}
+      onScroll={() => {
+        if (scrollEndTimerRef.current !== null) {
+          window.clearTimeout(scrollEndTimerRef.current);
+        }
+        scrollEndTimerRef.current = window.setTimeout(selectCenteredPeriod, 100);
+      }}
+    >
+      {Array.from({ length: 7 }, (_, index) => {
+        const periodNumber = index + 1;
+        return (
+          <button
+            key={periodNumber}
+            type="button"
+            role="radio"
+            aria-checked={periodNumber === value}
+            tabIndex={periodNumber === value ? 0 : -1}
+            data-period={periodNumber}
+            className={periodNumber === value ? "selected" : ""}
+            onClick={() => onChange(periodNumber)}
+          >
+            {periodNumber}限
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

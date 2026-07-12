@@ -88,19 +88,64 @@ class SqliteD1Database {
   }
 }
 
-function createTestDatabase() {
+function createTestDatabase(maximumMigration?: string) {
   const database = new DatabaseSync(':memory:')
   database.exec('pragma foreign_keys = on')
   const migrationsDirectory = fileURLToPath(
     new URL('../db/migrations/', import.meta.url),
   )
   for (const migration of readdirSync(migrationsDirectory).sort()) {
+    if (maximumMigration && migration > maximumMigration) break
     database.exec(readFileSync(`${migrationsDirectory}/${migration}`, 'utf8'))
   }
   return database
 }
 
 describe('D1 Direct Timetable Change persistence', () => {
+  it('backfills applied predecessors for existing Shared Information Changes', () => {
+    const database = createTestDatabase('0010_timetable_direct_change_integrity.sql')
+    database.exec('pragma foreign_keys = off')
+    database.exec(`
+      insert into shared_information_items (
+        shared_information_item_id, kind, target_scope_id, latest_change_id,
+        current_timetable_change_snapshot_id,
+        created_by_student_account_id, created_at, removed_at
+      ) values ('legacy-item', 'timetable_change', 'legacy-scope', null, null,
+                'legacy-student', '2026-07-10T00:00:00.000Z', null);
+      insert into shared_information_changes (
+        shared_information_change_id, shared_information_item_id, change_kind,
+        source_type, source_id, changed_by_student_account_id, changed_at,
+        timetable_change_snapshot_id
+      ) values
+        ('legacy-z-add', 'legacy-item', 'add', 'direct', 'legacy-z',
+         'legacy-student', '2026-07-10T00:00:00.000Z', null),
+        ('legacy-a-update', 'legacy-item', 'update', 'direct', 'legacy-a',
+         'legacy-student', '2026-07-10T00:00:00.000Z', null),
+        ('legacy-m-remove', 'legacy-item', 'remove', 'direct', 'legacy-m',
+         'legacy-student', '2026-07-10T00:00:00.000Z', null);
+    `)
+    const migrationPath = fileURLToPath(new URL(
+      '../db/migrations/0011_shared_information_change_predecessors.sql',
+      import.meta.url,
+    ))
+    database.exec(readFileSync(migrationPath, 'utf8'))
+
+    expect(database.prepare(`
+      select shared_information_change_id, preceding_change_id
+      from shared_information_changes order by rowid
+    `).all()).toEqual([
+      { shared_information_change_id: 'legacy-z-add', preceding_change_id: null },
+      {
+        shared_information_change_id: 'legacy-a-update',
+        preceding_change_id: 'legacy-z-add',
+      },
+      {
+        shared_information_change_id: 'legacy-m-remove',
+        preceding_change_id: 'legacy-a-update',
+      },
+    ])
+  })
+
   it('removes without deleting history, retries safely, reuses the slot, and rolls back mixed conflicts', async () => {
     const database = createTestDatabase()
     const adapters = createD1PersistenceAdapters(
@@ -165,16 +210,45 @@ describe('D1 Direct Timetable Change persistence', () => {
       current_timetable_change_snapshot_id: `${add.sourceId}:snapshot`,
     })
     expect(database.prepare(
-      `select change_kind, timetable_change_snapshot_id
+      `select change_kind, timetable_change_snapshot_id, preceding_change_id
        from shared_information_changes where shared_information_item_id = ?
        order by rowid`,
     ).all(add.sharedInformationItemId)).toEqual([
-      { change_kind: 'add', timetable_change_snapshot_id: `${add.sourceId}:snapshot` },
-      { change_kind: 'remove', timetable_change_snapshot_id: null },
+      {
+        change_kind: 'add',
+        timetable_change_snapshot_id: `${add.sourceId}:snapshot`,
+        preceding_change_id: null,
+      },
+      {
+        change_kind: 'remove',
+        timetable_change_snapshot_id: null,
+        preceding_change_id: add.latestChangeId,
+      },
     ])
     expect(database.prepare(
       'select count(*) as count from timetable_change_snapshots',
     ).get()).toEqual({ count: 1 })
+
+    await expect(adapters.timetableChangeHistory.listTimetableChangeHistory({
+      schoolYear: 2026,
+      targetScopeType: 'track',
+      targetScopeValue: 'track-1',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        sharedInformationChangeId: add.latestChangeId,
+        changeKind: 'add',
+        primaryActorDisplayName: 'Student',
+        replacement: { type: 'lesson_name', lessonName: '変更前' },
+      }),
+      expect.objectContaining({
+        sharedInformationChangeId: remove.latestChangeId,
+        changeKind: 'remove',
+        primaryActorDisplayName: 'Student',
+        replacement: null,
+      }),
+    ])
 
     const replacementAdd = operation({
       sourceId: '30333333-3333-4333-8333-333333333333',

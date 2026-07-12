@@ -148,6 +148,27 @@ export type DirectTimetableChangeOperation = DirectTimetableChangeOperationBase 
       }
   )
 
+export type HistoricalTimetableChangeReplacement =
+  | Exclude<TimetableChangeReplacement, { type: 'floating_lesson_reference' }>
+  | {
+      type: 'floating_lesson_reference'
+      floatingLessonReferenceLabelId: string
+      referenceLabel: string
+    }
+
+export type HistoricalTimetableChange = TimetableLayerKey & {
+  sharedInformationChangeId: string
+  sharedInformationItemId: string
+  changeKind: 'add' | 'update' | 'remove'
+  sourceType: 'direct' | 'proposal'
+  schoolYear: number
+  targetScopeValue: string
+  primaryActorDisplayName: string
+  changedAt: number
+  precedingChangeId: string | null
+  replacement: HistoricalTimetableChangeReplacement | null
+}
+
 export type CompleteInitialSetupTransactionInput = {
   setupSessionTokenHash: string
   schoolEmail: string
@@ -288,6 +309,16 @@ export type DirectTimetableChangeStore = {
   ): Promise<FloatingStandardTimetableEntry | null>
 }
 
+export type TimetableChangeHistoryStore = {
+  listTimetableChangeHistory(input: TimetableLayerKey & {
+    schoolYear: number
+    targetScopeValue: string
+  }): Promise<HistoricalTimetableChange[]>
+  listTimetableChangeItemHistoryByChangeId(
+    sharedInformationChangeId: string,
+  ): Promise<HistoricalTimetableChange[]>
+}
+
 export type PersistenceSeedStore = {
   saveStudentAccount(record: StudentAccount): Promise<void>
   saveSchoolYear(record: SchoolYearRecord): Promise<void>
@@ -302,6 +333,7 @@ export type PersistenceAdapters = {
   studentAffiliation: StudentAffiliationSetupStore
   dailyPlan: DailyPlanStore
   directTimetableChange: DirectTimetableChangeStore
+  timetableChangeHistory: TimetableChangeHistoryStore
   seed: PersistenceSeedStore
 }
 
@@ -309,7 +341,9 @@ export class InMemoryPersistenceAdapters
   implements
     StudentAccountAccessStore,
     StudentAffiliationSetupStore,
-    DailyPlanStore
+    DailyPlanStore,
+    DirectTimetableChangeStore,
+    TimetableChangeHistoryStore
 {
   private records: VerificationCodeRequestRecord[] = []
   private studentAccounts: StudentAccount[] = []
@@ -692,6 +726,76 @@ export class InMemoryPersistenceAdapters
     }
   }
 
+  async listTimetableChangeHistory(input: TimetableLayerKey & {
+    schoolYear: number
+    targetScopeValue: string
+  }) {
+    return [...this.directTimetableChangeOperations.values()]
+      .filter((change) =>
+        change.schoolYear === input.schoolYear &&
+        change.targetScopeType === input.targetScopeType &&
+        change.targetScopeValue === input.targetScopeValue &&
+        change.changeDate === input.changeDate &&
+        change.periodNumber === input.periodNumber)
+      .map((change) => this.mapHistoricalTimetableChange(change))
+  }
+
+  async listTimetableChangeItemHistoryByChangeId(
+    sharedInformationChangeId: string,
+  ) {
+    const selected = [...this.directTimetableChangeOperations.values()].find(
+      (change) => change.latestChangeId === sharedInformationChangeId,
+    )
+    if (!selected) return []
+    return [...this.directTimetableChangeOperations.values()]
+      .filter((change) =>
+        change.sharedInformationItemId === selected.sharedInformationItemId)
+      .map((change) => this.mapHistoricalTimetableChange(change))
+  }
+
+  private mapHistoricalTimetableChange(
+    change: DirectTimetableChangeOperation,
+  ): HistoricalTimetableChange {
+    let replacement: HistoricalTimetableChangeReplacement | null = null
+    if (change.changeKind !== 'remove') {
+      if (change.replacement.type === 'floating_lesson_reference') {
+        const floatingReferenceId =
+          change.replacement.floatingLessonReferenceLabelId
+        replacement = {
+          ...change.replacement,
+          referenceLabel: this.standardTimetableEntries.find(
+            (entry): entry is FloatingStandardTimetableEntry =>
+              entry.referenceType === 'floating' &&
+              (entry.floatingLessonReferenceLabelId === floatingReferenceId ||
+               entry.referenceLabel === floatingReferenceId
+                 .split(':').slice(2).join(':')),
+          )?.referenceLabel ?? floatingReferenceId,
+        }
+      } else {
+        replacement = change.replacement
+      }
+    }
+    return {
+      sharedInformationChangeId: change.latestChangeId,
+      sharedInformationItemId: change.sharedInformationItemId,
+      changeKind: change.changeKind,
+      sourceType: 'direct',
+      schoolYear: change.schoolYear,
+      targetScopeType: change.targetScopeType,
+      targetScopeValue: change.targetScopeValue,
+      changeDate: change.changeDate,
+      periodNumber: change.periodNumber,
+      primaryActorDisplayName: this.studentAccounts.find(
+        (student) => student.studentAccountId === change.changedByStudentAccountId,
+      )?.displayName ?? '',
+      changedAt: change.changedAt,
+      precedingChangeId: change.changeKind === 'add'
+        ? null
+        : change.expectedLatestChangeId,
+      replacement,
+    }
+  }
+
   async listFloatingLessonReferenceLabels(schoolYear: number, grade: number) {
     const classIds = new Set(
       this.schoolYearClasses
@@ -889,12 +993,37 @@ type ActiveTimetableChangeRow = {
   changed_at: string
 }
 
+type HistoricalTimetableChangeRow = {
+  shared_information_change_id: string
+  shared_information_item_id: string
+  change_kind: 'add' | 'update' | 'remove'
+  source_type: 'direct' | 'proposal'
+  school_year: number
+  scope_type: TargetScopeType
+  grade: number | null
+  class_id: string | null
+  track_id: string | null
+  student_account_id: string | null
+  change_date: string
+  period_number: number
+  replacement_type: TimetableChangeReplacement['type'] | null
+  replacement_lesson_name: string | null
+  reference_weekday: number | null
+  reference_period_number: number | null
+  reference_label: string | null
+  floating_lesson_reference_label_id: string | null
+  display_name: string
+  changed_at: string
+  preceding_change_id: string | null
+}
+
 export class D1PersistenceAdapters
   implements
     StudentAccountAccessStore,
     StudentAffiliationSetupStore,
     DailyPlanStore,
-    DirectTimetableChangeStore
+    DirectTimetableChangeStore,
+    TimetableChangeHistoryStore
 {
   private readonly db: D1Database
 
@@ -1595,7 +1724,7 @@ export class D1PersistenceAdapters
             change.expectedLatestChangeId,
             activeTimetableChangeSlotKey(change),
           ),
-          this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, timetable_change_snapshot_id) values (?, ?, 'update', 'direct', ?, ?, ?, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
+          this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, timetable_change_snapshot_id, preceding_change_id) values (?, ?, 'update', 'direct', ?, ?, ?, ?, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId, change.expectedLatestChangeId),
           this.db.prepare(`update shared_information_items set latest_change_id = ?, current_timetable_change_snapshot_id = ? where shared_information_item_id = ? and latest_change_id = ? and removed_at is null`).bind(sharedChangeId, snapshotId, change.sharedInformationItemId, change.expectedLatestChangeId),
         )
       } else {
@@ -1605,7 +1734,7 @@ export class D1PersistenceAdapters
                shared_information_change_id, shared_information_item_id,
                change_kind, source_type, source_id,
                changed_by_student_account_id, changed_at,
-               timetable_change_snapshot_id
+               timetable_change_snapshot_id, preceding_change_id
              ) values (
                ?,
                (select i.shared_information_item_id
@@ -1617,7 +1746,7 @@ export class D1PersistenceAdapters
                   and i.latest_change_id = ?
                   and i.removed_at is null
                   and a.timetable_change_slot_key = ?),
-               'remove', 'direct', ?, ?, ?, null
+               'remove', 'direct', ?, ?, ?, null, ?
              )`,
           ).bind(
             sharedChangeId,
@@ -1627,6 +1756,7 @@ export class D1PersistenceAdapters
             change.sourceId,
             change.changedByStudentAccountId,
             createdAt,
+            change.expectedLatestChangeId,
           ),
           this.db.prepare(`update shared_information_items set latest_change_id = ?, removed_at = ? where shared_information_item_id = ? and latest_change_id = ? and removed_at is null`).bind(sharedChangeId, createdAt, change.sharedInformationItemId, change.expectedLatestChangeId),
           this.db.prepare(`delete from active_timetable_change_slots where shared_information_item_id = ? and timetable_change_slot_key = ?`).bind(change.sharedInformationItemId, activeTimetableChangeSlotKey(change)),
@@ -1656,6 +1786,80 @@ export class D1PersistenceAdapters
     }
 
     return { status: 'applied' as const, changes }
+  }
+
+  async listTimetableChangeHistory(input: TimetableLayerKey & {
+    schoolYear: number
+    targetScopeValue: string
+  }) {
+    return this.queryTimetableChangeHistory(
+      `s.school_year = ? and p.scope_type = ?
+       and coalesce(cast(p.grade as text), p.class_id, p.track_id,
+                    p.student_account_id) = ?
+       and slot.change_date = ? and slot.period_number = ?`,
+      [
+        input.schoolYear,
+        input.targetScopeType,
+        input.targetScopeValue,
+        input.changeDate,
+        input.periodNumber,
+      ],
+    )
+  }
+
+  async listTimetableChangeItemHistoryByChangeId(
+    sharedInformationChangeId: string,
+  ) {
+    return this.queryTimetableChangeHistory(
+      `i.shared_information_item_id = (
+         select selected.shared_information_item_id
+         from shared_information_changes selected
+         where selected.shared_information_change_id = ?
+       )`,
+      [sharedInformationChangeId],
+    )
+  }
+
+  private async queryTimetableChangeHistory(
+    predicate: string,
+    values: unknown[],
+  ) {
+    const { results } = await this.db
+      .prepare(
+        `select c.shared_information_change_id,
+                c.shared_information_item_id, c.change_kind, c.source_type,
+                s.school_year, p.scope_type, p.grade, p.class_id, p.track_id,
+                p.student_account_id, slot.change_date, slot.period_number,
+                snapshot.replacement_type, snapshot.replacement_lesson_name,
+                snapshot.reference_weekday, snapshot.reference_period_number,
+                coalesce(label.reference_label, snapshot.reference_label) as reference_label,
+                snapshot.floating_lesson_reference_label_id,
+                actor.display_name, c.changed_at, c.preceding_change_id
+         from shared_information_changes c
+         join shared_information_items i
+           on i.shared_information_item_id = c.shared_information_item_id
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         join student_accounts actor
+           on actor.student_account_id = c.changed_by_student_account_id
+         join timetable_change_snapshots slot on slot.timetable_change_snapshot_id = (
+           select first_change.timetable_change_snapshot_id
+           from shared_information_changes first_change
+           where first_change.shared_information_item_id = i.shared_information_item_id
+             and first_change.timetable_change_snapshot_id is not null
+           order by first_change.changed_at, first_change.shared_information_change_id
+           limit 1
+         )
+         left join timetable_change_snapshots snapshot
+           on snapshot.timetable_change_snapshot_id = c.timetable_change_snapshot_id
+         left join floating_lesson_reference_labels label
+           on label.floating_lesson_reference_label_id =
+             snapshot.floating_lesson_reference_label_id
+         where i.kind = 'timetable_change' and ${predicate}`,
+      )
+      .bind(...values)
+      .all<HistoricalTimetableChangeRow>()
+    return results.map(mapHistoricalTimetableChangeRow)
   }
 
   private async findActiveTimetableChangesByItemIds(itemIds: string[]) {
@@ -1976,6 +2180,7 @@ export function createInMemoryPersistenceAdapters(): PersistenceAdapters {
     studentAffiliation: implementation,
     dailyPlan: implementation,
     directTimetableChange: implementation,
+    timetableChangeHistory: implementation,
     seed: implementation,
   }
 }
@@ -1988,6 +2193,7 @@ export function createD1PersistenceAdapters(db: D1Database): PersistenceAdapters
     studentAffiliation: implementation,
     dailyPlan: implementation,
     directTimetableChange: implementation,
+    timetableChangeHistory: implementation,
     seed: implementation,
   }
 }
@@ -2122,6 +2328,55 @@ function mapActiveTimetableChangeRow(
     replacement,
     changedByStudentAccountId: row.changed_by_student_account_id,
     changedAt: Date.parse(row.changed_at),
+  }
+}
+
+function mapHistoricalTimetableChangeRow(
+  row: HistoricalTimetableChangeRow,
+): HistoricalTimetableChange {
+  const targetScopeValue = row.scope_type === 'grade'
+    ? String(row.grade)
+    : row.scope_type === 'class'
+      ? String(row.class_id)
+      : row.scope_type === 'track'
+        ? String(row.track_id)
+        : String(row.student_account_id)
+  let replacement: HistoricalTimetableChangeReplacement | null = null
+  if (row.replacement_type === 'lesson_name') {
+    replacement = {
+      type: 'lesson_name',
+      lessonName: row.replacement_lesson_name ?? '',
+    }
+  } else if (row.replacement_type === 'period_reference') {
+    replacement = {
+      type: 'period_reference',
+      weekday: row.reference_weekday ?? 0,
+      periodNumber: row.reference_period_number ?? 0,
+    }
+  } else if (row.replacement_type === 'floating_lesson_reference') {
+    replacement = {
+      type: 'floating_lesson_reference',
+      floatingLessonReferenceLabelId:
+        row.floating_lesson_reference_label_id ?? row.reference_label ?? '',
+      referenceLabel: row.reference_label ?? '',
+    }
+  } else if (row.replacement_type === 'cancelled') {
+    replacement = { type: 'cancelled' }
+  }
+  return {
+    sharedInformationChangeId: row.shared_information_change_id,
+    sharedInformationItemId: row.shared_information_item_id,
+    changeKind: row.change_kind,
+    sourceType: row.source_type,
+    schoolYear: row.school_year,
+    targetScopeType: row.scope_type,
+    targetScopeValue,
+    changeDate: row.change_date,
+    periodNumber: row.period_number,
+    primaryActorDisplayName: row.display_name,
+    changedAt: Date.parse(row.changed_at),
+    precedingChangeId: row.preceding_change_id,
+    replacement,
   }
 }
 

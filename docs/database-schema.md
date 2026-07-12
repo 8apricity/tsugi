@@ -310,6 +310,7 @@ create table shared_information_changes (
   change_kind text not null,
   source_type text not null,
   source_id text,
+  preceding_change_id text references shared_information_changes(shared_information_change_id),
   changed_by_student_account_id text not null references student_accounts(student_account_id),
   changed_at text not null,
   task_snapshot_id text references task_snapshots(task_snapshot_id),
@@ -331,6 +332,7 @@ create table shared_information_changes (
 
 Accepted proposals and direct changes both create a shared information change. A separate direct changes table is intentionally not used.
 `changed_by_student_account_id` is stored for traceability. Ordinary shared-information views do not show student attribution. Edit history shows the student behind a direct change only to students inside the Target Scope; future proposal history may also show the proposer and the students who approved or rejected it there. Reference Scope inspection does not expose those student names.
+Timetable Change edit history queries immutable change rows by Target Scope, Change Date, and period rather than starting from only the active item. This keeps removed items visible and lets a later Direct Change addition occupy the released slot as a separate item history. `preceding_change_id` records the applied predecessor for update and remove changes, preserving causal order when timestamps tie. An update's before value comes from that preceding applied change of the same item; a remove uses that item's last active snapshot. Stored Period and Floating Lesson References are presented as stored references, not reconstructed historical Lesson Names.
 
 ## Change Proposals
 

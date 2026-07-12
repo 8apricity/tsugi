@@ -409,6 +409,35 @@ function readTimetableChangeLayers(
   )
 }
 
+function readTimetableChangeHistory(
+  env: Env,
+  cookie = '',
+  targetScopeType = 'track',
+  date = '2026-07-10',
+  periodNumber = 1,
+) {
+  const url = new URL('https://tsugi.test/api/timetable-changes/history')
+  url.searchParams.set('scope', targetScopeType)
+  url.searchParams.set('date', date)
+  url.searchParams.set('period', String(periodNumber))
+
+  return worker.fetch(new Request(url, { headers: cookie ? { cookie } : {} }), env)
+}
+
+function readDirectTimetableChangeDetail(
+  env: Env,
+  cookie: string,
+  sharedInformationChangeId: string,
+) {
+  return worker.fetch(
+    new Request(
+      `https://tsugi.test/api/timetable-changes/direct/${encodeURIComponent(sharedInformationChangeId)}`,
+      { headers: cookie ? { cookie } : {} },
+    ),
+    env,
+  )
+}
+
 describe('Timetable Direct Add API', () => {
   it('updates an Active Timetable Change when its expected latest change matches', async () => {
     const env = createDailyPlanTestEnv()
@@ -1059,6 +1088,224 @@ describe('Timetable Direct Add API', () => {
       { sourceId: 'd1111111-1111-4111-8111-111111111111', targetScopeType: 'student', changeDate: '2026-07-11', periodNumber: 1, replacement: { type: 'lesson_name', lessonName: '重複' } },
     ])
     expect(duplicateSlots.status).toBe(400)
+  })
+})
+
+describe('Timetable Change Edit History API', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('returns cross-item slot history newest first and reconstructs every Direct Change transition', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-10T00:00:00.000Z'))
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const firstItemId = '28111111-1111-4111-8111-111111111111'
+    const updateId = '28222222-2222-4222-8222-222222222222'
+    const removeId = '28333333-3333-4333-8333-333333333333'
+    const secondItemId = '28999999-9999-4999-8999-999999999999'
+
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      sourceId: firstItemId,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+      replacement: { type: 'period_reference', weekday: 2, periodNumber: 2 },
+    }])).status).toBe(201)
+    vi.setSystemTime(new Date('2026-07-10T00:01:00.000Z'))
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      changeKind: 'update',
+      sourceId: updateId,
+      sharedInformationItemId: firstItemId,
+      expectedLatestChangeId: `${firstItemId}:change`,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+      replacement: {
+        type: 'floating_lesson_reference',
+        floatingLessonReferenceLabelId: '2026:2:★',
+      },
+    }])).status).toBe(201)
+    vi.setSystemTime(new Date('2026-07-10T00:02:00.000Z'))
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      changeKind: 'remove',
+      sourceId: removeId,
+      sharedInformationItemId: firstItemId,
+      expectedLatestChangeId: `${updateId}:change`,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+    }])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      sourceId: secondItemId,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+      replacement: { type: 'cancelled' },
+    }])).status).toBe(201)
+
+    const response = await readTimetableChangeHistory(env, cookie)
+    expect(response.status).toBe(200)
+    const history = await response.json() as {
+      entries: Array<Record<string, unknown>>
+      [key: string]: unknown
+    }
+    expect(history).toMatchObject({
+      status: 'ready',
+      targetScope: { type: 'track', value: '2026-grade-2-class-3-humanities' },
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+    })
+    expect(history.entries).toEqual([
+      expect.objectContaining({
+        sharedInformationChangeId: `${secondItemId}:change`,
+        sharedInformationItemId: secondItemId,
+        changeKind: 'add',
+        sourceType: 'direct',
+        primaryActorDisplayName: 'Test Humanities 1',
+        before: null,
+        after: { type: 'cancelled' },
+      }),
+      expect.objectContaining({
+        sharedInformationChangeId: `${removeId}:change`,
+        sharedInformationItemId: firstItemId,
+        changeKind: 'remove',
+        before: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: '2026:2:★',
+          referenceLabel: '★',
+        },
+        after: null,
+      }),
+      expect.objectContaining({
+        sharedInformationChangeId: `${updateId}:change`,
+        sharedInformationItemId: firstItemId,
+        changeKind: 'update',
+        before: { type: 'period_reference', weekday: 2, periodNumber: 2 },
+        after: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: '2026:2:★',
+          referenceLabel: '★',
+        },
+      }),
+      expect.objectContaining({
+        sharedInformationChangeId: `${firstItemId}:change`,
+        sharedInformationItemId: firstItemId,
+        changeKind: 'add',
+        before: null,
+        after: { type: 'period_reference', weekday: 2, periodNumber: 2 },
+      }),
+    ])
+
+    const detailResponse = await readDirectTimetableChangeDetail(
+      env,
+      cookie,
+      `${updateId}:change`,
+    )
+    expect(detailResponse.status).toBe(200)
+    expect(await detailResponse.json()).toMatchObject({
+      status: 'ready',
+      sharedInformationChangeId: `${updateId}:change`,
+      sharedInformationItemId: firstItemId,
+      changeKind: 'update',
+      sourceType: 'direct',
+      primaryActorDisplayName: 'Test Humanities 1',
+      changedAt: Date.parse('2026-07-10T00:01:00.000Z'),
+      targetScope: { type: 'track', value: '2026-grade-2-class-3-humanities' },
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+      before: { type: 'period_reference', weekday: 2, periodNumber: 2 },
+      after: {
+        type: 'floating_lesson_reference',
+        floatingLessonReferenceLabelId: '2026:2:★',
+        referenceLabel: '★',
+      },
+    })
+
+    const layers = await (await readTimetableChangeLayers(env, cookie)).json()
+    expect(JSON.stringify(layers)).not.toContain('primaryActorDisplayName')
+  })
+
+  it('does not expose history attribution outside the Target Scope', async () => {
+    const env = createDailyPlanTestEnv()
+    const humanitiesCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const scienceCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-science-1',
+    )
+    const itemId = '28888888-8888-4888-8888-888888888888'
+    expect((await addDirectTimetableChanges(env, humanitiesCookie, [{
+      sourceId: itemId,
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 1,
+      replacement: { type: 'lesson_name', lessonName: '文科のみ' },
+    }])).status).toBe(201)
+
+    expect((await readTimetableChangeHistory(env)).status).toBe(401)
+    const otherTrackHistory = await readTimetableChangeHistory(env, scienceCookie)
+    expect(otherTrackHistory.status).toBe(200)
+    expect(await otherTrackHistory.json()).toMatchObject({ entries: [] })
+    expect((await readDirectTimetableChangeDetail(
+      env,
+      scienceCookie,
+      `${itemId}:change`,
+    )).status).toBe(404)
+    expect((await readDirectTimetableChangeDetail(
+      env,
+      '',
+      `${itemId}:change`,
+    )).status).toBe(401)
+  })
+
+  it('uses the applied predecessor when same-item timestamps tie', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-10T00:00:00.000Z'))
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const addId = '28f99999-9999-4999-8999-999999999999'
+    const updateId = '28011111-1111-4111-8111-111111111111'
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      sourceId: addId,
+      targetScopeType: 'student',
+      changeDate: '2026-07-10',
+      periodNumber: 6,
+      replacement: { type: 'lesson_name', lessonName: '前' },
+    }])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      changeKind: 'update',
+      sourceId: updateId,
+      sharedInformationItemId: addId,
+      expectedLatestChangeId: `${addId}:change`,
+      targetScopeType: 'student',
+      changeDate: '2026-07-10',
+      periodNumber: 6,
+      replacement: { type: 'lesson_name', lessonName: '後' },
+    }])).status).toBe(201)
+
+    const history = await (await readTimetableChangeHistory(
+      env,
+      cookie,
+      'student',
+      '2026-07-10',
+      6,
+    )).json() as { entries: Array<Record<string, unknown>> }
+    expect(history.entries).toEqual([
+      expect.objectContaining({
+        sharedInformationChangeId: `${updateId}:change`,
+        before: { type: 'lesson_name', lessonName: '前' },
+        after: { type: 'lesson_name', lessonName: '後' },
+      }),
+      expect.objectContaining({
+        sharedInformationChangeId: `${addId}:change`,
+        before: null,
+        after: { type: 'lesson_name', lessonName: '前' },
+      }),
+    ])
   })
 })
 

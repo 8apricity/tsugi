@@ -81,6 +81,48 @@ type TimetableLayerDialog = {
     | TimetableLayerState;
 };
 
+type TimetableChangeHistoryEntry = {
+  sharedInformationChangeId: string;
+  sharedInformationItemId: string;
+  changeKind: "add" | "update" | "remove";
+  sourceType: "direct" | "proposal";
+  primaryActorDisplayName: string;
+  changedAt: number;
+  before: TimetableReplacement | null;
+  after: TimetableReplacement | null;
+};
+
+type TimetableChangeHistoryResponse = {
+  status: "ready";
+  targetScope: { type: TargetScopeType; value: string };
+  changeDate: string;
+  periodNumber: number;
+  entries: TimetableChangeHistoryEntry[];
+};
+
+type DirectTimetableChangeDetail = TimetableChangeHistoryEntry & {
+  status: "ready";
+  targetScope: { type: TargetScopeType; value: string };
+  changeDate: string;
+  periodNumber: number;
+};
+
+type TimetableHistoryDialog = {
+  targetScopeType: TargetScopeType;
+  changeDate: string;
+  periodNumber: number;
+  requestId: number;
+  history:
+    | { status: "loading" }
+    | { status: "error" }
+    | TimetableChangeHistoryResponse;
+  detail:
+    | null
+    | { status: "loading"; sharedInformationChangeId: string }
+    | { status: "error"; sharedInformationChangeId: string }
+    | DirectTimetableChangeDetail;
+};
+
 function App() {
   const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
   const [schoolEmail, setSchoolEmail] = useState<string | null>(null);
@@ -152,6 +194,8 @@ function App() {
     useState<TimetableEditorForm | null>(null);
   const [timetableLayerDialog, setTimetableLayerDialog] =
     useState<TimetableLayerDialog | null>(null);
+  const [timetableHistoryDialog, setTimetableHistoryDialog] =
+    useState<TimetableHistoryDialog | null>(null);
   const layerDialogSchoolDate = timetableLayerDialog?.schoolDate;
   const layerDialogPeriodNumber = timetableLayerDialog?.periodNumber;
   const layerDialogRequestId = timetableLayerDialog?.requestId;
@@ -341,6 +385,49 @@ function App() {
     layerDialogRequestId,
     timetableEditorClient,
   ]);
+
+  useEffect(() => {
+    if (!timetableHistoryDialog ||
+      timetableHistoryDialog.history.status !== "loading") return;
+    const {
+      targetScopeType,
+      changeDate,
+      periodNumber,
+      requestId,
+    } = timetableHistoryDialog;
+    const controller = new AbortController();
+    const url = new URL("/api/timetable-changes/history", window.location.origin);
+    url.searchParams.set("scope", targetScopeType);
+    url.searchParams.set("date", changeDate);
+    url.searchParams.set("period", String(periodNumber));
+    fetch(url, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("history unavailable");
+        return response.json() as Promise<TimetableChangeHistoryResponse>;
+      })
+      .then((history) => {
+        setTimetableHistoryDialog((current) =>
+          current?.requestId === requestId &&
+          current.targetScopeType === targetScopeType &&
+          current.changeDate === changeDate &&
+          current.periodNumber === periodNumber
+            ? { ...current, history }
+            : current,
+        );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setTimetableHistoryDialog((current) =>
+          current?.requestId === requestId &&
+          current.targetScopeType === targetScopeType &&
+          current.changeDate === changeDate &&
+          current.periodNumber === periodNumber
+            ? { ...current, history: { status: "error" } }
+            : current,
+        );
+      });
+    return () => controller.abort();
+  }, [timetableHistoryDialog]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -748,6 +835,68 @@ function App() {
               replacement: { type: "lesson_name", lessonName: "" },
             }),
     );
+  }
+
+  function openLayerHistory(targetScopeType: TargetScopeType) {
+    if (!timetableLayerDialog) return;
+    setTimetableHistoryDialog({
+      targetScopeType,
+      changeDate: timetableLayerDialog.schoolDate,
+      periodNumber: timetableLayerDialog.periodNumber,
+      requestId: 0,
+      history: { status: "loading" },
+      detail: null,
+    });
+  }
+
+  async function openDirectChangeDetail(sharedInformationChangeId: string) {
+    setTimetableHistoryDialog((current) => current ? {
+      ...current,
+      detail: { status: "loading", sharedInformationChangeId },
+    } : current);
+    try {
+      const response = await fetch(
+        `/api/timetable-changes/direct/${encodeURIComponent(sharedInformationChangeId)}`,
+      );
+      if (!response.ok) throw new Error("detail unavailable");
+      const detail = await response.json() as DirectTimetableChangeDetail;
+      setTimetableHistoryDialog((current) =>
+        current && current.detail?.sharedInformationChangeId ===
+          sharedInformationChangeId
+          ? { ...current, detail }
+          : current,
+      );
+    } catch {
+      setTimetableHistoryDialog((current) =>
+        current && current.detail?.sharedInformationChangeId ===
+          sharedInformationChangeId
+          ? {
+              ...current,
+              detail: { status: "error", sharedInformationChangeId },
+            }
+          : current,
+      );
+    }
+  }
+
+  function planLayerRemoval(targetScopeType: TargetScopeType) {
+    if (!timetableLayerDialog) return;
+    const result = timetableEditorClient.removeDesiredState({
+      targetScopeType,
+      changeDate: timetableLayerDialog.schoolDate,
+      periodNumber: timetableLayerDialog.periodNumber,
+    });
+    if (result.status === "not-active") {
+      setTimetableEditorMessage(
+        "適用中のTimetable Changeがないため削除できません。",
+      );
+    } else if (result.status === "limit-reached") {
+      setTimetableEditorMessage(
+        "下書きは50件までです。既存の下書きを変更または取り消してください。",
+      );
+    } else {
+      setTimetableEditorMessage(null);
+    }
   }
 
   function planTimetableRemoval() {
@@ -1269,7 +1418,140 @@ function App() {
             </footer>
           ) : null}
 
-          {timetableLayerDialog && !timetableEditorForm ? (
+          {timetableHistoryDialog ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <section
+                className="timetable-editor-dialog timetable-history-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="timetable-history-title"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  if (timetableHistoryDialog.detail) {
+                    setTimetableHistoryDialog((current) =>
+                      current ? { ...current, detail: null } : current,
+                    );
+                  } else {
+                    setTimetableHistoryDialog(null);
+                  }
+                }}
+              >
+                <header className="editor-dialog-header">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={timetableHistoryDialog.detail
+                      ? "編集履歴に戻る"
+                      : "レイヤー概要に戻る"}
+                    onClick={() => timetableHistoryDialog.detail
+                      ? setTimetableHistoryDialog((current) =>
+                          current ? { ...current, detail: null } : current)
+                      : setTimetableHistoryDialog(null)}
+                  >
+                    ‹
+                  </button>
+                  <div className="history-dialog-heading">
+                    <h2 id="timetable-history-title">
+                      {timetableHistoryDialog.detail
+                        ? "Direct Change詳細"
+                        : "編集履歴"}
+                    </h2>
+                    <p className="layer-dialog-selection">
+                      {formatSchoolDateForDialog(timetableHistoryDialog.changeDate)}
+                      ・{timetableHistoryDialog.periodNumber}限・
+                      {scopeLabel(timetableHistoryDialog.targetScopeType)}
+                    </p>
+                  </div>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="閉じる"
+                    onClick={() => setTimetableHistoryDialog(null)}
+                  >
+                    ×
+                  </button>
+                </header>
+
+                {timetableHistoryDialog.detail ? (
+                  timetableHistoryDialog.detail.status === "loading" ? (
+                    <p className="layer-dialog-status" aria-live="polite">
+                      Direct Changeを読み込んでいます。
+                    </p>
+                  ) : timetableHistoryDialog.detail.status === "error" ? (
+                    <div className="layer-dialog-status" role="alert">
+                      <p>Direct Changeを読み込めませんでした。</p>
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => void openDirectChangeDetail(
+                          timetableHistoryDialog.detail!
+                            .sharedInformationChangeId,
+                        )}
+                      >
+                        再読み込み
+                      </button>
+                    </div>
+                  ) : (
+                    <DirectChangeDetailView
+                      detail={timetableHistoryDialog.detail}
+                    />
+                  )
+                ) : timetableHistoryDialog.history.status === "loading" ? (
+                  <p className="layer-dialog-status" aria-live="polite">
+                    編集履歴を読み込んでいます。
+                  </p>
+                ) : timetableHistoryDialog.history.status === "error" ? (
+                  <div className="layer-dialog-status" role="alert">
+                    <p>編集履歴を読み込めませんでした。</p>
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => setTimetableHistoryDialog((current) =>
+                        current ? {
+                          ...current,
+                          requestId: current.requestId + 1,
+                          history: { status: "loading" },
+                        } : current)}
+                    >
+                      再読み込み
+                    </button>
+                  </div>
+                ) : timetableHistoryDialog.history.entries.length === 0 ? (
+                  <p className="history-empty-state">
+                    このTarget Scope・Change Date・時限の編集履歴はありません。
+                  </p>
+                ) : (
+                  <div className="history-list" aria-label="編集履歴">
+                    {timetableHistoryDialog.history.entries.map((entry) => (
+                      <button
+                        className="history-row"
+                        type="button"
+                        key={entry.sharedInformationChangeId}
+                        onClick={() => void openDirectChangeDetail(
+                          entry.sharedInformationChangeId,
+                        )}
+                      >
+                        <span className={`history-kind history-kind-${entry.changeKind}`}>
+                          {changeKindLabel(entry.changeKind)}
+                        </span>
+                        <strong>{storedTransitionLabel(entry)}</strong>
+                        <span>{entry.sourceType === "direct"
+                          ? "Direct Change"
+                          : "Change Proposal"}</span>
+                        <span>{entry.primaryActorDisplayName}</span>
+                        <time dateTime={new Date(entry.changedAt).toISOString()}>
+                          {formatRelativeTime(entry.changedAt)}
+                        </time>
+                        <span aria-hidden="true">›</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          ) : null}
+
+          {timetableLayerDialog && !timetableEditorForm && !timetableHistoryDialog ? (
             <div className="editor-dialog-backdrop" role="presentation">
               <section
                 className="timetable-editor-dialog timetable-layer-dialog"
@@ -1457,6 +1739,30 @@ function App() {
                             ? () => openLayerReplacement(layer.targetScopeType)
                             : undefined
                         }
+                        menuActions={[
+                          ...(timetableEditor.editing ? [{
+                            label: serverLayer?.state === "active"
+                              ? "更新"
+                              : "追加",
+                            onClick: () => openLayerReplacement(
+                              layer.targetScopeType,
+                            ),
+                            disabled: !editable,
+                          }] : []),
+                          ...(timetableEditor.editing &&
+                            serverLayer?.state === "active" ? [{
+                              label: "削除",
+                              onClick: () => planLayerRemoval(
+                                layer.targetScopeType,
+                              ),
+                            }] : []),
+                          {
+                            label: "編集履歴",
+                            onClick: () => openLayerHistory(
+                              layer.targetScopeType,
+                            ),
+                          },
+                        ]}
                       />
                       );
                     })}
@@ -1920,6 +2226,7 @@ function LayerRow({
   desired = false,
   conflicted = false,
   onClick,
+  menuActions = [],
 }: {
   label: string;
   value: string;
@@ -1927,7 +2234,13 @@ function LayerRow({
   desired?: boolean;
   conflicted?: boolean;
   onClick?: () => void;
+  menuActions?: Array<{
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+  }>;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const content = (
     <>
       <span className="timetable-layer-label">{label}</span>
@@ -1942,31 +2255,137 @@ function LayerRow({
   );
   return (
     <>
-      {onClick ? (
-        <button
-          className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
-          type="button"
-          onClick={onClick}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              onClick();
-            }
-          }}
-          aria-label={`${label} Target Scopeを編集${desired ? "、下書きあり" : ""}`}
-        >
-          {content}
-        </button>
-      ) : (
-        <div className={`timetable-layer-row${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}>
-          {content}
-        </div>
-      )}
+      <div className={`layer-row-shell${menuActions.length ? " has-menu" : ""}`}>
+        {onClick ? (
+          <button
+            className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
+            type="button"
+            onClick={onClick}
+            aria-label={`${label} Target Scopeを編集${desired ? "、下書きあり" : ""}`}
+          >
+            {content}
+          </button>
+        ) : (
+          <div className={`timetable-layer-row${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}>
+            {content}
+          </div>
+        )}
+        {menuActions.length ? (
+          <div className="layer-kebab-area">
+            <button
+              className="layer-kebab-button"
+              type="button"
+              aria-label={`${label} Target Scopeのメニュー`}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              ⋮
+            </button>
+            {menuOpen ? (
+              <div className="layer-kebab-menu" role="menu">
+                {menuActions.map((action) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={action.label}
+                    disabled={action.disabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      action.onClick();
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       <div className="layer-flow-arrow" aria-hidden="true">
         ↓
       </div>
     </>
   );
+}
+
+function DirectChangeDetailView({
+  detail,
+}: {
+  detail: DirectTimetableChangeDetail;
+}) {
+  return (
+    <div className="direct-change-detail">
+      <dl className="history-detail-grid">
+        <div><dt>Change Kind</dt><dd>{changeKindLabel(detail.changeKind)}</dd></div>
+        <div><dt>Source</dt><dd>Direct Change</dd></div>
+        <div><dt>Display Name</dt><dd>{detail.primaryActorDisplayName}</dd></div>
+        <div>
+          <dt>日時</dt>
+          <dd><time dateTime={new Date(detail.changedAt).toISOString()}>
+            {formatExactTimestamp(detail.changedAt)}
+          </time></dd>
+        </div>
+        <div>
+          <dt>Target Scope</dt>
+          <dd>{scopeLabel(detail.targetScope.type)}（{detail.targetScope.value}）</dd>
+        </div>
+        <div><dt>Change Date</dt><dd>{detail.changeDate}</dd></div>
+        <div><dt>時限</dt><dd>{detail.periodNumber}限</dd></div>
+      </dl>
+      <div className="stored-transition-detail">
+        {detail.before ? (
+          <section>
+            <span>{detail.changeKind === "remove" ? "削除前" : "変更前"}</span>
+            <strong>{replacementLabel(detail.before)}</strong>
+            {isStoredReference(detail.before) ? (
+              <small>保存されたLesson Reference</small>
+            ) : null}
+          </section>
+        ) : null}
+        {detail.before && detail.after ? (
+          <span className="transition-arrow" aria-hidden="true">→</span>
+        ) : null}
+        {detail.after ? (
+          <section>
+            <span>{detail.changeKind === "add" ? "追加後" : "変更後"}</span>
+            <strong>{replacementLabel(detail.after)}</strong>
+            {isStoredReference(detail.after) ? (
+              <small>保存されたLesson Reference</small>
+            ) : null}
+          </section>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function storedTransitionLabel(entry: TimetableChangeHistoryEntry) {
+  if (entry.changeKind === "add") {
+    return `追加 → ${entry.after ? replacementLabel(entry.after) : "空欄"}`;
+  }
+  if (entry.changeKind === "remove") {
+    return `${entry.before ? replacementLabel(entry.before) : "空欄"} → 削除`;
+  }
+  return `${entry.before ? replacementLabel(entry.before) : "空欄"} → ${
+    entry.after ? replacementLabel(entry.after) : "空欄"
+  }`;
+}
+
+function changeKindLabel(changeKind: TimetableChangeHistoryEntry["changeKind"]) {
+  return { add: "追加", update: "更新", remove: "削除" }[changeKind];
+}
+
+function formatExactTimestamp(timestamp: number) {
+  return new Intl.DateTimeFormat("ja-JP", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(new Date(timestamp));
+}
+
+function isStoredReference(replacement: TimetableReplacement) {
+  return replacement.type === "period_reference" ||
+    replacement.type === "floating_lesson_reference";
 }
 
 function formatSchoolDateForDialog(schoolDate: string) {

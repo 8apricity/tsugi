@@ -45,6 +45,10 @@ _Avoid_: Display name, nickname
 Showing a student's display name as the source of Tsugi activity in edit history. Ordinary shared-information views do not show attribution. Direct Change history shows the student who made the change to students inside the Target Scope; future Change Proposal history may also show the students who proposed, approved, or rejected it there. Reference Scope inspection does not expose those student names.
 _Avoid_: Real-name attribution, anonymous identity, reputation
 
+**Edit History**:
+The Target Scope student view of Shared Information Changes for one Target Scope, Change Date, and period. Timetable Change edit history includes current and removed Shared Information Items that occupied the slot, keeps a removed item and a later add as separate item histories, and shows Named Attribution only after Target Scope membership is established. Direct Change detail derives before values from the preceding applied change of the same item and displays stored Lesson References without claiming a reconstructed historical Lesson Name.
+_Avoid_: Audit log, Reference Scope history, reactivation history
+
 **Student Affiliation**:
 A student's self-selected grade, class, and track inside the school community. Student affiliation determines which target scopes currently apply to the student and can be changed by the student.
 _Avoid_: Profile, role, permission

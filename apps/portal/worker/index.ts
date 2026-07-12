@@ -16,6 +16,10 @@ import {
   readDirectTimetableChangeOptions,
 } from "./directTimetableChange";
 import { readTimetableChangeLayers } from "./timetableChangeLayers";
+import {
+  readDirectTimetableChangeDetail,
+  readTimetableChangeHistory,
+} from "./timetableChangeHistory";
 
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
@@ -421,6 +425,70 @@ export default {
       }
 
       return Response.json(result, { status: 201 });
+    }
+
+    if (
+      url.pathname === "/api/timetable-changes/history" &&
+      request.method === "GET"
+    ) {
+      const persistence = await getPersistenceAdapters(env);
+      const result = await readTimetableChangeHistory({
+        sessionToken: readCookie(request, sessionCookieName),
+        targetScopeType: url.searchParams.get("scope"),
+        changeDate: url.searchParams.get("date"),
+        periodNumber: url.searchParams.get("period"),
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        dailyPlanStore: persistence.dailyPlan,
+        historyStore: persistence.timetableChangeHistory,
+      });
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "invalid-selection") {
+        return Response.json(result, { status: 400 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "unavailable") {
+        return Response.json(result, { status: 503 });
+      }
+      return Response.json(result);
+    }
+
+    const directChangeDetailPrefix = "/api/timetable-changes/direct/";
+    if (
+      url.pathname.startsWith(directChangeDetailPrefix) &&
+      url.pathname !== "/api/timetable-changes/direct/options" &&
+      request.method === "GET"
+    ) {
+      const sharedInformationChangeId = decodeURIComponent(
+        url.pathname.slice(directChangeDetailPrefix.length),
+      );
+      if (!sharedInformationChangeId) return new Response(null, { status: 404 });
+      const persistence = await getPersistenceAdapters(env);
+      const result = await readDirectTimetableChangeDetail({
+        sessionToken: readCookie(request, sessionCookieName),
+        sharedInformationChangeId,
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        dailyPlanStore: persistence.dailyPlan,
+        historyStore: persistence.timetableChangeHistory,
+      });
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "unavailable") {
+        return Response.json(result, { status: 503 });
+      }
+      if (result.status === "not-found") {
+        return new Response(null, { status: 404 });
+      }
+      return Response.json(result);
     }
 
     if (

@@ -9,6 +9,7 @@ import {
 import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader } from "./dailyPlanView";
+import { lockPageScroll } from "./pageScrollLock";
 import {
   createTimetableEditorClient,
   normalizeDirectLessonReplacement,
@@ -202,6 +203,15 @@ function App() {
   const [timetableEditorMessage, setTimetableEditorMessage] = useState<
     string | null
   >(null);
+  const timetableDialogOpen = Boolean(
+    timetableLayerDialog || timetableHistoryDialog || timetableEditorForm,
+  );
+
+  useEffect(() => {
+    if (!timetableDialogOpen) return;
+
+    return lockPageScroll(document);
+  }, [timetableDialogOpen]);
 
   useEffect(() => {
     if (!timetableEditorMessage) return;

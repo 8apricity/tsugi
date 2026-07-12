@@ -447,6 +447,12 @@
   touch-action: pan-y;
 }
 
+html.page-scroll-locked,
+body.page-scroll-locked {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 .timetable-editor-dialog {
   width: min(920px, 100%);
   max-height: calc(100svh - 48px);

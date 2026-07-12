@@ -494,6 +494,10 @@ body.page-scroll-locked {
   padding: 22px;
 }
 
+.layer-dialog-heading {
+  margin-left: 6px;
+}
+
 .layer-dialog-selection {
   margin: 4px 0 0;
   color: var(--color-muted);
@@ -554,7 +558,7 @@ body.page-scroll-locked {
 
 .timetable-layer-stack {
   display: grid;
-  margin-top: 20px;
+  margin: 20px 6px 0;
 }
 
 .layer-row-shell {

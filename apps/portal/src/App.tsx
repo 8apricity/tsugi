@@ -1573,7 +1573,7 @@ function App() {
                 }}
               >
                 <header className="editor-dialog-header">
-                  <div>
+                  <div className="layer-dialog-heading">
                     <h2 id="timetable-layer-title">時間割の適用状態</h2>
                     <p className="layer-dialog-selection">
                       {formatSchoolDateForDialog(timetableLayerDialog.schoolDate)}

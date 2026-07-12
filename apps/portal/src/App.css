@@ -592,13 +592,8 @@ body.page-scroll-locked {
   padding-block: 76px;
   background: transparent;
   scrollbar-width: none;
-  scroll-snap-type: y mandatory;
   overscroll-behavior: contain;
   touch-action: pan-y;
-}
-
-.period-wheel-viewport.dragging {
-  scroll-snap-type: none;
 }
 
 .period-wheel-viewport::-webkit-scrollbar {
@@ -617,7 +612,6 @@ body.page-scroll-locked {
   font-weight: 700;
   opacity: 0.4;
   cursor: pointer;
-  scroll-snap-align: center;
   transition: color 120ms ease, opacity 120ms ease;
 }
 

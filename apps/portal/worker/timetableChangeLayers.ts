@@ -56,6 +56,107 @@ export type TimetableChangeLayerResult =
   | { status: 'affiliation-renewal-needed'; schoolYear: number }
   | { status: 'unavailable' }
 
+export type TimetableChangeLayerRangeResult =
+  | {
+      status: 'ready'
+      states: Array<Extract<TimetableChangeLayerResult, { status: 'ready' }>>
+    }
+  | Exclude<TimetableChangeLayerResult, { status: 'ready' }>
+
+export async function readTimetableChangeLayerRange({
+  sessionToken,
+  startDate,
+  endDate,
+  now,
+  studentAccountStore,
+  store,
+}: {
+  sessionToken: string | null
+  startDate: string | null
+  endDate: string | null
+  now: number
+  studentAccountStore: StudentAccountAccessStore
+  store: DailyPlanStore
+}): Promise<TimetableChangeLayerRangeResult> {
+  const session = await readStudentSession({
+    sessionToken,
+    now,
+    store: studentAccountStore,
+  })
+  if (session.status === 'unauthenticated') return session
+
+  const schoolYear = await store.findCurrentSchoolYear()
+  if (!schoolYear) return { status: 'unavailable' }
+  if (
+    startDate === null ||
+    endDate === null ||
+    !isValidSchoolDate(startDate) ||
+    !isValidSchoolDate(endDate) ||
+    startDate < schoolYear.startsOn ||
+    endDate > schoolYear.endsOn
+  ) {
+    return { status: 'invalid-selection' }
+  }
+  const start = new Date(`${startDate}T00:00:00.000Z`)
+  const end = new Date(`${endDate}T00:00:00.000Z`)
+  const dayCount = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1
+  if (dayCount < 1 || dayCount > 5) return { status: 'invalid-selection' }
+
+  const affiliation = await store.findCurrentStudentAffiliation(
+    session.studentAccount.studentAccountId,
+    schoolYear.schoolYear,
+  )
+  if (!affiliation) {
+    return {
+      status: 'affiliation-renewal-needed',
+      schoolYear: schoolYear.schoolYear,
+    }
+  }
+
+  const schoolDates = Array.from({ length: dayCount }, (_, day) =>
+    new Date(start.getTime() + day * 86_400_000).toISOString().slice(0, 10),
+  )
+  const weekdays = [...new Set(schoolDates.map(weekdayForSchoolDate))]
+  const [standardEntriesByWeekday, activeChanges] = await Promise.all([
+    Promise.all(
+      weekdays.map(async (weekday) => [
+        weekday,
+        await store.listStandardTimetableEntriesForWeekday(
+          affiliation.classId,
+          affiliation.trackId,
+          weekday,
+        ),
+      ] as const),
+    ).then((entries) => new Map(entries)),
+    store.listActiveTimetableChangesForStudent(
+      affiliation,
+      startDate,
+      endDate,
+    ),
+  ])
+
+  const states: Array<Extract<TimetableChangeLayerResult, { status: 'ready' }>> = []
+  for (const schoolDate of schoolDates) {
+    const weekday = weekdayForSchoolDate(schoolDate)
+    const standardEntries = standardEntriesByWeekday.get(weekday) ?? []
+    const dateChanges = activeChanges.filter(
+      (change) => change.changeDate === schoolDate,
+    )
+    for (let periodNumber = 1; periodNumber <= 7; periodNumber += 1) {
+      states.push(await buildReadyLayerState({
+        schoolDate,
+        selectedPeriod: periodNumber,
+        weekday,
+        affiliation,
+        store,
+        standardEntries,
+        activeChanges: dateChanges,
+      }))
+    }
+  }
+  return { status: 'ready', states }
+}
+
 export async function readTimetableChangeLayers({
   sessionToken,
   schoolDate,
@@ -118,6 +219,36 @@ export async function readTimetableChangeLayers({
       schoolDate,
     ),
   ])
+  return buildReadyLayerState({
+    schoolDate,
+    selectedPeriod,
+    weekday,
+    affiliation,
+    store,
+    standardEntries,
+    activeChanges,
+  })
+}
+
+async function buildReadyLayerState({
+  schoolDate,
+  selectedPeriod,
+  weekday,
+  affiliation,
+  store,
+  standardEntries,
+  activeChanges,
+}: {
+  schoolDate: string
+  selectedPeriod: number
+  weekday: number
+  affiliation: StudentAffiliation
+  store: DailyPlanStore
+  standardEntries: Awaited<
+    ReturnType<DailyPlanStore['listStandardTimetableEntriesForWeekday']>
+  >
+  activeChanges: ActiveTimetableChange[]
+}): Promise<Extract<TimetableChangeLayerResult, { status: 'ready' }>> {
   const standardEntry = selectStandardTimetableEntry(
     standardEntries,
     affiliation.trackId,

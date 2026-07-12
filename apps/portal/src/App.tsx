@@ -11,7 +11,11 @@ import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
-import { findPeriodClosestToCenter } from "./periodWheelPicker";
+import {
+  PeriodWheelInteraction,
+  findPeriodClosestToCenter,
+} from "./periodWheelPicker";
+import { TimetableLayerMemoryCache } from "./timetableLayerCache";
 import {
   createTimetableEditorClient,
   normalizeDirectLessonReplacement,
@@ -186,6 +190,9 @@ function App() {
   const [timetableEditorClient] = useState(() =>
     createTimetableEditorClient({ storage: window.localStorage }),
   );
+  const timetableLayerCacheRef = useRef(
+    new TimetableLayerMemoryCache<TimetableLayerState>(),
+  );
   const timetableEditor = useSyncExternalStore(
     timetableEditorClient.subscribe,
     timetableEditorClient.getSnapshot,
@@ -200,7 +207,6 @@ function App() {
   const [timetableHistoryDialog, setTimetableHistoryDialog] =
     useState<TimetableHistoryDialog | null>(null);
   const layerDialogSchoolDate = timetableLayerDialog?.schoolDate;
-  const layerDialogPeriodNumber = timetableLayerDialog?.periodNumber;
   const layerDialogRequestId = timetableLayerDialog?.requestId;
   const [timetableEditorMessage, setTimetableEditorMessage] = useState<
     string | null
@@ -345,56 +351,72 @@ function App() {
   useEffect(() => {
     if (
       layerDialogSchoolDate === undefined ||
-      layerDialogPeriodNumber === undefined ||
-      layerDialogRequestId === undefined
+      layerDialogRequestId === undefined ||
+      !schoolYearRange
     )
       return;
     const schoolDate = layerDialogSchoolDate;
-    const periodNumber = layerDialogPeriodNumber;
     const requestId = layerDialogRequestId;
+    const cache = timetableLayerCacheRef.current;
+    const { missingRanges } = cache.selectWindow(
+      schoolDate,
+      schoolYearRange.startsOn,
+      schoolYearRange.endsOn,
+    );
+    setTimetableLayerDialog((current) => {
+      if (!current || current.schoolDate !== schoolDate) return current;
+      const cached = cache.get(current.schoolDate, current.periodNumber);
+      return cached ? { ...current, state: cached } : current;
+    });
+    if (missingRanges.length === 0) return;
+
     const controller = new AbortController();
-    fetch(
-      `/api/timetable-changes/layers?date=${encodeURIComponent(
-        schoolDate,
-      )}&period=${periodNumber}`,
-      { signal: controller.signal },
-    )
-      .then(async (response) => {
+    Promise.all(
+      missingRanges.map(async ({ startDate, endDate }) => {
+        const response = await fetch(
+          `/api/timetable-changes/layers/batch?start=${encodeURIComponent(
+            startDate,
+          )}&end=${encodeURIComponent(endDate)}`,
+          { signal: controller.signal },
+        );
         if (!response.ok) throw new Error("layers unavailable");
-        return (await response.json()) as TimetableLayerState;
-      })
-      .then((state) =>
+        return (await response.json()) as {
+          status: "ready";
+          states: TimetableLayerState[];
+        };
+      }),
+    )
+      .then((responses) => {
+        const states = responses.flatMap((response) => response.states);
+        cache.store(states);
+        timetableEditorClient.reconcileLayerStates(states);
         setTimetableLayerDialog((current) => {
           if (
             current?.schoolDate !== schoolDate ||
-            current.periodNumber !== periodNumber ||
             current.requestId !== requestId
           )
             return current;
-          timetableEditorClient.reconcileLayerState(state);
-          return { schoolDate, periodNumber, requestId, state };
-        }),
-      )
+          const state = cache.get(current.schoolDate, current.periodNumber);
+          return state ? { ...current, state } : current;
+        });
+      })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setTimetableLayerDialog((current) =>
-          current?.schoolDate === schoolDate &&
-          current.periodNumber === periodNumber &&
-          current.requestId === requestId
-            ? {
-                schoolDate,
-                periodNumber,
-                requestId,
-                state: { status: "error" },
-              }
-            : current,
-        );
+        setTimetableLayerDialog((current) => {
+          if (
+            current?.schoolDate !== schoolDate ||
+            current.requestId !== requestId ||
+            cache.get(current.schoolDate, current.periodNumber)
+          )
+            return current;
+          return { ...current, state: { status: "error" } };
+        });
       });
     return () => controller.abort();
   }, [
     layerDialogSchoolDate,
-    layerDialogPeriodNumber,
     layerDialogRequestId,
+    schoolYearRange,
     timetableEditorClient,
   ]);
 
@@ -753,6 +775,7 @@ function App() {
     setSetupOptions(null);
     dailyPlanClient.reset();
     timetableEditorClient.discard();
+    timetableLayerCacheRef.current.clear();
     setTimetableEditorForm(null);
     setTimetableLayerDialog(null);
     setTimetableEditorOptions(null);
@@ -797,11 +820,15 @@ function App() {
 
   function openTimetableEditor(periodNumber: number) {
     setTimetableEditorForm(null);
+    const cached = timetableLayerCacheRef.current.get(
+      selectedSchoolDate,
+      periodNumber,
+    );
     setTimetableLayerDialog({
       schoolDate: selectedSchoolDate,
       periodNumber,
       requestId: 0,
-      state: { status: "loading" },
+      state: cached ?? { status: "loading" },
     });
   }
 
@@ -941,8 +968,13 @@ function App() {
         ? {
             schoolDate,
             periodNumber,
-            requestId: current.requestId + 1,
-            state: { status: "loading" },
+            requestId:
+              current.schoolDate === schoolDate
+                ? current.requestId
+                : current.requestId + 1,
+            state:
+              timetableLayerCacheRef.current.get(schoolDate, periodNumber) ??
+              { status: "loading" },
           }
         : current,
     );
@@ -1031,6 +1063,7 @@ function App() {
         body?.status === "idempotency-conflict",
       );
       if (response.status === 409) {
+        timetableLayerCacheRef.current.clear();
         setTimetableLayerDialog((current) =>
           current
             ? {
@@ -1049,6 +1082,7 @@ function App() {
       return;
     }
     timetableEditorClient.commitSucceeded();
+    timetableLayerCacheRef.current.clear();
     setTimetableEditorMessage(null);
     setTimetableLayerDialog((current) =>
       current
@@ -2338,10 +2372,12 @@ function PeriodWheelPicker({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const pendingValueRef = useRef(value);
+  const interactionRef = useRef(new PeriodWheelInteraction());
+  const viewportMovedRef = useRef(false);
   const scrollSettleTimerRef = useRef<number | null>(null);
   const confirmTimerRef = useRef<number | null>(null);
+  const optionClickReleaseTimerRef = useRef<number | null>(null);
   const suppressScrollRef = useRef(false);
-  const lastPointerTypeRef = useRef("mouse");
   const triggerDragCleanupRef = useRef<(() => void) | null>(null);
   const triggerDragRef = useRef<{
     pointerId: number;
@@ -2365,6 +2401,7 @@ function PeriodWheelPicker({
     if (pendingValueRef.current === periodNumber) return;
     pendingValueRef.current = periodNumber;
     setPendingValue(periodNumber);
+    onChange(periodNumber);
   }
 
   function centeredPeriod() {
@@ -2403,9 +2440,25 @@ function PeriodWheelPicker({
     });
   }
 
+  function periodNeedsCentering(periodNumber: number) {
+    const picker = pickerRef.current;
+    const period = picker?.querySelector<HTMLElement>(
+      `[data-period="${periodNumber}"]`,
+    );
+    if (!picker || !period) return false;
+    const target =
+      period.offsetTop - (picker.clientHeight - period.clientHeight) / 2;
+    return Math.abs(picker.scrollTop - target) > 1;
+  }
+
+  function supportsNativeScrollEnd() {
+    return pickerRef.current ? "onscrollend" in pickerRef.current : false;
+  }
+
   function closePicker() {
     clearTimer(scrollSettleTimerRef);
     clearTimer(confirmTimerRef);
+    clearTimer(optionClickReleaseTimerRef);
     clearTriggerDragListeners();
     triggerDragRef.current = null;
     setOpen(false);
@@ -2414,15 +2467,21 @@ function PeriodWheelPicker({
   function confirmSelectionAfter(delay: number) {
     clearTimer(confirmTimerRef);
     confirmTimerRef.current = window.setTimeout(() => {
-      onChange(pendingValueRef.current);
       setOpen(false);
     }, delay);
   }
 
   function settleScroll() {
     clearTimer(scrollSettleTimerRef);
+    if (suppressScrollRef.current) return;
     const periodNumber = centeredPeriod();
     updatePendingValue(periodNumber);
+    const action = interactionRef.current.scrollSettled();
+    if (action === "stay-open") return;
+    if (action === "close-now") {
+      closePicker();
+      return;
+    }
     suppressScrollRef.current = true;
     scrollPeriodIntoCenter(periodNumber);
     confirmSelectionAfter(closeDelay);
@@ -2446,8 +2505,8 @@ function PeriodWheelPicker({
     if (!open) return;
 
     suppressScrollRef.current = true;
-    scrollPeriodIntoCenter(value, "auto");
-  }, [open, value]);
+    scrollPeriodIntoCenter(pendingValueRef.current, "auto");
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -2467,6 +2526,7 @@ function PeriodWheelPicker({
         confirmTimerRef.current = null;
       }
       clearTriggerDragListeners();
+      clearTimer(optionClickReleaseTimerRef);
       triggerDragRef.current = null;
       setOpen(false);
     }
@@ -2479,6 +2539,7 @@ function PeriodWheelPicker({
     () => () => {
       clearTimer(scrollSettleTimerRef);
       clearTimer(confirmTimerRef);
+      clearTimer(optionClickReleaseTimerRef);
       clearTriggerDragListeners();
     },
     [],
@@ -2530,7 +2591,7 @@ function PeriodWheelPicker({
         aria-controls={open ? "period-wheel-options" : undefined}
         onPointerDown={(event) => {
           event.preventDefault();
-          lastPointerTypeRef.current = event.pointerType;
+          interactionRef.current.beginTriggerContact();
           openPicker();
           triggerDragRef.current = {
             pointerId: event.pointerId,
@@ -2551,12 +2612,17 @@ function PeriodWheelPicker({
             if (endEvent.pointerId !== event.pointerId || !drag) return;
             clearTriggerDragListeners();
             triggerDragRef.current = null;
-            if (
-              endEvent.type === "pointerup" &&
-              (endEvent.pointerType === "touch" || drag.moved)
-            ) {
-              settleScroll();
+            const action = interactionRef.current.endContact(
+              endEvent.type === "pointerup" && drag.moved,
+            );
+            if (action === "wait-for-scroll-settle") {
+              scheduleScrollSettle();
             }
+            clearTimer(optionClickReleaseTimerRef);
+            optionClickReleaseTimerRef.current = window.setTimeout(() => {
+              interactionRef.current.allowOptionSelection();
+              optionClickReleaseTimerRef.current = null;
+            }, 0);
           }
 
           document.addEventListener("pointermove", moveFromTrigger, {
@@ -2586,23 +2652,51 @@ function PeriodWheelPicker({
             aria-label="時限"
             aria-activedescendant={`period-option-${pendingValue}`}
             onPointerDown={(event) => {
-              lastPointerTypeRef.current = event.pointerType;
               suppressScrollRef.current = false;
               clearTimer(confirmTimerRef);
+              viewportMovedRef.current = false;
+              if (event.pointerType !== "touch") {
+                interactionRef.current.beginContact();
+              }
+            }}
+            onTouchStart={() => {
+              interactionRef.current.beginContact();
+              viewportMovedRef.current = false;
+              clearTimer(confirmTimerRef);
+            }}
+            onTouchEnd={() => {
+              const action = interactionRef.current.endContact(
+                viewportMovedRef.current,
+              );
+              if (action === "wait-for-scroll-settle") {
+                scheduleScrollSettle();
+              }
+            }}
+            onTouchCancel={() => {
+              interactionRef.current.endContact(false);
+              clearTimer(scrollSettleTimerRef);
             }}
             onWheel={() => {
               suppressScrollRef.current = false;
             }}
             onPointerUp={(event) => {
-              if (event.pointerType !== "touch") return;
-              settleScroll();
+              if (event.pointerType === "touch") return;
+              const action = interactionRef.current.endContact(
+                viewportMovedRef.current,
+              );
+              if (action === "wait-for-scroll-settle") {
+                scheduleScrollSettle();
+              }
             }}
             onScroll={() => {
               if (suppressScrollRef.current) return;
+              viewportMovedRef.current = true;
               clearTimer(confirmTimerRef);
+              clearTimer(scrollSettleTimerRef);
               updatePendingValue(centeredPeriod());
-              scheduleScrollSettle();
+              if (!supportsNativeScrollEnd()) scheduleScrollSettle();
             }}
+            onScrollEnd={settleScroll}
           >
             {Array.from({ length: 7 }, (_, index) => {
               const periodNumber = index + 1;
@@ -2619,14 +2713,21 @@ function PeriodWheelPicker({
                     periodNumber === pendingValue ? "centered" : undefined
                   }
                   onClick={() => {
-                    suppressScrollRef.current = false;
+                    clearTimer(scrollSettleTimerRef);
+                    clearTimer(confirmTimerRef);
                     updatePendingValue(periodNumber);
-                    scrollPeriodIntoCenter(periodNumber);
-                    confirmSelectionAfter(
-                      lastPointerTypeRef.current === "touch"
-                        ? closeDelay
-                        : 200,
+                    const animationNeeded = periodNeedsCentering(periodNumber);
+                    const action = interactionRef.current.selectOption(
+                      animationNeeded,
                     );
+                    if (action === "stay-open") return;
+                    if (action === "close-now") {
+                      closePicker();
+                      return;
+                    }
+                    suppressScrollRef.current = false;
+                    scrollPeriodIntoCenter(periodNumber);
+                    if (!supportsNativeScrollEnd()) scheduleScrollSettle();
                   }}
                 >
                   {periodNumber}限

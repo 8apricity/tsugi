@@ -409,6 +409,24 @@ function readTimetableChangeLayers(
   )
 }
 
+function readTimetableChangeLayerRange(
+  env: Env,
+  cookie = '',
+  startDate = '2026-07-08',
+  endDate = '2026-07-12',
+) {
+  const url = new URL('https://tsugi.test/api/timetable-changes/layers/batch')
+  url.searchParams.set('start', startDate)
+  url.searchParams.set('end', endDate)
+
+  return worker.fetch(
+    new Request(url, {
+      headers: cookie ? { cookie } : {},
+    }),
+    env,
+  )
+}
+
 function readTimetableChangeHistory(
   env: Env,
   cookie = '',
@@ -1310,6 +1328,32 @@ describe('Timetable Change Edit History API', () => {
 })
 
 describe('Timetable Layer read API', () => {
+  it('returns every period for a five-day selection window', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readTimetableChangeLayerRange(env, cookie)
+
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      status: string
+      states: Array<{ schoolDate: string; periodNumber: number }>
+    }
+    expect(body.status).toBe('ready')
+    expect(body.states).toHaveLength(35)
+    expect(body.states[0]).toMatchObject({
+      schoolDate: '2026-07-08',
+      periodNumber: 1,
+    })
+    expect(body.states[34]).toMatchObject({
+      schoolDate: '2026-07-12',
+      periodNumber: 7,
+    })
+  })
+
   it('returns the Standard Timetable, every applicable layer, and the final Daily Lesson', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(

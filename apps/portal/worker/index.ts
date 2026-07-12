@@ -15,7 +15,10 @@ import {
   applyDirectTimetableChanges,
   readDirectTimetableChangeOptions,
 } from "./directTimetableChange";
-import { readTimetableChangeLayers } from "./timetableChangeLayers";
+import {
+  readTimetableChangeLayerRange,
+  readTimetableChangeLayers,
+} from "./timetableChangeLayers";
 import {
   readDirectTimetableChangeDetail,
   readTimetableChangeHistory,
@@ -487,6 +490,34 @@ export default {
       }
       if (result.status === "not-found") {
         return new Response(null, { status: 404 });
+      }
+      return Response.json(result);
+    }
+
+    if (
+      url.pathname === "/api/timetable-changes/layers/batch" &&
+      request.method === "GET"
+    ) {
+      const persistence = await getPersistenceAdapters(env);
+      const result = await readTimetableChangeLayerRange({
+        sessionToken: readCookie(request, sessionCookieName),
+        startDate: url.searchParams.get("start"),
+        endDate: url.searchParams.get("end"),
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        store: persistence.dailyPlan,
+      });
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "invalid-selection") {
+        return Response.json(result, { status: 400 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "unavailable") {
+        return Response.json(result, { status: 503 });
       }
       return Response.json(result);
     }

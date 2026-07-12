@@ -10,13 +10,31 @@ export type TimetableReplacement =
     }
   | { type: 'cancelled' }
 
-export type TimetableChangeDraft = {
-  sourceId: string
+export type TimetableLayerKey = {
   targetScopeType: TargetScopeType
   changeDate: string
   periodNumber: number
+}
+
+type TimetableChangeDraftBase = TimetableLayerKey & {
+  sourceId: string
   replacement: TimetableReplacement
 }
+
+export type TimetableChangeDraft = TimetableChangeDraftBase & (
+  | {
+      changeKind: 'add'
+      sharedInformationItemId?: never
+      expectedLatestChangeId?: never
+      serverReplacement?: never
+    }
+  | {
+      changeKind: 'update'
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+      serverReplacement: TimetableReplacement
+    }
+)
 
 export type TimetableLayerState = {
   status: 'ready'
@@ -48,7 +66,10 @@ export type TimetableLayerState = {
 }
 
 type StorageLike = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>
-type DesiredStateInput = Omit<TimetableChangeDraft, 'sourceId'>
+type DesiredStateInput = Pick<
+  TimetableChangeDraft,
+  'targetScopeType' | 'changeDate' | 'periodNumber' | 'replacement'
+>
 
 const storageKey = 'tsugi:timetable-direct-add-drafts:v1'
 const maximumDraftKeys = 50
@@ -83,7 +104,13 @@ export function createTimetableEditorClient({
   let lastTargetScopeType = restored.lastTargetScopeType
   let drafts = restored.drafts
   let lastCommitFailed = false
-  const occupiedServerKeys = new Set<string>()
+  const loadedServerLayers = new Map<
+    string,
+    TimetableLayerState['layers'][number]
+  >()
+  const conflictKeys = new Set<string>()
+  const stickyConflictKeys = new Set<string>()
+  const reconciledKeys = new Set<string>()
   let snapshot = buildSnapshot()
   const listeners = new Set<() => void>()
 
@@ -91,9 +118,20 @@ export function createTimetableEditorClient({
     return {
       editing,
       lastTargetScopeType,
-      drafts: [...drafts],
+      drafts: drafts.map((draft) => ({
+        ...draft,
+        conflicted: conflictKeys.has(draftKey(draft)),
+      })),
       draftCount: drafts.length,
       atLimit: drafts.length >= maximumDraftKeys,
+      conflictCount: conflictKeys.size,
+      unreconciledDrafts: drafts
+        .filter((draft) => !reconciledKeys.has(draftKey(draft)))
+        .map(({ targetScopeType, changeDate, periodNumber }) => ({
+          targetScopeType,
+          changeDate,
+          periodNumber,
+        })),
       lastCommitFailed,
       draftDates: [...new Set(drafts.map((draft) => draft.changeDate))].sort(),
     }
@@ -134,36 +172,64 @@ export function createTimetableEditorClient({
       editing = false
       drafts = []
       lastCommitFailed = false
+      conflictKeys.clear()
+      stickyConflictKeys.clear()
+      reconciledKeys.clear()
       lastTargetScopeType = 'track'
       storage.removeItem(storageKey)
       snapshot = buildSnapshot()
       listeners.forEach((listener) => listener())
     },
     reconcileLayerState(state: TimetableLayerState) {
-      for (const layer of state.layers) {
-        const key = draftKey({
-          targetScopeType: layer.targetScopeType,
-          changeDate: state.schoolDate,
-          periodNumber: state.periodNumber,
-        })
-        if (layer.state === 'active') occupiedServerKeys.add(key)
-        else occupiedServerKeys.delete(key)
-      }
+      applyLayerState(state)
+      publish()
+    },
+    reconcileLayerStates(states: TimetableLayerState[]) {
+      states.forEach(applyLayerState)
       publish()
     },
     setDesiredState(input: DesiredStateInput) {
       const key = draftKey(input)
       const existing = drafts.find((draft) => draftKey(draft) === key)
-      if (!existing && occupiedServerKeys.has(key)) {
-        return { status: 'active-layer' as const }
+      const serverLayer = loadedServerLayers.get(key)
+      const serverReplacement = existing?.serverReplacement ??
+        (serverLayer?.state === 'active' ? serverLayer.replacement : undefined)
+      if (
+        serverReplacement &&
+        replacementsEqual(input.replacement, serverReplacement)
+      ) {
+        if (removeDraftByKey(key)) {
+          conflictKeys.delete(key)
+          stickyConflictKeys.delete(key)
+          publish()
+        }
+        return { status: 'removed-noop' as const }
       }
       if (!existing && drafts.length >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
 
       const sourceId = existing?.sourceId ?? createId()
+      const operation = existing
+        ? existing.changeKind === 'update'
+          ? {
+              changeKind: 'update' as const,
+              sharedInformationItemId: existing.sharedInformationItemId,
+              expectedLatestChangeId: existing.expectedLatestChangeId,
+              serverReplacement: existing.serverReplacement,
+            }
+          : { changeKind: 'add' as const }
+        : serverLayer?.state === 'active'
+          ? {
+              changeKind: 'update' as const,
+              sharedInformationItemId: serverLayer.sharedInformationItemId,
+              expectedLatestChangeId: serverLayer.latestChangeId,
+              serverReplacement: serverLayer.replacement,
+            }
+          : { changeKind: 'add' as const }
       drafts = drafts.filter((draft) => draftKey(draft) !== key)
-      drafts.push({ ...input, sourceId })
+      drafts.push({ ...input, ...operation, sourceId })
+      if (serverLayer) reconciledKeys.add(key)
       lastTargetScopeType = input.targetScopeType
       editing = true
       lastCommitFailed = false
@@ -175,7 +241,11 @@ export function createTimetableEditorClient({
       changeDate: string,
       periodNumber: number,
     ) {
-      if (removeDraftByKey(draftKey({ targetScopeType, changeDate, periodNumber }))) {
+      const key = draftKey({ targetScopeType, changeDate, periodNumber })
+      if (removeDraftByKey(key)) {
+        conflictKeys.delete(key)
+        stickyConflictKeys.delete(key)
+        reconciledKeys.delete(key)
         publish()
         return { status: 'removed-noop' as const }
       }
@@ -186,12 +256,15 @@ export function createTimetableEditorClient({
       changeDate: string,
       periodNumber: number,
     ) {
-      return drafts.find(
+      const draft = drafts.find(
         (draft) =>
           draft.targetScopeType === targetScopeType &&
           draft.changeDate === changeDate &&
           draft.periodNumber === periodNumber,
       )
+      return draft
+        ? { ...draft, conflicted: conflictKeys.has(draftKey(draft)) }
+        : undefined
     },
     isLessonEdited(changeDate: string, periodNumber: number) {
       return drafts.some(
@@ -225,8 +298,14 @@ export function createTimetableEditorClient({
           finalDailyLesson = resolvePreviewReplacement(replacement, resolveReference)
         }
         return replacement
-          ? { ...layer, state: 'active' as const, replacement, desired: !!draft }
-          : { ...layer, desired: false }
+          ? {
+              ...layer,
+              state: 'active' as const,
+              replacement,
+              desired: !!draft,
+              conflicted: draft ? conflictKeys.has(draftKey(draft)) : false,
+            }
+          : { ...layer, desired: false, conflicted: false }
       })
       return {
         ...state,
@@ -236,8 +315,21 @@ export function createTimetableEditorClient({
     },
     toCommitPayload() {
       return {
-        changes: drafts.map(({ sourceId, targetScopeType, changeDate, periodNumber, replacement }) => ({
+        changes: drafts.map(({
           sourceId,
+          changeKind,
+          sharedInformationItemId,
+          expectedLatestChangeId,
+          targetScopeType,
+          changeDate,
+          periodNumber,
+          replacement,
+        }) => ({
+          changeKind,
+          sourceId,
+          ...(changeKind === 'update'
+            ? { sharedInformationItemId, expectedLatestChangeId }
+            : {}),
           targetScopeType,
           changeDate,
           periodNumber,
@@ -245,19 +337,55 @@ export function createTimetableEditorClient({
         })),
       }
     },
-    commitFailed() {
+    commitFailed(
+      conflictingKeys: TimetableLayerKey[] = [],
+      sticky = false,
+    ) {
       lastCommitFailed = true
+      conflictingKeys.forEach((key) => {
+        const serializedKey = draftKey(key)
+        conflictKeys.add(serializedKey)
+        if (sticky) stickyConflictKeys.add(serializedKey)
+        reconciledKeys.delete(serializedKey)
+      })
       publish()
     },
     commitSucceeded() {
       editing = false
       drafts = []
       lastCommitFailed = false
+      conflictKeys.clear()
+      stickyConflictKeys.clear()
+      reconciledKeys.clear()
       storage.removeItem(storageKey)
       snapshot = buildSnapshot()
       listeners.forEach((listener) => listener())
     },
   }
+
+  function applyLayerState(state: TimetableLayerState) {
+      for (const layer of state.layers) {
+        const key = draftKey({
+          targetScopeType: layer.targetScopeType,
+          changeDate: state.schoolDate,
+          periodNumber: state.periodNumber,
+        })
+        loadedServerLayers.set(key, layer)
+        reconciledKeys.add(key)
+        const draft = drafts.find((candidate) => draftKey(candidate) === key)
+        if (!draft) {
+          conflictKeys.delete(key)
+          continue
+        }
+        const conflicted = draft.changeKind === 'add'
+          ? layer.state === 'active'
+          : layer.state !== 'active' ||
+            layer.sharedInformationItemId !== draft.sharedInformationItemId ||
+            layer.latestChangeId !== draft.expectedLatestChangeId
+        if (conflicted || stickyConflictKeys.has(key)) conflictKeys.add(key)
+        else conflictKeys.delete(key)
+      }
+    }
 }
 
 function resolvePreviewReplacement(
@@ -277,7 +405,7 @@ function resolvePreviewReplacement(
 }
 
 function draftKey(
-  draft: Pick<TimetableChangeDraft, 'targetScopeType' | 'changeDate' | 'periodNumber'>,
+  draft: TimetableLayerKey,
 ) {
   return `${draft.targetScopeType}:${draft.changeDate}:${draft.periodNumber}`
 }
@@ -292,7 +420,10 @@ function restore(storage: StorageLike): {
     if (!value) throw new Error('empty')
     const parsed = JSON.parse(value) as Record<string, unknown>
     const drafts = Array.isArray(parsed.drafts)
-      ? parsed.drafts.filter(isTimetableChangeDraft).slice(0, maximumDraftKeys)
+      ? parsed.drafts
+          .map(restoreTimetableChangeDraft)
+          .filter((draft): draft is TimetableChangeDraft => draft !== null)
+          .slice(0, maximumDraftKeys)
       : []
 
     return {
@@ -307,16 +438,59 @@ function restore(storage: StorageLike): {
   }
 }
 
-function isTimetableChangeDraft(value: unknown): value is TimetableChangeDraft {
-  if (!value || typeof value !== 'object') return false
+function restoreTimetableChangeDraft(value: unknown): TimetableChangeDraft | null {
+  if (!value || typeof value !== 'object') return null
   const draft = value as Record<string, unknown>
-  return (
-    typeof draft.sourceId === 'string' &&
-    isTargetScopeType(draft.targetScopeType) &&
-    typeof draft.changeDate === 'string' &&
-    Number.isInteger(draft.periodNumber) &&
-    isReplacement(draft.replacement)
-  )
+  if (
+    typeof draft.sourceId !== 'string' ||
+    (draft.changeKind !== undefined &&
+      draft.changeKind !== 'add' &&
+      draft.changeKind !== 'update') ||
+    !isTargetScopeType(draft.targetScopeType) ||
+    typeof draft.changeDate !== 'string' ||
+    typeof draft.periodNumber !== 'number' ||
+    !Number.isInteger(draft.periodNumber) ||
+    !isReplacement(draft.replacement)
+  ) return null
+  const base = {
+    sourceId: draft.sourceId,
+    targetScopeType: draft.targetScopeType,
+    changeDate: draft.changeDate,
+    periodNumber: draft.periodNumber,
+    replacement: draft.replacement,
+  }
+  if (draft.changeKind === 'update') {
+    return typeof draft.sharedInformationItemId === 'string' &&
+      typeof draft.expectedLatestChangeId === 'string' &&
+      isReplacement(draft.serverReplacement)
+      ? {
+          ...base,
+          changeKind: 'update',
+          sharedInformationItemId: draft.sharedInformationItemId,
+          expectedLatestChangeId: draft.expectedLatestChangeId,
+          serverReplacement: draft.serverReplacement,
+        }
+      : null
+  }
+  return draft.sharedInformationItemId === undefined &&
+      draft.expectedLatestChangeId === undefined &&
+      draft.serverReplacement === undefined
+    ? { ...base, changeKind: 'add' }
+    : null
+}
+
+function replacementsEqual(left: TimetableReplacement, right: TimetableReplacement) {
+  if (left.type !== right.type) return false
+  if (left.type === 'cancelled') return true
+  if (left.type === 'lesson_name' && right.type === 'lesson_name') {
+    return left.lessonName === right.lessonName
+  }
+  if (left.type === 'period_reference' && right.type === 'period_reference') {
+    return left.weekday === right.weekday && left.periodNumber === right.periodNumber
+  }
+  return left.type === 'floating_lesson_reference' &&
+    right.type === 'floating_lesson_reference' &&
+    left.floatingLessonReferenceLabelId === right.floatingLessonReferenceLabelId
 }
 
 function isReplacement(value: unknown): value is TimetableReplacement {

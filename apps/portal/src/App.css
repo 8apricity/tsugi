@@ -585,6 +585,12 @@ button.timetable-layer-row {
   background: var(--color-accent-soft);
 }
 
+.timetable-layer-row.conflict {
+  border-color: #9a6700;
+  border-style: double;
+  background: #fff8e6;
+}
+
 .timetable-layer-label,
 .layer-result-row span {
   color: var(--color-muted);
@@ -613,6 +619,10 @@ button.timetable-layer-row {
   color: var(--color-primary);
   font-size: 10px;
   font-weight: 800;
+}
+
+.layer-draft-badge.conflict {
+  color: #7a5100;
 }
 
 .layer-flow-arrow {

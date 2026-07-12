@@ -15,6 +15,7 @@ import {
   type TargetScopeType,
   type TimetableChangeDraft,
   type TimetableLayerState,
+  type TimetableLayerKey,
   type TimetableReplacement,
 } from "./timetableEditorClient";
 
@@ -66,7 +67,10 @@ type TimetableEditorOptions = {
   }>;
 };
 
-type TimetableEditorForm = Omit<TimetableChangeDraft, "sourceId"> & {
+type TimetableEditorForm = Pick<
+  TimetableChangeDraft,
+  "targetScopeType" | "changeDate" | "periodNumber" | "replacement"
+> & {
   sourceId?: string;
 };
 
@@ -249,6 +253,41 @@ function App() {
       cancelled = true;
     };
   }, [status, studentAccount, timetableEditor.editing, timetableEditorOptions]);
+
+  useEffect(() => {
+    if (
+      status !== "authenticated" ||
+      !studentAccount ||
+      timetableEditor.unreconciledDrafts.length === 0
+    )
+      return;
+    const controller = new AbortController();
+    Promise.all(
+      timetableEditor.unreconciledDrafts.map(async (draft) => {
+        const response = await fetch(
+          `/api/timetable-changes/layers?date=${encodeURIComponent(
+            draft.changeDate,
+          )}&period=${draft.periodNumber}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error("draft reconciliation unavailable");
+        return (await response.json()) as TimetableLayerState;
+      }),
+    )
+      .then((states) => timetableEditorClient.reconcileLayerStates(states))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setTimetableEditorMessage(
+          "下書きと現在のTimetable Layerを照合できませんでした。",
+        );
+      });
+    return () => controller.abort();
+  }, [
+    status,
+    studentAccount,
+    timetableEditor.unreconciledDrafts,
+    timetableEditorClient,
+  ]);
 
   useEffect(() => {
     if (
@@ -685,14 +724,21 @@ function App() {
     const serverLayer = timetableLayerDialog.state.layers.find(
       (layer) => layer.targetScopeType === targetScopeType,
     );
-    if (!existing && serverLayer?.state !== "unchanged") return;
     setTimetableEditorForm(
-      existing ?? {
-        targetScopeType,
-        changeDate: timetableLayerDialog.schoolDate,
-        periodNumber: timetableLayerDialog.periodNumber,
-        replacement: { type: "lesson_name", lessonName: "" },
-      },
+      existing ??
+        (serverLayer?.state === "active"
+          ? {
+              targetScopeType,
+              changeDate: timetableLayerDialog.schoolDate,
+              periodNumber: timetableLayerDialog.periodNumber,
+              replacement: serverLayer.replacement,
+            }
+          : {
+              targetScopeType,
+              changeDate: timetableLayerDialog.schoolDate,
+              periodNumber: timetableLayerDialog.periodNumber,
+              replacement: { type: "lesson_name", lessonName: "" },
+            }),
     );
   }
 
@@ -745,6 +791,12 @@ function App() {
   }
 
   async function commitTimetableDrafts() {
+    if (timetableEditor.conflictCount > 0) {
+      setTimetableEditorMessage(
+        "競合する下書きを取り消すか、現在の状態から編集し直してください。",
+      );
+      return;
+    }
     const payload = timetableEditorClient.toCommitPayload();
     if (payload.changes.length === 0) return;
     const summary = payload.changes
@@ -776,10 +828,30 @@ function App() {
       return;
     }
     if (!response.ok) {
-      timetableEditorClient.commitFailed();
+      const body = (await response.json().catch(() => null)) as
+        | {
+            status?: string;
+            conflictingKeys?: TimetableLayerKey[];
+          }
+        | null;
+      timetableEditorClient.commitFailed(
+        body?.conflictingKeys ?? [],
+        body?.status === "idempotency-conflict",
+      );
+      if (response.status === 409) {
+        setTimetableLayerDialog((current) =>
+          current
+            ? {
+                ...current,
+                requestId: current.requestId + 1,
+                state: { status: "loading" },
+              }
+            : current,
+        );
+      }
       setTimetableEditorMessage(
         response.status === 409
-          ? "同じTarget Scope・日付・時限にActive Timetable Changeがあります。"
+          ? "Active Timetable Changeが更新されています。競合する下書きを確認してください。"
           : "変更を確定できませんでした。",
       );
       return;
@@ -1137,7 +1209,10 @@ function App() {
                   <button
                     className="button-secondary"
                     type="button"
-                    disabled={timetableEditor.drafts.length === 0}
+                    disabled={
+                      timetableEditor.drafts.length === 0 ||
+                      timetableEditor.conflictCount > 0
+                    }
                     onClick={() => void commitTimetableDrafts()}
                   >
                     変更を確定 ({timetableEditor.drafts.length})
@@ -1321,8 +1396,7 @@ function App() {
                       const editable =
                         timetableEditor.editing &&
                         (!!existingDraft ||
-                          (serverLayer?.state === "unchanged" &&
-                            !timetableEditor.atLimit));
+                          (!!serverLayer && !timetableEditor.atLimit));
                       return (
                       <LayerRow
                         key={layer.targetScopeType}
@@ -1334,12 +1408,15 @@ function App() {
                         }
                         detail={
                           layer.desired
-                            ? "保存前の希望状態"
+                            ? layer.conflicted
+                              ? "競合・確認が必要"
+                              : "保存前の希望状態"
                             : layer.state === "active" && "changedAt" in layer
                             ? `最終更新 ${formatRelativeTime(layer.changedAt)}`
                             : undefined
                         }
                         desired={layer.desired}
+                        conflicted={layer.conflicted}
                         onClick={
                           editable
                             ? () => openLayerReplacement(layer.targetScopeType)
@@ -1361,7 +1438,10 @@ function App() {
                         <button
                           className="button-primary"
                           type="button"
-                          disabled={timetableEditor.draftCount === 0}
+                          disabled={
+                            timetableEditor.draftCount === 0 ||
+                            timetableEditor.conflictCount > 0
+                          }
                           onClick={() => void commitTimetableDrafts()}
                         >
                           変更を確定 ({timetableEditor.draftCount})
@@ -1788,12 +1868,14 @@ function LayerRow({
   value,
   detail,
   desired = false,
+  conflicted = false,
   onClick,
 }: {
   label: string;
   value: string;
   detail?: string;
   desired?: boolean;
+  conflicted?: boolean;
   onClick?: () => void;
 }) {
   const content = (
@@ -1801,14 +1883,18 @@ function LayerRow({
       <span className="timetable-layer-label">{label}</span>
       <strong>{value}</strong>
       <small>{detail}</small>
-      {desired ? <span className="layer-draft-badge">下書き</span> : null}
+      {desired ? (
+        <span className={`layer-draft-badge${conflicted ? " conflict" : ""}`}>
+          {conflicted ? "競合" : "下書き"}
+        </span>
+      ) : null}
     </>
   );
   return (
     <>
       {onClick ? (
         <button
-          className={`timetable-layer-row editable${desired ? " desired" : ""}`}
+          className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
           type="button"
           onClick={onClick}
           onKeyDown={(event) => {
@@ -1822,7 +1908,7 @@ function LayerRow({
           {content}
         </button>
       ) : (
-        <div className={`timetable-layer-row${desired ? " desired" : ""}`}>
+        <div className={`timetable-layer-row${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}>
           {content}
         </div>
       )}

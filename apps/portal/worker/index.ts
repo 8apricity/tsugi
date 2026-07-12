@@ -12,7 +12,7 @@ import {
 import { readDailyPlan, readDailyPlansRange } from "./dailyPlan";
 import { createStudentAccountAccess } from "./studentAccountAccess";
 import {
-  addDirectTimetableChanges,
+  applyDirectTimetableChanges,
   readDirectTimetableChangeOptions,
 } from "./directTimetableChange";
 import { readTimetableChangeLayers } from "./timetableChangeLayers";
@@ -396,7 +396,7 @@ export default {
         return Response.json({ status: "invalid-change" }, { status: 400 });
       }
 
-      const result = await addDirectTimetableChanges({
+      const result = await applyDirectTimetableChanges({
         sessionToken: readCookie(request, sessionCookieName),
         drafts: body.changes,
         now: Date.now(),

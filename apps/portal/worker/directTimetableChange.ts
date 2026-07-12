@@ -1,28 +1,35 @@
 import type {
-  ActiveTimetableChange,
+  DirectTimetableChangeOperation,
   DirectTimetableChangeStore,
   StudentAccountAccessStore,
   TargetScopeType,
+  TimetableLayerKey,
   TimetableChangeReplacement,
 } from './persistence'
 import { readStudentSession } from './studentAccountAccess'
 import { isValidSchoolDate, selectStandardTimetableEntry } from './timetable'
 
 type DirectChangeDraft = {
+  changeKind?: unknown
   sourceId: unknown
+  sharedInformationItemId?: unknown
+  expectedLatestChangeId?: unknown
   targetScopeType: unknown
   changeDate: unknown
   periodNumber: unknown
   replacement: unknown
 }
 
-export type AddDirectTimetableChangesResult =
+export type ApplyDirectTimetableChangesResult =
   | { status: 'applied'; changes: Array<{ sourceId: string; sharedInformationItemId: string }> }
   | { status: 'unauthenticated' }
   | { status: 'invalid-change' }
   | { status: 'affiliation-renewal-needed'; schoolYear: number }
-  | { status: 'timetable-change-conflict' }
-  | { status: 'idempotency-conflict' }
+  | {
+      status: 'timetable-change-conflict'
+      conflictingKeys: TimetableLayerKey[]
+    }
+  | { status: 'idempotency-conflict'; conflictingKeys: TimetableLayerKey[] }
 
 export async function readDirectTimetableChangeOptions({
   sessionToken,
@@ -95,7 +102,7 @@ export async function readDirectTimetableChangeOptions({
   }
 }
 
-export async function addDirectTimetableChanges({
+export async function applyDirectTimetableChanges({
   sessionToken,
   drafts,
   now,
@@ -107,7 +114,7 @@ export async function addDirectTimetableChanges({
   now: number
   studentAccountStore: StudentAccountAccessStore
   store: DirectTimetableChangeStore
-}): Promise<AddDirectTimetableChangesResult> {
+}): Promise<ApplyDirectTimetableChangesResult> {
   const session = await readStudentSession({
     sessionToken,
     now,
@@ -136,14 +143,16 @@ export async function addDirectTimetableChanges({
     return { status: 'invalid-change' }
   }
 
-  const changes: ActiveTimetableChange[] = []
+  const changes: DirectTimetableChangeOperation[] = []
 
   for (const candidate of drafts as DirectChangeDraft[]) {
     const replacement = parseReplacement(candidate.replacement)
+    const changeKind = candidate.changeKind ?? 'add'
 
     if (
       typeof candidate.sourceId !== 'string' ||
       !uuidPattern.test(candidate.sourceId) ||
+      (changeKind !== 'add' && changeKind !== 'update') ||
       !isTargetScopeType(candidate.targetScopeType) ||
       typeof candidate.changeDate !== 'string' ||
       !isValidSchoolDate(candidate.changeDate) ||
@@ -153,6 +162,17 @@ export async function addDirectTimetableChanges({
       Number(candidate.periodNumber) < 1 ||
       Number(candidate.periodNumber) > 7 ||
       !replacement
+    ) {
+      return { status: 'invalid-change' }
+    }
+
+    if (
+      changeKind === 'update' &&
+      (typeof candidate.sharedInformationItemId !== 'string' ||
+        !uuidPattern.test(candidate.sharedInformationItemId) ||
+        typeof candidate.expectedLatestChangeId !== 'string' ||
+        candidate.expectedLatestChangeId.length === 0 ||
+        candidate.expectedLatestChangeId.length > 200)
     ) {
       return { status: 'invalid-change' }
     }
@@ -169,9 +189,8 @@ export async function addDirectTimetableChanges({
     }
 
     const targetScopeType = candidate.targetScopeType
-    changes.push({
+    const common = {
       sourceId: candidate.sourceId,
-      sharedInformationItemId: candidate.sourceId,
       latestChangeId: `${candidate.sourceId}:change`,
       schoolYear: schoolYear.schoolYear,
       targetScopeType,
@@ -181,7 +200,21 @@ export async function addDirectTimetableChanges({
       replacement,
       changedByStudentAccountId: session.studentAccount.studentAccountId,
       changedAt: now,
-    })
+    }
+    changes.push(
+      changeKind === 'update'
+        ? {
+            ...common,
+            changeKind,
+            sharedInformationItemId: candidate.sharedInformationItemId as string,
+            expectedLatestChangeId: candidate.expectedLatestChangeId as string,
+          }
+        : {
+            ...common,
+            changeKind,
+            sharedInformationItemId: candidate.sourceId,
+          },
+    )
   }
 
   const slotKeys = changes.map((change) =>
@@ -203,9 +236,17 @@ export async function addDirectTimetableChanges({
   const result = await store.commitDirectTimetableChanges(changes)
 
   if (result.status === 'conflict') {
-    return { status: 'timetable-change-conflict' }
+    return {
+      status: 'timetable-change-conflict',
+      conflictingKeys: conflictingKeysFor(changes, result.conflictingSourceIds),
+    }
   }
-  if (result.status === 'idempotency-conflict') return result
+  if (result.status === 'idempotency-conflict') {
+    return {
+      status: 'idempotency-conflict',
+      conflictingKeys: conflictingKeysFor(changes, result.conflictingSourceIds),
+    }
+  }
 
   return {
     status: 'applied',
@@ -214,6 +255,20 @@ export async function addDirectTimetableChanges({
       sharedInformationItemId,
     })),
   }
+}
+
+function conflictingKeysFor(
+  changes: DirectTimetableChangeOperation[],
+  conflictingSourceIds: string[],
+) {
+  const conflictingSources = new Set(conflictingSourceIds)
+  return changes
+    .filter((change) => conflictingSources.has(change.sourceId))
+    .map(({ targetScopeType, changeDate, periodNumber }) => ({
+      targetScopeType,
+      changeDate,
+      periodNumber,
+    }))
 }
 
 function targetScopeValue(

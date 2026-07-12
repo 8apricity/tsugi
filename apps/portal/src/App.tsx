@@ -1817,21 +1817,6 @@ function App() {
                         )}
                       </strong>
                     </div>
-                    {timetableEditor.editing ? (
-                      <div className="layer-dialog-actions">
-                        <button
-                          className="button-primary"
-                          type="button"
-                          disabled={
-                            timetableEditor.draftCount === 0 ||
-                            timetableEditor.conflictCount > 0
-                          }
-                          onClick={() => void commitTimetableDrafts()}
-                        >
-                          変更を確定 ({timetableEditor.draftCount})
-                        </button>
-                      </div>
-                    ) : null}
                   </div>
                 ) : null}
               </section>

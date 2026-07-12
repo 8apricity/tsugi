@@ -2366,7 +2366,7 @@ function PeriodWheelPicker({
   onChange: (periodNumber: number) => void;
 }) {
   const wheelSettleDelay = 120;
-  const closeDelay = 400;
+  const closeDelay = 250;
   const snapDuration = 100;
   const [open, setOpen] = useState(false);
   const [pendingValue, setPendingValue] = useState(value);
@@ -2529,8 +2529,9 @@ function PeriodWheelPicker({
       return;
     }
     suppressScrollRef.current = true;
-    animatePeriodIntoCenter(periodNumber);
-    confirmSelectionAfter(closeDelay);
+    animatePeriodIntoCenter(periodNumber, () =>
+      confirmSelectionAfter(closeDelay),
+    );
   }
 
   function scheduleScrollSettle() {

@@ -8,7 +8,7 @@ import {
 } from "react";
 import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
-import { buildDateHeader } from "./dailyPlanView";
+import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
 import {
   createTimetableEditorClient,
@@ -1595,12 +1595,16 @@ function App() {
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label="前の時限"
-                    disabled={timetableLayerDialog.periodNumber <= 1}
+                    aria-label="前の日"
+                    disabled={
+                      !schoolYearRange ||
+                      timetableLayerDialog.schoolDate <=
+                        schoolYearRange.startsOn
+                    }
                     onClick={() =>
                       navigateLayerDialog(
-                        timetableLayerDialog.schoolDate,
-                        timetableLayerDialog.periodNumber - 1,
+                        shiftSchoolDate(timetableLayerDialog.schoolDate, -1),
+                        timetableLayerDialog.periodNumber,
                       )
                     }
                   >
@@ -1638,12 +1642,16 @@ function App() {
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label="次の時限"
-                    disabled={timetableLayerDialog.periodNumber >= 7}
+                    aria-label="次の日"
+                    disabled={
+                      !schoolYearRange ||
+                      timetableLayerDialog.schoolDate >=
+                        schoolYearRange.endsOn
+                    }
                     onClick={() =>
                       navigateLayerDialog(
-                        timetableLayerDialog.schoolDate,
-                        timetableLayerDialog.periodNumber + 1,
+                        shiftSchoolDate(timetableLayerDialog.schoolDate, 1),
+                        timetableLayerDialog.periodNumber,
                       )
                     }
                   >

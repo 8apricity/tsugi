@@ -14,6 +14,7 @@ import {
   normalizeDirectLessonReplacement,
   type TargetScopeType,
   type TimetableChangeDraft,
+  type TimetableLayerState,
   type TimetableReplacement,
 } from "./timetableEditorClient";
 
@@ -53,43 +54,20 @@ type InitialSetupOptions = {
 
 type TimetableEditorOptions = {
   status: "ready";
+  periodReferences: Array<{
+    weekday: number;
+    periodNumber: number;
+    lessonName: string;
+  }>;
   floatingLessonReferenceLabels: Array<{
     floatingLessonReferenceLabelId: string;
     referenceLabel: string;
+    lessonName: string | null;
   }>;
 };
 
 type TimetableEditorForm = Omit<TimetableChangeDraft, "sourceId"> & {
   sourceId?: string;
-};
-
-type TimetableLayerState = {
-  status: "ready";
-  schoolDate: string;
-  periodNumber: number;
-  standardTimetable: {
-    periodReference: { weekday: number; periodNumber: number };
-    lessonName: string;
-  } | null;
-  layers: Array<
-    | { targetScopeType: TargetScopeType; state: "unchanged" }
-    | {
-        targetScopeType: TargetScopeType;
-        state: "active";
-        sharedInformationItemId: string;
-        latestChangeId: string;
-        replacement: TimetableReplacement;
-        changedAt: number;
-      }
-  >;
-  finalDailyLesson: {
-    lessonName: string;
-    timetableChangeState:
-      | "unchanged"
-      | "resolved"
-      | "cancelled"
-      | "unresolved-reference";
-  };
 };
 
 type TimetableLayerDialog = {
@@ -160,7 +138,7 @@ function App() {
   const [completedPlaceholderTaskIds, setCompletedPlaceholderTaskIds] =
     useState<Set<string>>(() => new Set());
   const [timetableEditorClient] = useState(() =>
-    createTimetableEditorClient({ storage: window.sessionStorage }),
+    createTimetableEditorClient({ storage: window.localStorage }),
   );
   const timetableEditor = useSyncExternalStore(
     timetableEditorClient.subscribe,
@@ -294,13 +272,16 @@ function App() {
         return (await response.json()) as TimetableLayerState;
       })
       .then((state) =>
-        setTimetableLayerDialog((current) =>
-          current?.schoolDate === schoolDate &&
-          current.periodNumber === periodNumber &&
-          current.requestId === requestId
-            ? { schoolDate, periodNumber, requestId, state }
-            : current,
-        ),
+        setTimetableLayerDialog((current) => {
+          if (
+            current?.schoolDate !== schoolDate ||
+            current.periodNumber !== periodNumber ||
+            current.requestId !== requestId
+          )
+            return current;
+          timetableEditorClient.reconcileLayerState(state);
+          return { schoolDate, periodNumber, requestId, state };
+        }),
       )
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -322,6 +303,7 @@ function App() {
     layerDialogSchoolDate,
     layerDialogPeriodNumber,
     layerDialogRequestId,
+    timetableEditorClient,
   ]);
 
   useEffect(() => {
@@ -679,44 +661,52 @@ function App() {
   }
 
   function openTimetableEditor(periodNumber: number) {
-    if (!timetableEditor.editing) {
-      setTimetableLayerDialog({
-        schoolDate: selectedSchoolDate,
-        periodNumber,
-        requestId: 0,
-        state: { status: "loading" },
-      });
+    setTimetableEditorForm(null);
+    setTimetableLayerDialog({
+      schoolDate: selectedSchoolDate,
+      periodNumber,
+      requestId: 0,
+      state: { status: "loading" },
+    });
+  }
+
+  function openLayerReplacement(targetScopeType: TargetScopeType) {
+    if (
+      !timetableEditor.editing ||
+      !timetableLayerDialog ||
+      timetableLayerDialog.state.status !== "ready"
+    )
       return;
-    }
-    const targetScopeType = timetableEditor.lastTargetScopeType;
     const existing = timetableEditorClient.findDraft(
       targetScopeType,
-      selectedSchoolDate,
-      periodNumber,
+      timetableLayerDialog.schoolDate,
+      timetableLayerDialog.periodNumber,
     );
+    const serverLayer = timetableLayerDialog.state.layers.find(
+      (layer) => layer.targetScopeType === targetScopeType,
+    );
+    if (!existing && serverLayer?.state !== "unchanged") return;
     setTimetableEditorForm(
       existing ?? {
         targetScopeType,
-        changeDate: selectedSchoolDate,
-        periodNumber,
+        changeDate: timetableLayerDialog.schoolDate,
+        periodNumber: timetableLayerDialog.periodNumber,
         replacement: { type: "lesson_name", lessonName: "" },
       },
     );
   }
 
-  function changeEditorScope(targetScopeType: TargetScopeType) {
-    if (!timetableEditorForm) return;
-    const existing = timetableEditorClient.findDraft(
-      targetScopeType,
-      timetableEditorForm.changeDate,
-      timetableEditorForm.periodNumber,
-    );
-    setTimetableEditorForm(
-      existing ?? {
-        ...timetableEditorForm,
-        sourceId: undefined,
-        targetScopeType,
-      },
+  function navigateLayerDialog(schoolDate: string, periodNumber: number) {
+    setTimetableEditorForm(null);
+    setTimetableLayerDialog((current) =>
+      current
+        ? {
+            schoolDate,
+            periodNumber,
+            requestId: current.requestId + 1,
+            state: { status: "loading" },
+          }
+        : current,
     );
   }
 
@@ -740,10 +730,16 @@ function App() {
       );
       return;
     }
-    timetableEditorClient.saveDraft(
-      { ...timetableEditorForm, replacement },
-      timetableEditorForm.sourceId,
-    );
+    const result = timetableEditorClient.setDesiredState({
+      ...timetableEditorForm,
+      replacement,
+    });
+    if (result.status === "limit-reached") {
+      setTimetableEditorMessage(
+        "下書きは50件までです。既存の下書きを変更または取り消してください。",
+      );
+      return;
+    }
     setTimetableEditorForm(null);
     setTimetableEditorMessage(null);
   }
@@ -765,12 +761,22 @@ function App() {
       return;
 
     setTimetableEditorMessage("確定しています。");
-    const response = await fetch("/api/timetable-changes/direct", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    let response: Response;
+    try {
+      response = await fetch("/api/timetable-changes/direct", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      timetableEditorClient.commitFailed();
+      setTimetableEditorMessage(
+        "通信できませんでした。下書きは保存されています。",
+      );
+      return;
+    }
     if (!response.ok) {
+      timetableEditorClient.commitFailed();
       setTimetableEditorMessage(
         response.status === 409
           ? "同じTarget Scope・日付・時限にActive Timetable Changeがあります。"
@@ -780,6 +786,15 @@ function App() {
     }
     timetableEditorClient.commitSucceeded();
     setTimetableEditorMessage(null);
+    setTimetableLayerDialog((current) =>
+      current
+        ? {
+            ...current,
+            requestId: current.requestId + 1,
+            state: { status: "loading" },
+          }
+        : current,
+    );
     await dailyPlanClient.reload();
   }
 
@@ -840,6 +855,17 @@ function App() {
 
   if (status === "authenticated" && studentAccount) {
     const dateHeader = buildDateHeader(selectedSchoolDate, currentSchoolDate);
+    const loadedLayerState =
+      timetableLayerDialog?.state.status === "ready"
+        ? timetableLayerDialog.state
+        : null;
+    const layerPreview = loadedLayerState
+      ? timetableEditorClient.previewLayerState(
+          loadedLayerState,
+          (replacement) =>
+            resolveReplacementLessonName(replacement, timetableEditorOptions),
+        )
+      : null;
 
     return (
       <main className="app-page daily-plan-page">
@@ -1137,13 +1163,16 @@ function App() {
             </footer>
           ) : null}
 
-          {timetableLayerDialog ? (
+          {timetableLayerDialog && !timetableEditorForm ? (
             <div className="editor-dialog-backdrop" role="presentation">
               <section
                 className="timetable-editor-dialog timetable-layer-dialog"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="timetable-layer-title"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setTimetableLayerDialog(null);
+                }}
               >
                 <header className="editor-dialog-header">
                   <div>
@@ -1157,11 +1186,85 @@ function App() {
                     className="icon-button"
                     type="button"
                     aria-label="閉じる"
+                    autoFocus
                     onClick={() => setTimetableLayerDialog(null)}
                   >
                     ×
                   </button>
                 </header>
+
+                <div className="layer-dialog-navigation" aria-label="日付と時限">
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="前の時限"
+                    disabled={timetableLayerDialog.periodNumber <= 1}
+                    onClick={() =>
+                      navigateLayerDialog(
+                        timetableLayerDialog.schoolDate,
+                        timetableLayerDialog.periodNumber - 1,
+                      )
+                    }
+                  >
+                    ‹
+                  </button>
+                  <input
+                    type="date"
+                    aria-label="Change Date"
+                    min={schoolYearRange?.startsOn}
+                    max={schoolYearRange?.endsOn}
+                    value={timetableLayerDialog.schoolDate}
+                    onChange={(event) =>
+                      navigateLayerDialog(
+                        event.target.value,
+                        timetableLayerDialog.periodNumber,
+                      )
+                    }
+                  />
+                  <select
+                    aria-label="period"
+                    value={timetableLayerDialog.periodNumber}
+                    onChange={(event) =>
+                      navigateLayerDialog(
+                        timetableLayerDialog.schoolDate,
+                        Number(event.target.value),
+                      )
+                    }
+                  >
+                    {Array.from({ length: 7 }, (_, index) => (
+                      <option value={index + 1} key={index + 1}>
+                        {index + 1}限
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="次の時限"
+                    disabled={timetableLayerDialog.periodNumber >= 7}
+                    onClick={() =>
+                      navigateLayerDialog(
+                        timetableLayerDialog.schoolDate,
+                        timetableLayerDialog.periodNumber + 1,
+                      )
+                    }
+                  >
+                    ›
+                  </button>
+                </div>
+
+                {timetableEditor.editing ? (
+                  <div className="layer-edit-guidance" role="status">
+                    <span>
+                      {timetableEditor.lastCommitFailed
+                        ? "前回の確定に失敗しました。下書きは保持されています。"
+                        : "変更を適用するTarget Scopeを選択してください。"}
+                    </span>
+                    <strong>
+                      下書き {timetableEditor.draftCount}/50
+                    </strong>
+                  </div>
+                ) : null}
 
                 {timetableLayerDialog.state.status === "loading" ? (
                   <p className="layer-dialog-status" aria-live="polite">
@@ -1185,27 +1288,42 @@ function App() {
                       再読み込み
                     </button>
                   </div>
-                ) : (
+                ) : layerPreview ? (
                   <div className="timetable-layer-stack">
                     <LayerRow
                       label="デフォルト"
                       value={
-                        timetableLayerDialog.state.standardTimetable
+                        layerPreview.standardTimetable
                           ?.lessonName || "空欄"
                       }
                       detail={
-                        timetableLayerDialog.state.standardTimetable
+                        layerPreview.standardTimetable
                           ? `${weekdayLabel(
-                              timetableLayerDialog.state.standardTimetable
+                              layerPreview.standardTimetable
                                 .periodReference.weekday,
                             )}${
-                              timetableLayerDialog.state.standardTimetable
+                              layerPreview.standardTimetable
                                 .periodReference.periodNumber
                             }のStandard Timetable`
                           : "Standard Timetableに設定なし"
                       }
                     />
-                    {timetableLayerDialog.state.layers.map((layer) => (
+                    {layerPreview.layers.map((layer) => {
+                      const existingDraft = timetableEditorClient.findDraft(
+                        layer.targetScopeType,
+                        timetableLayerDialog.schoolDate,
+                        timetableLayerDialog.periodNumber,
+                      );
+                      const serverLayer = loadedLayerState?.layers.find(
+                        (candidate) =>
+                          candidate.targetScopeType === layer.targetScopeType,
+                      );
+                      const editable =
+                        timetableEditor.editing &&
+                        (!!existingDraft ||
+                          (serverLayer?.state === "unchanged" &&
+                            !timetableEditor.atLimit));
+                      return (
                       <LayerRow
                         key={layer.targetScopeType}
                         label={scopeLabel(layer.targetScopeType)}
@@ -1215,22 +1333,43 @@ function App() {
                             : "変更なし"
                         }
                         detail={
-                          layer.state === "active"
+                          layer.desired
+                            ? "保存前の希望状態"
+                            : layer.state === "active" && "changedAt" in layer
                             ? `最終更新 ${formatRelativeTime(layer.changedAt)}`
                             : undefined
                         }
+                        desired={layer.desired}
+                        onClick={
+                          editable
+                            ? () => openLayerReplacement(layer.targetScopeType)
+                            : undefined
+                        }
                       />
-                    ))}
+                      );
+                    })}
                     <div className="layer-result-row">
                       <span>最終結果</span>
                       <strong>
                         {finalDailyLessonLabel(
-                          timetableLayerDialog.state.finalDailyLesson,
+                          layerPreview.finalDailyLesson,
                         )}
                       </strong>
                     </div>
+                    {timetableEditor.editing ? (
+                      <div className="layer-dialog-actions">
+                        <button
+                          className="button-primary"
+                          type="button"
+                          disabled={timetableEditor.draftCount === 0}
+                          onClick={() => void commitTimetableDrafts()}
+                        >
+                          変更を確定 ({timetableEditor.draftCount})
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                )}
+                ) : null}
               </section>
             </div>
           ) : null}
@@ -1242,6 +1381,9 @@ function App() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="timetable-editor-title"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setTimetableEditorForm(null);
+                }}
               >
                 <form onSubmit={saveTimetableDraft}>
                   <header className="editor-dialog-header">
@@ -1250,6 +1392,7 @@ function App() {
                       className="icon-button"
                       type="button"
                       aria-label="閉じる"
+                      autoFocus
                       onClick={() => setTimetableEditorForm(null)}
                     >
                       ×
@@ -1257,52 +1400,18 @@ function App() {
                   </header>
                   <div className="editor-fields">
                     <label>
-                      日付
-                      <input
-                        type="date"
-                        min={schoolYearRange.startsOn}
-                        max={schoolYearRange.endsOn}
-                        required
-                        value={timetableEditorForm.changeDate}
-                        onChange={(event) =>
-                          setTimetableEditorForm({
-                            ...timetableEditorForm,
-                            changeDate: event.target.value,
-                          })
-                        }
-                      />
+                      Change Date（固定）
+                      <output>{timetableEditorForm.changeDate}</output>
                     </label>
                     <label>
-                      時限
-                      <input
-                        type="number"
-                        min={1}
-                        max={7}
-                        required
-                        value={timetableEditorForm.periodNumber}
-                        onChange={(event) =>
-                          setTimetableEditorForm({
-                            ...timetableEditorForm,
-                            periodNumber: Number(event.target.value),
-                          })
-                        }
-                      />
+                      時限（固定）
+                      <output>{timetableEditorForm.periodNumber}限</output>
                     </label>
                     <label className="editor-field-wide">
-                      変更適用範囲
-                      <select
-                        value={timetableEditorForm.targetScopeType}
-                        onChange={(event) =>
-                          changeEditorScope(
-                            event.target.value as TargetScopeType,
-                          )
-                        }
-                      >
-                        <option value="grade">Grade</option>
-                        <option value="class">Class</option>
-                        <option value="track">Track</option>
-                        <option value="student">Student</option>
-                      </select>
+                      Target Scope（固定）
+                      <output>
+                        {scopeLabel(timetableEditorForm.targetScopeType)}
+                      </output>
                     </label>
                   </div>
 
@@ -1418,18 +1527,24 @@ function App() {
                   </div>
 
                   <footer className="editor-dialog-actions">
-                    {timetableEditorForm.sourceId ? (
+                    {timetableEditorClient.findDraft(
+                      timetableEditorForm.targetScopeType,
+                      timetableEditorForm.changeDate,
+                      timetableEditorForm.periodNumber,
+                    ) ? (
                       <button
                         className="button-secondary"
                         type="button"
                         onClick={() => {
-                          timetableEditorClient.deleteDraft(
-                            timetableEditorForm.sourceId ?? "",
+                          timetableEditorClient.restoreServerState(
+                            timetableEditorForm.targetScopeType,
+                            timetableEditorForm.changeDate,
+                            timetableEditorForm.periodNumber,
                           );
                           setTimetableEditorForm(null);
                         }}
                       >
-                        下書きを削除
+                        下書きを取り消す
                       </button>
                     ) : null}
                     <button className="button-primary" type="submit">
@@ -1672,18 +1787,45 @@ function LayerRow({
   label,
   value,
   detail,
+  desired = false,
+  onClick,
 }: {
   label: string;
   value: string;
   detail?: string;
+  desired?: boolean;
+  onClick?: () => void;
 }) {
+  const content = (
+    <>
+      <span className="timetable-layer-label">{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+      {desired ? <span className="layer-draft-badge">下書き</span> : null}
+    </>
+  );
   return (
     <>
-      <div className="timetable-layer-row">
-        <span className="timetable-layer-label">{label}</span>
-        <strong>{value}</strong>
-        <small>{detail}</small>
-      </div>
+      {onClick ? (
+        <button
+          className={`timetable-layer-row editable${desired ? " desired" : ""}`}
+          type="button"
+          onClick={onClick}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onClick();
+            }
+          }}
+          aria-label={`${label} Target Scopeを編集${desired ? "、下書きあり" : ""}`}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className={`timetable-layer-row${desired ? " desired" : ""}`}>
+          {content}
+        </div>
+      )}
       <div className="layer-flow-arrow" aria-hidden="true">
         ↓
       </div>
@@ -1743,6 +1885,31 @@ function defaultReplacement(
     return { type, floatingLessonReferenceLabelId: "", referenceLabel: "" };
   }
   return { type: "cancelled" };
+}
+
+function resolveReplacementLessonName(
+  replacement: TimetableReplacement,
+  options: TimetableEditorOptions | null,
+) {
+  if (replacement.type === "period_reference") {
+    return (
+      options?.periodReferences.find(
+        (reference) =>
+          reference.weekday === replacement.weekday &&
+          reference.periodNumber === replacement.periodNumber,
+      )?.lessonName ?? null
+    );
+  }
+  if (replacement.type === "floating_lesson_reference") {
+    return (
+      options?.floatingLessonReferenceLabels.find(
+        (reference) =>
+          reference.floatingLessonReferenceLabelId ===
+          replacement.floatingLessonReferenceLabelId,
+      )?.lessonName ?? null
+    );
+  }
+  return replacement.type === "lesson_name" ? replacement.lessonName : null;
 }
 
 export default App;

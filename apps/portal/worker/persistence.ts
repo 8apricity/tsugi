@@ -252,6 +252,16 @@ export type DirectTimetableChangeStore = {
     schoolYear: number,
     grade: number,
   ): Promise<FloatingLessonReferenceLabel | null>
+  listStandardTimetableEntriesForWeekday(
+    classId: string,
+    trackId: string,
+    weekday: number,
+  ): Promise<PeriodStandardTimetableEntry[]>
+  findStandardTimetableEntryForFloatingReferenceLabelId(
+    classId: string,
+    trackId: string,
+    floatingLessonReferenceLabelId: string,
+  ): Promise<FloatingStandardTimetableEntry | null>
 }
 
 export type PersistenceSeedStore = {

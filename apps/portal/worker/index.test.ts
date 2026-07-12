@@ -382,6 +382,15 @@ function addDirectTimetableChanges(
   )
 }
 
+function readDirectTimetableChangeOptions(env: Env, cookie = '') {
+  return worker.fetch(
+    new Request('https://tsugi.test/api/timetable-changes/direct/options', {
+      headers: cookie ? { cookie } : {},
+    }),
+    env,
+  )
+}
+
 function readTimetableChangeLayers(
   env: Env,
   cookie = '',
@@ -401,6 +410,26 @@ function readTimetableChangeLayers(
 }
 
 describe('Timetable Direct Add API', () => {
+  it('returns resolved Period and Floating Lesson References for previews', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readDirectTimetableChangeOptions(env, cookie)
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      periodReferences: expect.arrayContaining([
+        { weekday: 1, periodNumber: 1, lessonName: '数Ⅱβ' },
+        { weekday: 2, periodNumber: 2, lessonName: '古典' },
+      ]),
+      floatingLessonReferenceLabels: expect.arrayContaining([
+        expect.objectContaining({ referenceLabel: '★', lessonName: '自走' }),
+      ]),
+    })
+  })
+
   it('rejects unauthenticated and invalid Direct Add requests', async () => {
     const env = createDailyPlanTestEnv()
     const unauthenticated = await addDirectTimetableChanges(env, '', [])

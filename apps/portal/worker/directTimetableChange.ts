@@ -6,7 +6,7 @@ import type {
   TimetableChangeReplacement,
 } from './persistence'
 import { readStudentSession } from './studentAccountAccess'
-import { isValidSchoolDate } from './timetable'
+import { isValidSchoolDate, selectStandardTimetableEntry } from './timetable'
 
 type DirectChangeDraft = {
   sourceId: unknown
@@ -46,12 +46,51 @@ export async function readDirectTimetableChangeOptions({
   if (!affiliation) {
     return { status: 'affiliation-renewal-needed' as const, schoolYear: schoolYear.schoolYear }
   }
+  const floatingLabels = await store.listFloatingLessonReferenceLabels(
+    schoolYear.schoolYear,
+    affiliation.grade,
+  )
+  const entriesByWeekday = await Promise.all(
+    Array.from({ length: 6 }, (_, weekdayIndex) =>
+      store.listStandardTimetableEntriesForWeekday(
+        affiliation.classId,
+        affiliation.trackId,
+        weekdayIndex + 1,
+      ),
+    ),
+  )
+  const periodReferences = entriesByWeekday.flatMap((entries, weekdayIndex) =>
+    Array.from({ length: 7 }, (_, periodIndex) => {
+      const entry = selectStandardTimetableEntry(
+        entries,
+        affiliation.trackId,
+        periodIndex + 1,
+      )
+      return entry
+        ? {
+            weekday: weekdayIndex + 1,
+            periodNumber: periodIndex + 1,
+            lessonName: entry.lessonName,
+          }
+        : []
+    }).flat(),
+  )
   return {
     status: 'ready' as const,
     schoolYearRange: { startsOn: schoolYear.startsOn, endsOn: schoolYear.endsOn },
-    floatingLessonReferenceLabels: await store.listFloatingLessonReferenceLabels(
-      schoolYear.schoolYear,
-      affiliation.grade,
+    periodReferences,
+    floatingLessonReferenceLabels: await Promise.all(
+      floatingLabels.map(async (label) => ({
+        floatingLessonReferenceLabelId: label.floatingLessonReferenceLabelId,
+        referenceLabel: label.referenceLabel,
+        lessonName: (
+          await store.findStandardTimetableEntryForFloatingReferenceLabelId(
+            affiliation.classId,
+            affiliation.trackId,
+            label.floatingLessonReferenceLabelId,
+          )
+        )?.lessonName ?? null,
+      })),
     ),
   }
 }

@@ -525,23 +525,83 @@ body.page-scroll-locked {
   font-weight: 700;
 }
 
-.period-wheel-picker {
-  height: 114px;
-  overflow-y: auto;
-  padding-block: 38px;
+.period-picker {
+  position: relative;
+  min-width: 0;
+  height: 44px;
+}
+
+.period-picker.open {
+  z-index: 6;
+}
+
+.period-picker-trigger {
+  width: 100%;
+  height: 44px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-panel);
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.period-picker-trigger:hover,
+.period-picker-trigger:focus-visible {
+  border-color: var(--color-accent);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.period-wheel-popover {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 88px);
+  height: 190px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel);
+  box-shadow: 0 12px 28px rgba(35, 50, 77, 0.18);
+  transform: translate(-50%, -50%);
+}
+
+.period-wheel-selection {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 38px;
+  border-block: 1px solid var(--color-border);
+  background: var(--color-accent-soft);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.period-wheel-viewport {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  height: 190px;
+  overflow-y: auto;
+  padding-block: 76px;
+  background: transparent;
   scrollbar-width: none;
   scroll-snap-type: y mandatory;
   overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
-.period-wheel-picker::-webkit-scrollbar {
+.period-wheel-viewport::-webkit-scrollbar {
   display: none;
 }
 
-.period-wheel-picker button {
+.period-wheel-viewport button {
   display: block;
   width: 100%;
   height: 38px;
@@ -551,18 +611,19 @@ body.page-scroll-locked {
   color: var(--color-muted);
   font: inherit;
   font-weight: 700;
+  opacity: 0.4;
   cursor: pointer;
   scroll-snap-align: center;
+  transition: color 120ms ease, opacity 120ms ease;
 }
 
-.period-wheel-picker button.selected {
-  background: var(--color-accent-soft);
+.period-wheel-viewport button.centered {
   color: var(--color-primary);
+  opacity: 1;
 }
 
-.period-wheel-picker button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
+.period-wheel-viewport button:focus-visible {
+  outline: none;
 }
 
 .layer-edit-guidance {

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -10,6 +11,7 @@ import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
+import { findPeriodClosestToCenter } from "./periodWheelPicker";
 import {
   createTimetableEditorClient,
   normalizeDirectLessonReplacement,
@@ -2329,84 +2331,268 @@ function PeriodWheelPicker({
   value: number;
   onChange: (periodNumber: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [pendingValue, setPendingValue] = useState(value);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
-  const scrollEndTimerRef = useRef<number | null>(null);
+  const pendingValueRef = useRef(value);
+  const scrollSettleTimerRef = useRef<number | null>(null);
+  const confirmTimerRef = useRef<number | null>(null);
+  const suppressScrollRef = useRef(false);
+  const lastPointerTypeRef = useRef("mouse");
+  const triggerDragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startScrollTop: number | null;
+  } | null>(null);
 
-  useEffect(() => {
+  function clearTimer(timerRef: { current: number | null }) {
+    if (timerRef.current === null) return;
+    window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }
+
+  function updatePendingValue(periodNumber: number) {
+    pendingValueRef.current = periodNumber;
+    setPendingValue(periodNumber);
+  }
+
+  function centeredPeriod() {
     const picker = pickerRef.current;
-    const selected = picker?.querySelector<HTMLElement>(
-      `[data-period="${value}"]`,
-    );
-    if (!picker || !selected) return;
-
-    picker.scrollTo({
-      top: selected.offsetTop - (picker.clientHeight - selected.clientHeight) / 2,
-    });
-  }, [value]);
-
-  useEffect(
-    () => () => {
-      if (scrollEndTimerRef.current !== null) {
-        window.clearTimeout(scrollEndTimerRef.current);
-      }
-    },
-    [],
-  );
-
-  function selectCenteredPeriod() {
-    const picker = pickerRef.current;
-    if (!picker) return;
+    if (!picker) return pendingValueRef.current;
     const pickerCenter = picker.scrollTop + picker.clientHeight / 2;
     const periods = Array.from(
       picker.querySelectorAll<HTMLElement>("[data-period]"),
     );
-    const centered = periods.reduce((closest, period) =>
-      Math.abs(period.offsetTop + period.clientHeight / 2 - pickerCenter) <
-      Math.abs(closest.offsetTop + closest.clientHeight / 2 - pickerCenter)
-        ? period
-        : closest,
+    if (periods.length === 0) return pendingValueRef.current;
+
+    return (
+      findPeriodClosestToCenter(
+        pickerCenter,
+        periods.map((period) => ({
+          periodNumber: Number(period.dataset.period),
+          center: period.offsetTop + period.clientHeight / 2,
+        })),
+      ) ?? pendingValueRef.current
     );
-    const periodNumber = Number(centered.dataset.period);
-    if (periodNumber !== value) onChange(periodNumber);
+  }
+
+  function scrollPeriodIntoCenter(
+    periodNumber: number,
+    behavior: ScrollBehavior = "smooth",
+  ) {
+    const picker = pickerRef.current;
+    const period = picker?.querySelector<HTMLElement>(
+      `[data-period="${periodNumber}"]`,
+    );
+    if (!picker || !period) return;
+
+    picker.scrollTo({
+      top: period.offsetTop - (picker.clientHeight - period.clientHeight) / 2,
+      behavior,
+    });
+  }
+
+  function closePicker() {
+    clearTimer(scrollSettleTimerRef);
+    clearTimer(confirmTimerRef);
+    setOpen(false);
+  }
+
+  function confirmSelectionAfter(delay: number) {
+    clearTimer(confirmTimerRef);
+    confirmTimerRef.current = window.setTimeout(() => {
+      onChange(pendingValueRef.current);
+      setOpen(false);
+    }, delay);
+  }
+
+  function settleScroll() {
+    const periodNumber = centeredPeriod();
+    updatePendingValue(periodNumber);
+    scrollPeriodIntoCenter(periodNumber);
+    confirmSelectionAfter(1000);
+  }
+
+  function scheduleScrollSettle() {
+    clearTimer(scrollSettleTimerRef);
+    scrollSettleTimerRef.current = window.setTimeout(settleScroll, 120);
+  }
+
+  function openPicker() {
+    clearTimer(confirmTimerRef);
+    updatePendingValue(value);
+    setOpen(true);
+  }
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    suppressScrollRef.current = true;
+    scrollPeriodIntoCenter(value, "auto");
+  }, [open, value]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeWhenOutside(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        rootRef.current?.contains(event.target)
+      )
+        return;
+      if (scrollSettleTimerRef.current !== null) {
+        window.clearTimeout(scrollSettleTimerRef.current);
+        scrollSettleTimerRef.current = null;
+      }
+      if (confirmTimerRef.current !== null) {
+        window.clearTimeout(confirmTimerRef.current);
+        confirmTimerRef.current = null;
+      }
+      setOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeWhenOutside);
+    return () => document.removeEventListener("pointerdown", closeWhenOutside);
+  }, [open]);
+
+  useEffect(
+    () => () => {
+      clearTimer(scrollSettleTimerRef);
+      clearTimer(confirmTimerRef);
+    },
+    [],
+  );
+
+  function dragFromTrigger(clientY: number) {
+    const drag = triggerDragRef.current;
+    const picker = pickerRef.current;
+    if (!drag || !picker) return;
+    if (drag.startScrollTop === null) drag.startScrollTop = picker.scrollTop;
+    suppressScrollRef.current = false;
+    picker.scrollTop = drag.startScrollTop + drag.startY - clientY;
   }
 
   return (
     <div
-      ref={pickerRef}
-      className="period-wheel-picker"
-      role="radiogroup"
-      aria-label="時限"
+      ref={rootRef}
+      className={`period-picker${open ? " open" : ""}`}
       onKeyDown={(event) => {
-        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-        event.preventDefault();
-        onChange(
-          Math.min(7, Math.max(1, value + (event.key === "ArrowDown" ? 1 : -1))),
-        );
-      }}
-      onScroll={() => {
-        if (scrollEndTimerRef.current !== null) {
-          window.clearTimeout(scrollEndTimerRef.current);
+        if (event.key === "Escape" && open) {
+          event.preventDefault();
+          closePicker();
+          return;
         }
-        scrollEndTimerRef.current = window.setTimeout(selectCenteredPeriod, 100);
+        if (!open || (event.key !== "ArrowUp" && event.key !== "ArrowDown"))
+          return;
+        event.preventDefault();
+        suppressScrollRef.current = false;
+        const next = Math.min(
+          7,
+          Math.max(
+            1,
+            pendingValueRef.current + (event.key === "ArrowDown" ? 1 : -1),
+          ),
+        );
+        updatePendingValue(next);
+        scrollPeriodIntoCenter(next);
+        confirmSelectionAfter(1000);
       }}
     >
-      {Array.from({ length: 7 }, (_, index) => {
-        const periodNumber = index + 1;
-        return (
-          <button
-            key={periodNumber}
-            type="button"
-            role="radio"
-            aria-checked={periodNumber === value}
-            tabIndex={periodNumber === value ? 0 : -1}
-            data-period={periodNumber}
-            className={periodNumber === value ? "selected" : ""}
-            onClick={() => onChange(periodNumber)}
+      <button
+        type="button"
+        className="period-picker-trigger"
+        aria-label="時限"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? "period-wheel-options" : undefined}
+        onPointerDown={(event) => {
+          lastPointerTypeRef.current = event.pointerType;
+          openPicker();
+          if (event.pointerType !== "touch") return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          triggerDragRef.current = {
+            pointerId: event.pointerId,
+            startY: event.clientY,
+            startScrollTop: null,
+          };
+        }}
+        onPointerMove={(event) => {
+          if (triggerDragRef.current?.pointerId !== event.pointerId) return;
+          event.preventDefault();
+          dragFromTrigger(event.clientY);
+        }}
+        onPointerUp={(event) => {
+          if (triggerDragRef.current?.pointerId !== event.pointerId) return;
+          triggerDragRef.current = null;
+          scheduleScrollSettle();
+        }}
+        onPointerCancel={() => {
+          triggerDragRef.current = null;
+        }}
+        onClick={openPicker}
+      >
+        {value}限
+      </button>
+
+      {open ? (
+        <div className="period-wheel-popover">
+          <div className="period-wheel-selection" aria-hidden="true" />
+          <div
+            ref={pickerRef}
+            id="period-wheel-options"
+            className="period-wheel-viewport"
+            role="listbox"
+            aria-label="時限"
+            aria-activedescendant={`period-option-${pendingValue}`}
+            onPointerDown={(event) => {
+              lastPointerTypeRef.current = event.pointerType;
+              suppressScrollRef.current = false;
+              clearTimer(confirmTimerRef);
+            }}
+            onWheel={() => {
+              suppressScrollRef.current = false;
+            }}
+            onPointerUp={(event) => {
+              if (event.pointerType === "touch") scheduleScrollSettle();
+            }}
+            onScroll={() => {
+              if (suppressScrollRef.current) return;
+              clearTimer(confirmTimerRef);
+              updatePendingValue(centeredPeriod());
+              scheduleScrollSettle();
+            }}
           >
-            {periodNumber}限
-          </button>
-        );
-      })}
+            {Array.from({ length: 7 }, (_, index) => {
+              const periodNumber = index + 1;
+              return (
+                <button
+                  id={`period-option-${periodNumber}`}
+                  key={periodNumber}
+                  type="button"
+                  role="option"
+                  aria-selected={periodNumber === pendingValue}
+                  tabIndex={-1}
+                  data-period={periodNumber}
+                  className={
+                    periodNumber === pendingValue ? "centered" : undefined
+                  }
+                  onClick={() => {
+                    suppressScrollRef.current = false;
+                    updatePendingValue(periodNumber);
+                    scrollPeriodIntoCenter(periodNumber);
+                    confirmSelectionAfter(
+                      lastPointerTypeRef.current === "touch" ? 1000 : 200,
+                    );
+                  }}
+                >
+                  {periodNumber}限
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

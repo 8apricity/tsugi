@@ -1803,9 +1803,7 @@ function App() {
                     <div className="layer-result-row">
                       <span>最終結果</span>
                       <strong>
-                        {finalDailyLessonLabel(
-                          layerPreview.finalDailyLesson,
-                        )}
+                        {layerPreview.finalDailyLesson.lessonName}
                       </strong>
                     </div>
                   </div>
@@ -2857,13 +2855,6 @@ function formatRelativeTime(timestamp: number) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}時間前`;
   return `${Math.floor(hours / 24)}日前`;
-}
-
-function finalDailyLessonLabel(
-  lesson: TimetableLayerState["finalDailyLesson"],
-) {
-  if (lesson.timetableChangeState === "cancelled") return "休講";
-  return lesson.lessonName || "空欄";
 }
 
 function scopeLabel(scope: TargetScopeType) {

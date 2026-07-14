@@ -850,7 +850,7 @@ button.timetable-layer-row {
   width: min(760px, calc(100vw - 32px));
 }
 
-.history-dialog-heading {
+.timetable-dialog-heading {
   flex: 1;
 }
 

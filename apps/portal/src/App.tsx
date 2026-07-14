@@ -961,6 +961,18 @@ function App() {
     setTimetableEditorMessage(null);
   }
 
+  function closeTimetableDialogFlow() {
+    setTimetableEditorForm(null);
+    setTimetableHistoryDialog(null);
+    setTimetableLayerDialog(null);
+  }
+
+  function goBackInTimetableHistoryDialog() {
+    setTimetableHistoryDialog((current) =>
+      current?.detail ? { ...current, detail: null } : null,
+    );
+  }
+
   function navigateLayerDialog(schoolDate: string, periodNumber: number) {
     setTimetableEditorForm(null);
     setTimetableLayerDialog((current) =>
@@ -1473,13 +1485,7 @@ function App() {
                 aria-labelledby="timetable-history-title"
                 onKeyDown={(event) => {
                   if (event.key !== "Escape") return;
-                  if (timetableHistoryDialog.detail) {
-                    setTimetableHistoryDialog((current) =>
-                      current ? { ...current, detail: null } : current,
-                    );
-                  } else {
-                    setTimetableHistoryDialog(null);
-                  }
+                  goBackInTimetableHistoryDialog();
                 }}
               >
                 <header className="editor-dialog-header">
@@ -1489,14 +1495,11 @@ function App() {
                     aria-label={timetableHistoryDialog.detail
                       ? "編集履歴に戻る"
                       : "レイヤー概要に戻る"}
-                    onClick={() => timetableHistoryDialog.detail
-                      ? setTimetableHistoryDialog((current) =>
-                          current ? { ...current, detail: null } : current)
-                      : setTimetableHistoryDialog(null)}
+                    onClick={goBackInTimetableHistoryDialog}
                   >
                     ‹
                   </button>
-                  <div className="history-dialog-heading">
+                  <div className="timetable-dialog-heading">
                     <h2 id="timetable-history-title">
                       {timetableHistoryDialog.detail
                         ? "Direct Change詳細"
@@ -1512,7 +1515,7 @@ function App() {
                     className="icon-button"
                     type="button"
                     aria-label="閉じる"
-                    onClick={() => setTimetableHistoryDialog(null)}
+                    onClick={closeTimetableDialogFlow}
                   >
                     ×
                   </button>
@@ -1605,7 +1608,7 @@ function App() {
                 aria-modal="true"
                 aria-labelledby="timetable-layer-title"
                 onKeyDown={(event) => {
-                  if (event.key === "Escape") setTimetableLayerDialog(null);
+                  if (event.key === "Escape") closeTimetableDialogFlow();
                 }}
               >
                 <header className="editor-dialog-header">
@@ -1617,7 +1620,7 @@ function App() {
                     type="button"
                     aria-label="閉じる"
                     autoFocus
-                    onClick={() => setTimetableLayerDialog(null)}
+                    onClick={closeTimetableDialogFlow}
                   >
                     ×
                   </button>
@@ -1825,13 +1828,23 @@ function App() {
               >
                 <form onSubmit={saveTimetableDraft}>
                   <header className="editor-dialog-header">
-                    <h2 id="timetable-editor-title">時間割変更</h2>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      aria-label="時間割の適用状態に戻る"
+                      onClick={() => setTimetableEditorForm(null)}
+                    >
+                      ‹
+                    </button>
+                    <div className="timetable-dialog-heading">
+                      <h2 id="timetable-editor-title">時間割変更</h2>
+                    </div>
                     <button
                       className="icon-button"
                       type="button"
                       aria-label="閉じる"
                       autoFocus
-                      onClick={() => setTimetableEditorForm(null)}
+                      onClick={closeTimetableDialogFlow}
                     >
                       ×
                     </button>

@@ -150,7 +150,7 @@ A target scope outside a student's own current target scopes that the student ch
 _Avoid_: Reference view, public feed, unrestricted access
 
 **Standard Timetable**:
-The baseline timetable information for a class and track in a school year. A standard timetable contains recurring lesson slots and may also contain floating lesson references such as "★". Track-specific standard timetable values override class-common values, and timetable changes may refer back to this baseline with lesson references.
+The baseline timetable information for a class and track in a school year. A standard timetable contains recurring lesson slots and may also contain floating lesson references such as "★". Track-specific standard timetable values override class-common values, and timetable changes may refer back to this baseline with lesson references. A lesson slot without an applicable value has no lesson name; Tsugi does not distinguish an intentionally empty slot from an unset slot.
 _Avoid_: Default calendar, school-wide timetable
 
 **Timetable Change**:
@@ -168,6 +168,10 @@ _Avoid_: Effective period, version
 **Timetable Layer**:
 A scope-specific source of timetable changes, ordered from broader to narrower scope: standard timetable, grade, class, track, student, and optionally group. Narrower timetable layers override broader layers for the displayed timetable, while broader-layer entries remain inspectable.
 _Avoid_: Calendar layer, priority, category
+
+**Timetable Projection**:
+The derived Timetable Layer states and final Daily Lesson for a lesson slot after selecting the applicable Standard Timetable value and applying broader-to-narrower Timetable Changes. A timetable projection may include explicitly selected transient desired states for preview, but keeps them distinguishable from Active Shared Information and does not change stored information.
+_Avoid_: Canonical timetable, stored timetable, active shared information
 
 **Track**:
 A curriculum grouping under a class that can split the standard timetable. Track names may appear across multiple classes, but Tsugi currently treats track as subordinate to class for target scopes. In a class with only one track, the track scope effectively acts like a class scope.

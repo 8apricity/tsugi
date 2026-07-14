@@ -203,6 +203,8 @@ create unique index standard_timetable_entries_unique_track_floating
 
 `standard_timetable_entries` stores lesson references. A `period` entry represents a recurring lesson slot; a `floating` entry represents a floating lesson reference, such as `★`, that is not bound to a weekday and period number. `track_id is null` means the class-common value. A track-specific value overrides the class-common value for the same lesson slot or reference label.
 
+Standard Timetable entries are sparse rather than materializing every weekday, period, and Track combination. Resolution selects the Track-specific value first, then the class-common value, and otherwise produces a Daily Lesson with no Lesson Name. Tsugi does not distinguish an intentionally empty Lesson Slot from an unset Lesson Slot.
+
 ## Shared Information Snapshots
 
 Snapshots are immutable value records. They do not store creator, target scope, or review information.

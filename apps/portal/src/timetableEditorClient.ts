@@ -1,14 +1,23 @@
-export type TargetScopeType = 'grade' | 'class' | 'track' | 'student'
+import {
+  projectTimetableSlot,
+  type DesiredTimetableLayer,
+  type TargetScopeType as ProjectionTargetScopeType,
+  type TimetableReference as ProjectionTimetableReference,
+  type TimetableReplacement as ProjectionTimetableReplacement,
+} from '../shared/timetableProjection'
+import { isTargetScopeType } from '../shared/targetScope'
 
+export type TargetScopeType = ProjectionTargetScopeType
+export type TimetableReference = ProjectionTimetableReference
 export type TimetableReplacement =
-  | { type: 'lesson_name'; lessonName: string }
-  | { type: 'period_reference'; weekday: number; periodNumber: number }
-  | {
-      type: 'floating_lesson_reference'
-      floatingLessonReferenceLabelId: string
-      referenceLabel: string
-    }
-  | { type: 'cancelled' }
+  | Exclude<
+      ProjectionTimetableReplacement,
+      { type: 'floating_lesson_reference' }
+    >
+  | (Extract<
+      ProjectionTimetableReplacement,
+      { type: 'floating_lesson_reference' }
+    > & { referenceLabel: string })
 
 export type TimetableLayerKey = {
   targetScopeType: TargetScopeType
@@ -423,25 +432,51 @@ export function createTimetableEditorClient({
     },
     previewLayerState(
       state: TimetableLayerState,
-      resolveReference: (replacement: TimetableReplacement) => string | null,
+      resolveReference: (reference: TimetableReference) => string | null,
     ) {
-      const hasDraft = drafts.some(
+      const slotDrafts = drafts.filter(
         (draft) =>
           draft.changeDate === state.schoolDate &&
           draft.periodNumber === state.periodNumber,
       )
-      let finalDailyLesson = {
-        lessonName: state.standardTimetable?.lessonName ?? '',
-        timetableChangeState: 'unchanged' as TimetableLayerState['finalDailyLesson']['timetableChangeState'],
-      }
+      const desiredLayers: DesiredTimetableLayer[] = slotDrafts.map((draft) =>
+        draft.changeKind === 'remove'
+          ? { targetScopeType: draft.targetScopeType, change: 'remove' }
+          : {
+              targetScopeType: draft.targetScopeType,
+              change: 'replace',
+              replacement: draft.replacement,
+            },
+      )
+      const projection = projectTimetableSlot({
+        standardTimetable: state.standardTimetable
+          ? { type: 'selected', lessonName: state.standardTimetable.lessonName }
+          : null,
+        activeLayers: state.layers.flatMap((layer) =>
+          layer.state === 'active'
+            ? [{
+                targetScopeType: layer.targetScopeType,
+                replacement: layer.replacement,
+              }]
+            : [],
+        ),
+        desiredLayers,
+        resolveReference,
+      })
+      const projectedLayers = new Map(
+        projection.layers.map((layer) => [layer.targetScopeType, layer]),
+      )
       const layers = state.layers.map((layer) => {
-        const draft = drafts.find(
-          (candidate) =>
-            candidate.targetScopeType === layer.targetScopeType &&
-            candidate.changeDate === state.schoolDate &&
-            candidate.periodNumber === state.periodNumber,
+        const draft = slotDrafts.find(
+          (candidate) => candidate.targetScopeType === layer.targetScopeType,
         )
-        if (draft?.changeKind === 'remove') {
+        const projectedLayer = projectedLayers.get(layer.targetScopeType)
+        if (
+          projectedLayer?.state === 'unchanged' &&
+          'origin' in projectedLayer &&
+          projectedLayer.origin === 'desired' &&
+          draft
+        ) {
           return {
             targetScopeType: layer.targetScopeType,
             state: 'unchanged' as const,
@@ -450,25 +485,31 @@ export function createTimetableEditorClient({
             conflicted: conflictKeys.has(draftKey(draft)),
           }
         }
-        const replacement = draft?.replacement ??
-          (layer.state === 'active' ? layer.replacement : undefined)
-        if (replacement) {
-          finalDailyLesson = resolvePreviewReplacement(replacement, resolveReference)
+        if (projectedLayer?.state === 'active') {
+          const replacement = draft && draft.changeKind !== 'remove'
+            ? draft.replacement
+            : layer.state === 'active'
+              ? layer.replacement
+              : undefined
+          if (!replacement) {
+            return { ...layer, desired: false, conflicted: false }
+          }
+          return {
+            ...layer,
+            state: 'active' as const,
+            replacement,
+            desired: !!draft,
+            conflicted: draft ? conflictKeys.has(draftKey(draft)) : false,
+          }
         }
-        return replacement
-          ? {
-              ...layer,
-              state: 'active' as const,
-              replacement,
-              desired: !!draft,
-              conflicted: draft ? conflictKeys.has(draftKey(draft)) : false,
-            }
-          : { ...layer, desired: false, conflicted: false }
+        return { ...layer, desired: false, conflicted: false }
       })
       return {
         ...state,
         layers,
-        finalDailyLesson: hasDraft ? finalDailyLesson : state.finalDailyLesson,
+        finalDailyLesson: slotDrafts.length > 0
+          ? projection.finalDailyLesson
+          : state.finalDailyLesson,
       }
     },
     async submitCurrentBatch({
@@ -621,22 +662,6 @@ export function createTimetableEditorClient({
     }
 }
 
-function resolvePreviewReplacement(
-  replacement: TimetableReplacement,
-  resolveReference: (replacement: TimetableReplacement) => string | null,
-) {
-  if (replacement.type === 'cancelled') {
-    return { lessonName: '', timetableChangeState: 'cancelled' as const }
-  }
-  if (replacement.type === 'lesson_name') {
-    return { lessonName: replacement.lessonName, timetableChangeState: 'resolved' as const }
-  }
-  const lessonName = resolveReference(replacement)
-  return lessonName === null
-    ? { lessonName: '', timetableChangeState: 'unresolved-reference' as const }
-    : { lessonName, timetableChangeState: 'resolved' as const }
-}
-
 function draftKey(
   draft: TimetableLayerKey,
 ) {
@@ -781,8 +806,4 @@ function isReplacement(value: unknown): value is TimetableReplacement {
   return replacement.type === 'floating_lesson_reference' &&
     typeof replacement.floatingLessonReferenceLabelId === 'string' &&
     typeof replacement.referenceLabel === 'string'
-}
-
-function isTargetScopeType(value: unknown): value is TargetScopeType {
-  return value === 'grade' || value === 'class' || value === 'track' || value === 'student'
 }

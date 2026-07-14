@@ -311,6 +311,27 @@ describe('Timetable editor client', () => {
     })
   })
 
+  it('uses the canonical unresolved Floating Reference result in draft preview', () => {
+    const editor = createTimetableEditorClient({ storage: memoryStorage() })
+    const server = layerState()
+    editor.reconcileLayerState(server)
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: {
+        type: 'floating_lesson_reference',
+        floatingLessonReferenceLabelId: 'unknown',
+        referenceLabel: '★',
+      },
+    })
+
+    expect(editor.previewLayerState(server, () => null).finalDailyLesson).toEqual({
+      lessonName: 'エラー',
+      timetableChangeState: 'unresolved-reference',
+    })
+  })
+
   it('derives remove only for an active layer and previews the next applicable layer', () => {
     const editor = createTimetableEditorClient({ storage: memoryStorage() })
     const server = layerState([

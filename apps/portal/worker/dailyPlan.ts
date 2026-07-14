@@ -1,4 +1,8 @@
 import {
+  projectTimetableSlot,
+  type ProjectedDailyLesson,
+} from '../shared/timetableProjection'
+import {
   type ActiveTimetableChange,
   type DailyPlanStore,
   type PeriodStandardTimetableEntry,
@@ -12,10 +16,8 @@ import {
   type StudentOperationalContextResult,
 } from './studentOperationalContext'
 import {
+  createTimetableReferenceResolver,
   isValidSchoolDate,
-  resolveTimetableChangeReplacement,
-  selectStandardTimetableEntry,
-  timetableLayerOrder,
   weekdayForSchoolDate,
 } from './timetable'
 
@@ -193,10 +195,7 @@ export async function readDailyPlansRange({
     return sharedContext
   }
 
-  const entriesByWeekday = new Map<
-    number,
-    Map<number, PeriodStandardTimetableEntry>
-  >()
+  const entriesByWeekday = new Map<number, PeriodStandardTimetableEntry[]>()
   const uniqueWeekdays = new Set(schoolDates.map(weekdayForSchoolDate))
 
   await Promise.all(
@@ -207,10 +206,7 @@ export async function readDailyPlansRange({
           sharedContext.studentAffiliation.trackId,
           weekday,
         )
-      entriesByWeekday.set(
-        weekday,
-        buildEntriesByPeriod(entries, sharedContext.studentAffiliation.trackId),
-      )
+      entriesByWeekday.set(weekday, entries)
     }),
   )
 
@@ -230,9 +226,8 @@ export async function readDailyPlansRange({
     dailyPlans[date] = buildReadyDailyPlan({
       schoolDate: date,
       sharedContext,
-      entriesByPeriod:
-        entriesByWeekday.get(weekdayForSchoolDate(date)) ?? new Map(),
-      changedLessonNames: await resolveChangedLessonNames(
+      projectedLessons: await projectDailyPlanLessons(
+        entriesByWeekday.get(weekdayForSchoolDate(date)) ?? [],
         activeTimetableChanges.filter((change) => change.changeDate === date),
         sharedContext.studentAffiliation,
         dailyPlanStore,
@@ -285,11 +280,8 @@ async function readDailyPlanForAuthenticatedStudent({
   return buildReadyDailyPlan({
     schoolDate,
     sharedContext,
-    entriesByPeriod: buildEntriesByPeriod(
+    projectedLessons: await projectDailyPlanLessons(
       standardTimetableEntries,
-      sharedContext.studentAffiliation.trackId,
-    ),
-    changedLessonNames: await resolveChangedLessonNames(
       activeTimetableChanges,
       sharedContext.studentAffiliation,
       store,
@@ -342,46 +334,17 @@ async function resolveDailyPlanSharedContext({
   }
 }
 
-function buildEntriesByPeriod(
-  standardTimetableEntries: PeriodStandardTimetableEntry[],
-  trackId: string,
-) {
-  const entriesByPeriod = new Map<number, PeriodStandardTimetableEntry>()
-  const periodNumbers = new Set(
-    standardTimetableEntries.map((entry) => entry.periodNumber),
-  )
-
-  for (const periodNumber of periodNumbers) {
-    const entry = selectStandardTimetableEntry(
-      standardTimetableEntries,
-      trackId,
-      periodNumber,
-    )
-    if (entry) entriesByPeriod.set(periodNumber, entry)
-  }
-
-  return entriesByPeriod
-}
-
 function buildReadyDailyPlan({
   schoolDate,
   sharedContext,
-  entriesByPeriod,
-  changedLessonNames = new Map(),
+  projectedLessons,
 }: {
   schoolDate: string
   sharedContext: Extract<
     Awaited<ReturnType<typeof resolveDailyPlanSharedContext>>,
     { status: 'ready' }
   >
-  entriesByPeriod: Map<number, PeriodStandardTimetableEntry>
-  changedLessonNames?: Map<
-    number,
-    {
-      lessonName: string
-      timetableChangeState: 'resolved' | 'cancelled' | 'unresolved-reference'
-    }
-  >
+  projectedLessons: Map<number, ProjectedDailyLesson>
 }): Extract<DailyPlanResult, { status: 'ready' }> {
   const weekday = weekdayForSchoolDate(schoolDate)
   const placeholderTasks = listPlaceholderDailyPlanTasks(schoolDate)
@@ -411,16 +374,14 @@ function buildReadyDailyPlan({
     },
     periods: Array.from({ length: 7 }, (_, index) => {
       const periodNumber = index + 1
-      const changedLesson = changedLessonNames.get(periodNumber)
-      const lessonName = changedLesson
-        ? changedLesson.lessonName
-        : entriesByPeriod.get(periodNumber)?.lessonName ?? ''
+      const projectedLesson = projectedLessons.get(periodNumber)
+      const lessonName = projectedLesson?.lessonName ?? ''
 
       return {
         periodNumber,
         lessonName,
-        ...(changedLesson
-          ? { timetableChangeState: changedLesson.timetableChangeState }
+        ...(projectedLesson && projectedLesson.timetableChangeState !== 'unchanged'
+          ? { timetableChangeState: projectedLesson.timetableChangeState }
           : {}),
         hasTasks: placeholderTasks.some((task) =>
           isPlaceholderTaskRelatedToLesson(task, {
@@ -441,27 +402,37 @@ function buildReadyDailyPlan({
   }
 }
 
-async function resolveChangedLessonNames(
+async function projectDailyPlanLessons(
+  standardTimetableEntries: PeriodStandardTimetableEntry[],
   changes: ActiveTimetableChange[],
   affiliation: StudentAffiliation,
   store: DailyPlanStore,
 ) {
-  const result = new Map<
-    number,
-    {
-      lessonName: string
-      timetableChangeState: 'resolved' | 'cancelled' | 'unresolved-reference'
-    }
-  >()
-  for (const change of [...changes].sort(
-    (left, right) =>
-      timetableLayerOrder.indexOf(left.targetScope.type) -
-      timetableLayerOrder.indexOf(right.targetScope.type),
-  )) {
-    result.set(
-      change.periodNumber,
-      await resolveTimetableChangeReplacement(change.replacement, affiliation, store),
+  const result = new Map<number, ProjectedDailyLesson>()
+  for (let periodNumber = 1; periodNumber <= 7; periodNumber += 1) {
+    const activeLayers = changes
+      .filter((change) => change.periodNumber === periodNumber)
+      .map((change) => ({
+        targetScopeType: change.targetScope.type,
+        replacement: change.replacement,
+      }))
+    const resolveReference = await createTimetableReferenceResolver(
+      activeLayers.map((layer) => layer.replacement),
+      affiliation,
+      store,
     )
+    const projection = projectTimetableSlot({
+      standardTimetable: {
+        type: 'candidates',
+        selectedTrackId: affiliation.trackId,
+        candidates: standardTimetableEntries.filter(
+          (entry) => entry.periodNumber === periodNumber,
+        ),
+      },
+      activeLayers,
+      resolveReference,
+    })
+    result.set(periodNumber, projection.finalDailyLesson)
   }
 
   return result

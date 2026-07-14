@@ -5,13 +5,14 @@ import type {
   TimetableLayerKey,
   TimetableChangeReplacement,
 } from './persistence'
+import { projectTimetableSlot } from '../shared/timetableProjection'
 import { resolveStudentOperationalContext } from './studentOperationalContext'
 import {
   isTargetScopeType,
   targetScopeForStudentAffiliation,
   targetScopesEqual,
 } from './targetScopePolicy'
-import { isValidSchoolDate, selectStandardTimetableEntry } from './timetable'
+import { isValidSchoolDate } from './timetable'
 
 type DirectChangeDraft = {
   changeKind?: unknown
@@ -77,22 +78,31 @@ export async function readDirectTimetableChangeOptions({
       ),
     ),
   )
-  const periodReferences = entriesByWeekday.flatMap((entries, weekdayIndex) =>
-    Array.from({ length: 7 }, (_, periodIndex) => {
-      const entry = selectStandardTimetableEntry(
-        entries,
-        affiliation.trackId,
-        periodIndex + 1,
-      )
-      return entry
+  const periodReferences = entriesByWeekday
+    .flatMap((entries, weekdayIndex) =>
+      Array.from({ length: 7 }, (_, periodIndex) => {
+        const periodNumber = periodIndex + 1
+        const projection = projectTimetableSlot({
+          standardTimetable: {
+            type: 'candidates',
+            selectedTrackId: affiliation.trackId,
+            candidates: entries.filter(
+              (entry) => entry.periodNumber === periodNumber,
+            ),
+          },
+          activeLayers: [],
+          resolveReference: () => null,
+        })
+        return projection.standardTimetable
         ? {
             weekday: weekdayIndex + 1,
-            periodNumber: periodIndex + 1,
-            lessonName: entry.lessonName,
+            periodNumber,
+            lessonName: projection.standardTimetable.lessonName,
           }
-        : []
-    }).flat(),
-  )
+          : null
+      }),
+    )
+    .filter((entry) => entry !== null)
   return {
     status: 'ready' as const,
     schoolYearRange: { startsOn: schoolYear.startsOn, endsOn: schoolYear.endsOn },

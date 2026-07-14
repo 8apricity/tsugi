@@ -1,4 +1,9 @@
-export type TargetScopeType = 'grade' | 'class' | 'track' | 'student'
+import type { TargetScopeType } from '../shared/targetScope'
+
+export {
+  isTargetScopeType,
+  type TargetScopeType,
+} from '../shared/targetScope'
 
 export type TargetScope =
   | { type: 'grade'; schoolYear: number; grade: number }
@@ -16,11 +21,6 @@ type StudentAffiliationTargetScopeFacts = {
   grade: number
   classId: string
   trackId: string
-}
-
-export function isTargetScopeType(value: unknown): value is TargetScopeType {
-  return value === 'grade' || value === 'class' || value === 'track' ||
-    value === 'student'
 }
 
 export function targetScopeForStudentAffiliation(

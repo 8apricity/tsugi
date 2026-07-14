@@ -1,5 +1,8 @@
 // Domain-local seams share storage implementations without sharing caller interfaces.
 import type { StudentOperationalContextStore } from './studentOperationalContext'
+import type {
+  TimetableReplacement as ProjectionTimetableReplacement,
+} from '../shared/timetableProjection'
 import { targetScopeValue } from './targetScopeBoundary'
 import {
   studentAffiliationIncludesTargetScope,
@@ -113,11 +116,7 @@ export type FloatingLessonReferenceLabel = {
   displayOrder: number
 }
 
-export type TimetableChangeReplacement =
-  | { type: 'lesson_name'; lessonName: string }
-  | { type: 'period_reference'; weekday: number; periodNumber: number }
-  | { type: 'floating_lesson_reference'; floatingLessonReferenceLabelId: string }
-  | { type: 'cancelled' }
+export type TimetableChangeReplacement = ProjectionTimetableReplacement
 
 export type TimetableLayerKey = {
   targetScopeType: TargetScopeType

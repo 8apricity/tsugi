@@ -1,6 +1,6 @@
+import { isTargetScopeType } from '../shared/targetScope'
 import type {
   SubmitDirectTimetableChanges,
-  TargetScopeType,
   TimetableLayerKey,
 } from './timetableEditorClient'
 
@@ -53,9 +53,4 @@ function isTimetableLayerKey(value: unknown): value is TimetableLayerKey {
   return isTargetScopeType(key.targetScopeType) &&
     typeof key.changeDate === 'string' &&
     Number.isInteger(key.periodNumber)
-}
-
-function isTargetScopeType(value: unknown): value is TargetScopeType {
-  return value === 'grade' || value === 'class' || value === 'track' ||
-    value === 'student'
 }

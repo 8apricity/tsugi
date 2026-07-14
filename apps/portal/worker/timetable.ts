@@ -1,66 +1,59 @@
 import type {
   DailyPlanStore,
-  PeriodStandardTimetableEntry,
   StudentAffiliation,
-  TargetScopeType,
-  TimetableChangeReplacement,
 } from './persistence'
+import type {
+  TimetableReference,
+  TimetableReplacement,
+} from '../shared/timetableProjection'
 
-export const timetableLayerOrder: TargetScopeType[] = [
-  'grade',
-  'class',
-  'track',
-  'student',
-]
-
-export type ResolvedTimetableReplacement = {
-  lessonName: string
-  timetableChangeState: 'resolved' | 'cancelled' | 'unresolved-reference'
-}
-
-export function selectStandardTimetableEntry(
-  entries: PeriodStandardTimetableEntry[],
-  trackId: string,
-  periodNumber: number,
-) {
-  const matching = entries.filter((entry) => entry.periodNumber === periodNumber)
-  return matching.find((entry) => entry.trackId === trackId) ?? matching[0] ?? null
-}
-
-export async function resolveTimetableChangeReplacement(
-  replacement: TimetableChangeReplacement,
+export async function createTimetableReferenceResolver(
+  replacements: readonly TimetableReplacement[],
   affiliation: StudentAffiliation,
   store: DailyPlanStore,
-): Promise<ResolvedTimetableReplacement> {
-  if (replacement.type === 'lesson_name') {
-    return { lessonName: replacement.lessonName, timetableChangeState: 'resolved' }
-  }
-  if (replacement.type === 'cancelled') {
-    return { lessonName: '', timetableChangeState: 'cancelled' }
-  }
+): Promise<(reference: TimetableReference) => string | null> {
+  const references = replacements.filter(
+    (replacement): replacement is TimetableReference =>
+      replacement.type === 'period_reference' ||
+      replacement.type === 'floating_lesson_reference',
+  )
+  const resolvedReferences = new Map(
+    await Promise.all(
+      references.map(async (reference) => [
+        timetableReferenceKey(reference),
+        await resolveTimetableReference(reference, affiliation, store),
+      ] as const),
+    ),
+  )
+  return (reference) =>
+    resolvedReferences.get(timetableReferenceKey(reference)) ?? null
+}
+
+async function resolveTimetableReference(
+  reference: TimetableReference,
+  affiliation: StudentAffiliation,
+  store: DailyPlanStore,
+): Promise<string | null> {
   const entry =
-    replacement.type === 'period_reference'
+    reference.type === 'period_reference'
       ? await store.findStandardTimetableEntryForPeriodReference(
           affiliation.classId,
           affiliation.trackId,
-          replacement.weekday,
-          replacement.periodNumber,
+          reference.weekday,
+          reference.periodNumber,
         )
       : await store.findStandardTimetableEntryForFloatingReferenceLabelId(
           affiliation.classId,
           affiliation.trackId,
-          replacement.floatingLessonReferenceLabelId,
+          reference.floatingLessonReferenceLabelId,
         )
+  return entry?.lessonName ?? null
+}
 
-  return entry
-    ? { lessonName: entry.lessonName, timetableChangeState: 'resolved' }
-    : {
-        lessonName: replacement.type === 'floating_lesson_reference' ? 'エラー' : '',
-        timetableChangeState:
-          replacement.type === 'floating_lesson_reference'
-            ? 'unresolved-reference'
-            : 'cancelled',
-      }
+function timetableReferenceKey(reference: TimetableReference) {
+  return reference.type === 'period_reference'
+    ? `period:${reference.weekday}:${reference.periodNumber}`
+    : `floating:${reference.floatingLessonReferenceLabelId}`
 }
 
 export function isValidSchoolDate(value: string) {

@@ -22,6 +22,7 @@ import {
   type TargetScopeType,
   type TimetableLayerState,
   type TimetableLayerKey,
+  type TimetableReference,
   type TimetableReplacement,
 } from "./timetableEditorClient";
 import { createDirectTimetableChangeTransport } from "./timetableSubmissionTransport";
@@ -2949,7 +2950,7 @@ function defaultReplacement(
 }
 
 function resolveReplacementLessonName(
-  replacement: TimetableReplacement,
+  replacement: TimetableReference,
   options: TimetableEditorOptions | null,
 ) {
   if (replacement.type === "period_reference") {
@@ -2970,7 +2971,7 @@ function resolveReplacementLessonName(
       )?.lessonName ?? null
     );
   }
-  return replacement.type === "lesson_name" ? replacement.lessonName : null;
+  return null;
 }
 
 export default App;

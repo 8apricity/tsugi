@@ -6,12 +6,11 @@ import type {
   TargetScopeType,
   TimetableChangeReplacement,
 } from './persistence'
+import { projectTimetableSlot } from '../shared/timetableProjection'
 import { resolveStudentOperationalContext } from './studentOperationalContext'
 import {
+  createTimetableReferenceResolver,
   isValidSchoolDate,
-  resolveTimetableChangeReplacement,
-  selectStandardTimetableEntry,
-  timetableLayerOrder,
   weekdayForSchoolDate,
 } from './timetable'
 
@@ -239,49 +238,45 @@ async function buildReadyLayerState({
   >
   activeChanges: ActiveTimetableChange[]
 }): Promise<Extract<TimetableChangeLayerResult, { status: 'ready' }>> {
-  const standardEntry = selectStandardTimetableEntry(
-    standardEntries,
-    affiliation.trackId,
-    selectedPeriod,
-  )
   const changesByLayer = new Map(
     activeChanges
       .filter((change) => change.periodNumber === selectedPeriod)
       .map((change) => [change.targetScope.type, change]),
   )
-
-  let finalDailyLesson: Extract<
-    TimetableChangeLayerResult,
-    { status: 'ready' }
-  >['finalDailyLesson'] = {
-    lessonName: standardEntry?.lessonName ?? '',
-    timetableChangeState: 'unchanged',
-  }
-
-  for (const targetScopeType of timetableLayerOrder) {
-    const change = changesByLayer.get(targetScopeType)
-    if (change) {
-      finalDailyLesson = await resolveTimetableChangeReplacement(
-        change.replacement,
-        affiliation,
-        store,
-      )
-    }
-  }
+  const activeLayers = [...changesByLayer.values()].map((change) => ({
+    targetScopeType: change.targetScope.type,
+    replacement: change.replacement,
+  }))
+  const resolveReference = await createTimetableReferenceResolver(
+    activeLayers.map((layer) => layer.replacement),
+    affiliation,
+    store,
+  )
+  const projection = projectTimetableSlot({
+    standardTimetable: {
+      type: 'candidates',
+      selectedTrackId: affiliation.trackId,
+      candidates: standardEntries.filter(
+        (entry) => entry.periodNumber === selectedPeriod,
+      ),
+    },
+    activeLayers,
+    resolveReference,
+  })
 
   const layers = await Promise.all(
-    timetableLayerOrder.map(async (targetScopeType) => {
-      const change = changesByLayer.get(targetScopeType)
-      return change
+    projection.layers.map(async (layer) => {
+      const change = changesByLayer.get(layer.targetScopeType)
+      return layer.state === 'active' && change
         ? {
-            targetScopeType,
+            targetScopeType: layer.targetScopeType,
             state: 'active' as const,
             sharedInformationItemId: change.sharedInformationItemId,
             latestChangeId: change.latestChangeId,
             replacement: await displayReplacement(change, affiliation, store),
             changedAt: change.changedAt,
           }
-        : { targetScopeType, state: 'unchanged' as const }
+        : { targetScopeType: layer.targetScopeType, state: 'unchanged' as const }
     }),
   )
 
@@ -289,14 +284,14 @@ async function buildReadyLayerState({
     status: 'ready',
     schoolDate,
     periodNumber: selectedPeriod,
-    standardTimetable: standardEntry
+    standardTimetable: projection.standardTimetable
       ? {
           periodReference: { weekday, periodNumber: selectedPeriod },
-          lessonName: standardEntry.lessonName,
+          lessonName: projection.standardTimetable.lessonName,
         }
       : null,
     layers,
-    finalDailyLesson,
+    finalDailyLesson: projection.finalDailyLesson,
   }
 }
 

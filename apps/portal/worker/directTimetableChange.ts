@@ -2,11 +2,15 @@ import type {
   DirectTimetableChangeOperation,
   DirectTimetableChangeStore,
   StudentAccountAccessStore,
-  TargetScopeType,
   TimetableLayerKey,
   TimetableChangeReplacement,
 } from './persistence'
-import { readStudentSession } from './studentAccountAccess'
+import { resolveStudentOperationalContext } from './studentOperationalContext'
+import {
+  isTargetScopeType,
+  targetScopeForStudentAffiliation,
+  targetScopesEqual,
+} from './targetScopePolicy'
 import { isValidSchoolDate, selectStandardTimetableEntry } from './timetable'
 
 type DirectChangeDraft = {
@@ -42,17 +46,24 @@ export async function readDirectTimetableChangeOptions({
   studentAccountStore: StudentAccountAccessStore
   store: DirectTimetableChangeStore
 }) {
-  const session = await readStudentSession({ sessionToken, now, store: studentAccountStore })
-  if (session.status === 'unauthenticated') return session
-  const schoolYear = await store.findCurrentSchoolYear()
-  if (!schoolYear) return { status: 'unavailable' as const }
-  const affiliation = await store.findCurrentStudentAffiliation(
-    session.studentAccount.studentAccountId,
-    schoolYear.schoolYear,
-  )
-  if (!affiliation) {
-    return { status: 'affiliation-renewal-needed' as const, schoolYear: schoolYear.schoolYear }
+  const context = await resolveStudentOperationalContext({
+    sessionToken,
+    now,
+    studentAccountStore,
+    contextStore: store,
+  })
+  if (context.status === 'unauthenticated') return context
+  if (context.status === 'school-year-unavailable') {
+    return { status: 'unavailable' as const }
   }
+  if (context.status === 'affiliation-renewal-needed') {
+    return {
+      status: context.status,
+      schoolYear: context.currentSchoolYear.schoolYear,
+    }
+  }
+  const { currentSchoolYear: schoolYear, studentAffiliation: affiliation } =
+    context
   const floatingLabels = await store.listFloatingLessonReferenceLabels(
     schoolYear.schoolYear,
     affiliation.grade,
@@ -115,29 +126,27 @@ export async function applyDirectTimetableChanges({
   studentAccountStore: StudentAccountAccessStore
   store: DirectTimetableChangeStore
 }): Promise<ApplyDirectTimetableChangesResult> {
-  const session = await readStudentSession({
+  const context = await resolveStudentOperationalContext({
     sessionToken,
     now,
-    store: studentAccountStore,
+    studentAccountStore,
+    contextStore: store,
   })
-
-  if (session.status === 'unauthenticated') return session
-
-  const schoolYear = await store.findCurrentSchoolYear()
-
-  if (!schoolYear) return { status: 'invalid-change' }
-
-  const affiliation = await store.findCurrentStudentAffiliation(
-    session.studentAccount.studentAccountId,
-    schoolYear.schoolYear,
-  )
-
-  if (!affiliation) {
+  if (context.status === 'unauthenticated') return context
+  if (context.status === 'school-year-unavailable') {
+    return { status: 'invalid-change' }
+  }
+  if (context.status === 'affiliation-renewal-needed') {
     return {
-      status: 'affiliation-renewal-needed',
-      schoolYear: schoolYear.schoolYear,
+      status: context.status,
+      schoolYear: context.currentSchoolYear.schoolYear,
     }
   }
+  const {
+    currentSchoolYear: schoolYear,
+    studentAffiliation: affiliation,
+    studentAccount,
+  } = context
 
   if (!Array.isArray(drafts) || drafts.length === 0 || drafts.length > 50) {
     return { status: 'invalid-change' }
@@ -196,12 +205,13 @@ export async function applyDirectTimetableChanges({
     const common = {
       sourceId: candidate.sourceId,
       latestChangeId: `${candidate.sourceId}:change`,
-      schoolYear: schoolYear.schoolYear,
-      targetScopeType,
-      targetScopeValue: targetScopeValue(targetScopeType, affiliation),
+      targetScope: targetScopeForStudentAffiliation(
+        affiliation,
+        targetScopeType,
+      ),
       changeDate: candidate.changeDate,
       periodNumber: Number(candidate.periodNumber),
-      changedByStudentAccountId: session.studentAccount.studentAccountId,
+      changedByStudentAccountId: studentAccount.studentAccountId,
       changedAt: now,
     }
     changes.push(
@@ -229,18 +239,16 @@ export async function applyDirectTimetableChanges({
     )
   }
 
-  const slotKeys = changes.map((change) =>
-    [
-      change.schoolYear,
-      change.targetScopeType,
-      change.targetScopeValue,
-      change.changeDate,
-      change.periodNumber,
-    ].join(':'),
+  const hasDuplicateSlot = changes.some((change, index) =>
+    changes.slice(0, index).some((candidate) =>
+      targetScopesEqual(candidate.targetScope, change.targetScope) &&
+      candidate.changeDate === change.changeDate &&
+      candidate.periodNumber === change.periodNumber
+    )
   )
   if (
     new Set(changes.map((change) => change.sourceId)).size !== changes.length ||
-    new Set(slotKeys).size !== changes.length
+    hasDuplicateSlot
   ) {
     return { status: 'invalid-change' }
   }
@@ -276,26 +284,11 @@ function conflictingKeysFor(
   const conflictingSources = new Set(conflictingSourceIds)
   return changes
     .filter((change) => conflictingSources.has(change.sourceId))
-    .map(({ targetScopeType, changeDate, periodNumber }) => ({
-      targetScopeType,
+    .map(({ targetScope, changeDate, periodNumber }) => ({
+      targetScopeType: targetScope.type,
       changeDate,
       periodNumber,
     }))
-}
-
-function targetScopeValue(
-  type: TargetScopeType,
-  affiliation: {
-    grade: number
-    classId: string
-    trackId: string
-    studentAccountId: string
-  },
-) {
-  if (type === 'grade') return String(affiliation.grade)
-  if (type === 'class') return affiliation.classId
-  if (type === 'track') return affiliation.trackId
-  return affiliation.studentAccountId
 }
 
 function parseReplacement(value: unknown): TimetableChangeReplacement | null {
@@ -340,10 +333,6 @@ function parseReplacement(value: unknown): TimetableChangeReplacement | null {
   }
 
   return null
-}
-
-function isTargetScopeType(value: unknown): value is TargetScopeType {
-  return value === 'grade' || value === 'class' || value === 'track' || value === 'student'
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i

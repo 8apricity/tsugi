@@ -7,8 +7,11 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   createD1PersistenceAdapters,
+  createInMemoryPersistenceAdapters,
   type DirectTimetableChangeOperation,
+  type PersistenceAdapters,
   type StudentAffiliation,
+  type TargetScope,
   type TimetableChangeReplacement,
 } from './persistence'
 
@@ -230,9 +233,7 @@ describe('D1 Direct Timetable Change persistence', () => {
     ).get()).toEqual({ count: 1 })
 
     await expect(adapters.timetableChangeHistory.listTimetableChangeHistory({
-      schoolYear: 2026,
-      targetScopeType: 'track',
-      targetScopeValue: 'track-1',
+      targetScope: { type: 'track', schoolYear: 2026, trackId: 'track-1' },
       changeDate: '2026-07-10',
       periodNumber: 1,
     })).resolves.toEqual([
@@ -274,8 +275,11 @@ describe('D1 Direct Timetable Change persistence', () => {
     const mixedAdd = operation({
       sourceId: '30444444-4444-4444-8444-444444444444',
       changeKind: 'add',
-      targetScopeType: 'student',
-      targetScopeValue: 'student-1',
+      targetScope: {
+        type: 'student',
+        schoolYear: 2026,
+        studentAccountId: 'student-1',
+      },
       periodNumber: 2,
       replacement: { type: 'lesson_name', lessonName: '保存されない' },
     })
@@ -298,15 +302,177 @@ describe('D1 Direct Timetable Change persistence', () => {
       'select count(*) as count from shared_information_items where shared_information_item_id = ?',
     ).get(mixedAdd.sharedInformationItemId)).toEqual({ count: 0 })
   })
+
+  it('does not expose an unsupported multi-part Target Scope', async () => {
+    const database = createTestDatabase()
+    const adapters = createD1PersistenceAdapters(
+      new SqliteD1Database(database) as unknown as D1Database,
+    )
+    const affiliation: StudentAffiliation = {
+      studentAffiliationId: 'affiliation-1',
+      studentAccountId: 'student-1',
+      schoolYear: 2026,
+      grade: 2,
+      classId: 'class-1',
+      trackId: 'track-1',
+      selectedAt: 1,
+      endedAt: null,
+    }
+    await adapters.seed.saveStudentAccount({
+      studentAccountId: 'student-1',
+      schoolEmail: 'student@example.invalid',
+      displayName: 'Student',
+    })
+    await adapters.seed.saveSchoolYearClass({
+      classId: 'class-1',
+      schoolYear: 2026,
+      grade: 2,
+      classNumber: 1,
+    })
+    await adapters.seed.saveTrack({
+      trackId: 'track-1',
+      classId: 'class-1',
+      trackName: 'Track',
+    })
+    const change = operation({
+      sourceId: '30666666-6666-4666-8666-666666666666',
+      changeKind: 'add',
+      replacement: { type: 'cancelled' },
+    })
+    await adapters.directTimetableChange.commitDirectTimetableChanges([change])
+    database.prepare(`
+      insert into target_scope_parts (
+        target_scope_part_id, target_scope_id, scope_type, grade,
+        class_id, track_id, student_account_id
+      ) values (?, ?, 'grade', 2, null, null, null)
+    `).run(
+      `${change.sourceId}:extra-part`,
+      `${change.sourceId}:scope`,
+    )
+
+    await expect(
+      adapters.dailyPlan.listActiveTimetableChangesForStudent(
+        affiliation,
+        '2026-07-10',
+        '2026-07-10',
+      ),
+    ).resolves.toEqual([])
+  })
 })
+
+const targetScopeMembershipAdapterCases: Array<
+  [string, () => PersistenceAdapters]
+> = [
+  ['in-memory', () => createInMemoryPersistenceAdapters()],
+  [
+    'D1',
+    () => createD1PersistenceAdapters(
+      new SqliteD1Database(createTestDatabase()) as unknown as D1Database,
+    ),
+  ],
+]
+
+describe.each(targetScopeMembershipAdapterCases)(
+  'Target Scope membership adapter conformance: %s',
+  (_name, createAdapters) => {
+    it('returns only active Timetable Changes whose Target Scope includes the Student', async () => {
+      const adapters = createAdapters()
+      const affiliation: StudentAffiliation = {
+        studentAffiliationId: 'affiliation-1',
+        studentAccountId: 'student-1',
+        schoolYear: 2026,
+        grade: 2,
+        classId: 'class-1',
+        trackId: 'track-1',
+        selectedAt: 1,
+        endedAt: null,
+      }
+      await adapters.seed.saveStudentAccount({
+        studentAccountId: 'student-1',
+        schoolEmail: 'student@example.invalid',
+        displayName: 'Student',
+      })
+      await adapters.seed.saveSchoolYearClass({
+        classId: 'class-1',
+        schoolYear: 2026,
+        grade: 2,
+        classNumber: 1,
+      })
+      await adapters.seed.saveTrack({
+        trackId: 'track-1',
+        classId: 'class-1',
+        trackName: 'Track',
+      })
+      const changes = [
+        operation({
+          sourceId: '40111111-1111-4111-8111-111111111111',
+          changeKind: 'add',
+          targetScope: { type: 'grade', schoolYear: 2026, grade: 2 },
+          periodNumber: 1,
+          replacement: { type: 'cancelled' },
+        }),
+        operation({
+          sourceId: '40222222-2222-4222-8222-222222222222',
+          changeKind: 'add',
+          targetScope: { type: 'class', schoolYear: 2026, classId: 'class-1' },
+          periodNumber: 2,
+          replacement: { type: 'cancelled' },
+        }),
+        operation({
+          sourceId: '40333333-3333-4333-8333-333333333333',
+          changeKind: 'add',
+          targetScope: { type: 'track', schoolYear: 2026, trackId: 'track-1' },
+          periodNumber: 3,
+          replacement: { type: 'cancelled' },
+        }),
+        operation({
+          sourceId: '40444444-4444-4444-8444-444444444444',
+          changeKind: 'add',
+          targetScope: {
+            type: 'student',
+            schoolYear: 2026,
+            studentAccountId: 'student-1',
+          },
+          periodNumber: 4,
+          replacement: { type: 'cancelled' },
+        }),
+        operation({
+          sourceId: '40555555-5555-4555-8555-555555555555',
+          changeKind: 'add',
+          targetScope: { type: 'grade', schoolYear: 2026, grade: 3 },
+          periodNumber: 5,
+          replacement: { type: 'cancelled' },
+        }),
+      ]
+
+      await expect(
+        adapters.directTimetableChange.commitDirectTimetableChanges(changes),
+      ).resolves.toMatchObject({ status: 'applied' })
+
+      const visible =
+        await adapters.dailyPlan.listActiveTimetableChangesForStudent(
+          affiliation,
+          '2026-07-10',
+          '2026-07-10',
+        )
+      expect(
+        visible.map(({ sourceId, targetScope }) => ({ sourceId, targetScope })),
+      ).toEqual(
+        changes.slice(0, 4).map(({ sourceId, targetScope }) => ({
+          sourceId,
+          targetScope,
+        })),
+      )
+    })
+  },
+)
 
 type OperationOverrides =
   | {
       sourceId: string
       changeKind: 'add'
       replacement: TimetableChangeReplacement
-      targetScopeType?: 'track' | 'student'
-      targetScopeValue?: string
+      targetScope?: TargetScope
       periodNumber?: number
     }
   | {
@@ -324,11 +490,18 @@ function operation(overrides: OperationOverrides): DirectTimetableChangeOperatio
         ? overrides.sharedInformationItemId
         : overrides.sourceId,
     latestChangeId: `${overrides.sourceId}:change`,
-    schoolYear: 2026,
-    targetScopeType:
-      'targetScopeType' in overrides ? overrides.targetScopeType ?? 'track' : 'track',
-    targetScopeValue:
-      'targetScopeValue' in overrides ? overrides.targetScopeValue ?? 'track-1' : 'track-1',
+    targetScope:
+      'targetScope' in overrides
+        ? overrides.targetScope ?? {
+            type: 'track' as const,
+            schoolYear: 2026,
+            trackId: 'track-1',
+          }
+        : {
+            type: 'track' as const,
+            schoolYear: 2026,
+            trackId: 'track-1',
+          },
     changeDate: '2026-07-10',
     periodNumber: 'periodNumber' in overrides ? overrides.periodNumber ?? 1 : 1,
     changedByStudentAccountId: 'student-1',

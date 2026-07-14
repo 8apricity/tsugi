@@ -3,12 +3,14 @@ import {
   type DailyPlanStore,
   type PeriodStandardTimetableEntry,
   type SchoolYearClassRecord,
-  type SchoolYearRecord,
   type StudentAffiliation,
   type StudentAccountAccessStore,
   type TrackRecord,
 } from './persistence'
-import { readStudentSession } from './studentAccountAccess'
+import {
+  resolveStudentOperationalContext,
+  type StudentOperationalContextResult,
+} from './studentOperationalContext'
 import {
   isValidSchoolDate,
   resolveTimetableChangeReplacement,
@@ -105,24 +107,31 @@ export async function readDailyPlan({
   studentAccountStore: StudentAccountAccessStore
   dailyPlanStore: DailyPlanStore
 }): Promise<DailyPlanResult> {
-  const session = await readStudentSession({
+  const operationalContext = await resolveStudentOperationalContext({
     sessionToken,
     now,
-    store: studentAccountStore,
+    studentAccountStore,
+    contextStore: dailyPlanStore,
   })
-
-  if (session.status === 'unauthenticated') {
-    return { status: 'unauthenticated' }
-  }
+  if (operationalContext.status === 'unauthenticated') return operationalContext
 
   const resolvedSchoolDate = schoolDate ?? formatJstSchoolDate(now)
 
   if (!isValidSchoolDate(resolvedSchoolDate)) {
     return { status: 'invalid-date' }
   }
+  if (operationalContext.status === 'school-year-unavailable') {
+    return { status: 'daily-plan-unavailable' }
+  }
+  if (operationalContext.status === 'affiliation-renewal-needed') {
+    return {
+      status: operationalContext.status,
+      schoolYear: operationalContext.currentSchoolYear.schoolYear,
+    }
+  }
 
   return readDailyPlanForAuthenticatedStudent({
-    studentAccountId: session.studentAccount.studentAccountId,
+    operationalContext,
     schoolDate: resolvedSchoolDate,
     store: dailyPlanStore,
   })
@@ -143,15 +152,13 @@ export async function readDailyPlansRange({
   studentAccountStore: StudentAccountAccessStore
   dailyPlanStore: DailyPlanStore
 }): Promise<DailyPlansRangeResult> {
-  const session = await readStudentSession({
+  const operationalContext = await resolveStudentOperationalContext({
     sessionToken,
     now,
-    store: studentAccountStore,
+    studentAccountStore,
+    contextStore: dailyPlanStore,
   })
-
-  if (session.status === 'unauthenticated') {
-    return { status: 'unauthenticated' }
-  }
+  if (operationalContext.status === 'unauthenticated') return operationalContext
 
   const resolvedStart = start ?? formatJstSchoolDate(now)
   const resolvedEnd = end ?? resolvedStart
@@ -167,9 +174,18 @@ export async function readDailyPlansRange({
       status: schoolDates ? 'date-range-too-large' : 'invalid-date',
     }
   }
+  if (operationalContext.status === 'school-year-unavailable') {
+    return { status: 'daily-plan-unavailable' }
+  }
+  if (operationalContext.status === 'affiliation-renewal-needed') {
+    return {
+      status: operationalContext.status,
+      schoolYear: operationalContext.currentSchoolYear.schoolYear,
+    }
+  }
 
   const sharedContext = await resolveDailyPlanSharedContext({
-    studentAccountId: session.studentAccount.studentAccountId,
+    operationalContext,
     store: dailyPlanStore,
   })
 
@@ -233,16 +249,19 @@ export async function readDailyPlansRange({
 }
 
 async function readDailyPlanForAuthenticatedStudent({
-  studentAccountId,
+  operationalContext,
   schoolDate,
   store,
 }: {
-  studentAccountId: string
+  operationalContext: Extract<
+    StudentOperationalContextResult,
+    { status: 'ready' }
+  >
   schoolDate: string
   store: DailyPlanStore
 }): Promise<DailyPlanResult> {
   const sharedContext = await resolveDailyPlanSharedContext({
-    studentAccountId,
+    operationalContext,
     store,
   })
 
@@ -279,39 +298,28 @@ async function readDailyPlanForAuthenticatedStudent({
 }
 
 async function resolveDailyPlanSharedContext({
-  studentAccountId,
+  operationalContext,
   store,
 }: {
-  studentAccountId: string
+  operationalContext: Extract<
+    StudentOperationalContextResult,
+    { status: 'ready' }
+  >
   store: DailyPlanStore
 }): Promise<
   | {
       status: 'ready'
-      currentSchoolYear: SchoolYearRecord
+      currentSchoolYear: Extract<
+        StudentOperationalContextResult,
+        { status: 'ready' }
+      >['currentSchoolYear']
       studentAffiliation: StudentAffiliation
       schoolClass: SchoolYearClassRecord
       track: TrackRecord
     }
   | { status: 'daily-plan-unavailable' }
-  | { status: 'affiliation-renewal-needed'; schoolYear: number }
 > {
-  const currentSchoolYear = await store.findCurrentSchoolYear()
-
-  if (!currentSchoolYear) {
-    return { status: 'daily-plan-unavailable' }
-  }
-
-  const studentAffiliation = await store.findCurrentStudentAffiliation(
-    studentAccountId,
-    currentSchoolYear.schoolYear,
-  )
-
-  if (!studentAffiliation) {
-    return {
-      status: 'affiliation-renewal-needed',
-      schoolYear: currentSchoolYear.schoolYear,
-    }
-  }
+  const { currentSchoolYear, studentAffiliation } = operationalContext
 
   const [schoolClass, track] = await Promise.all([
     store.findSchoolYearClassById(
@@ -447,8 +455,8 @@ async function resolveChangedLessonNames(
   >()
   for (const change of [...changes].sort(
     (left, right) =>
-      timetableLayerOrder.indexOf(left.targetScopeType) -
-      timetableLayerOrder.indexOf(right.targetScopeType),
+      timetableLayerOrder.indexOf(left.targetScope.type) -
+      timetableLayerOrder.indexOf(right.targetScope.type),
   )) {
     result.set(
       change.periodNumber,

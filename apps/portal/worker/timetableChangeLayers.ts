@@ -6,7 +6,7 @@ import type {
   TargetScopeType,
   TimetableChangeReplacement,
 } from './persistence'
-import { readStudentSession } from './studentAccountAccess'
+import { resolveStudentOperationalContext } from './studentOperationalContext'
 import {
   isValidSchoolDate,
   resolveTimetableChangeReplacement,
@@ -78,15 +78,17 @@ export async function readTimetableChangeLayerRange({
   studentAccountStore: StudentAccountAccessStore
   store: DailyPlanStore
 }): Promise<TimetableChangeLayerRangeResult> {
-  const session = await readStudentSession({
+  const context = await resolveStudentOperationalContext({
     sessionToken,
     now,
-    store: studentAccountStore,
+    studentAccountStore,
+    contextStore: store,
   })
-  if (session.status === 'unauthenticated') return session
-
-  const schoolYear = await store.findCurrentSchoolYear()
-  if (!schoolYear) return { status: 'unavailable' }
+  if (context.status === 'unauthenticated') return context
+  if (context.status === 'school-year-unavailable') {
+    return { status: 'unavailable' }
+  }
+  const schoolYear = context.currentSchoolYear
   if (
     startDate === null ||
     endDate === null ||
@@ -101,17 +103,10 @@ export async function readTimetableChangeLayerRange({
   const end = new Date(`${endDate}T00:00:00.000Z`)
   const dayCount = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1
   if (dayCount < 1 || dayCount > 5) return { status: 'invalid-selection' }
-
-  const affiliation = await store.findCurrentStudentAffiliation(
-    session.studentAccount.studentAccountId,
-    schoolYear.schoolYear,
-  )
-  if (!affiliation) {
-    return {
-      status: 'affiliation-renewal-needed',
-      schoolYear: schoolYear.schoolYear,
-    }
+  if (context.status === 'affiliation-renewal-needed') {
+    return { status: context.status, schoolYear: schoolYear.schoolYear }
   }
+  const affiliation = context.studentAffiliation
 
   const schoolDates = Array.from({ length: dayCount }, (_, day) =>
     new Date(start.getTime() + day * 86_400_000).toISOString().slice(0, 10),
@@ -172,15 +167,17 @@ export async function readTimetableChangeLayers({
   studentAccountStore: StudentAccountAccessStore
   store: DailyPlanStore
 }): Promise<TimetableChangeLayerResult> {
-  const session = await readStudentSession({
+  const context = await resolveStudentOperationalContext({
     sessionToken,
     now,
-    store: studentAccountStore,
+    studentAccountStore,
+    contextStore: store,
   })
-  if (session.status === 'unauthenticated') return session
-
-  const schoolYear = await store.findCurrentSchoolYear()
-  if (!schoolYear) return { status: 'unavailable' }
+  if (context.status === 'unauthenticated') return context
+  if (context.status === 'school-year-unavailable') {
+    return { status: 'unavailable' }
+  }
+  const schoolYear = context.currentSchoolYear
 
   const selectedPeriod = Number(periodNumber)
   if (
@@ -194,17 +191,10 @@ export async function readTimetableChangeLayers({
   ) {
     return { status: 'invalid-selection' }
   }
-
-  const affiliation = await store.findCurrentStudentAffiliation(
-    session.studentAccount.studentAccountId,
-    schoolYear.schoolYear,
-  )
-  if (!affiliation) {
-    return {
-      status: 'affiliation-renewal-needed',
-      schoolYear: schoolYear.schoolYear,
-    }
+  if (context.status === 'affiliation-renewal-needed') {
+    return { status: context.status, schoolYear: schoolYear.schoolYear }
   }
+  const affiliation = context.studentAffiliation
 
   const weekday = weekdayForSchoolDate(schoolDate)
   const [standardEntries, activeChanges] = await Promise.all([
@@ -257,7 +247,7 @@ async function buildReadyLayerState({
   const changesByLayer = new Map(
     activeChanges
       .filter((change) => change.periodNumber === selectedPeriod)
-      .map((change) => [change.targetScopeType, change]),
+      .map((change) => [change.targetScope.type, change]),
   )
 
   let finalDailyLesson: Extract<

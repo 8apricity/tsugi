@@ -1,4 +1,15 @@
 // Domain-local seams share storage implementations without sharing caller interfaces.
+import type { StudentOperationalContextStore } from './studentOperationalContext'
+import { targetScopeValue } from './targetScopeBoundary'
+import {
+  studentAffiliationIncludesTargetScope,
+  targetScopesEqual,
+  type TargetScope,
+  type TargetScopeType,
+} from './targetScopePolicy'
+
+export type { TargetScope, TargetScopeType } from './targetScopePolicy'
+
 export type VerificationCodeRequestRecord = {
   emailVerificationCodeId?: string
   schoolEmail: string
@@ -94,8 +105,6 @@ export type StandardTimetableEntry =
   | PeriodStandardTimetableEntry
   | FloatingStandardTimetableEntry
 
-export type TargetScopeType = 'grade' | 'class' | 'track' | 'student'
-
 export type FloatingLessonReferenceLabel = {
   floatingLessonReferenceLabelId: string
   schoolYear: number
@@ -116,12 +125,11 @@ export type TimetableLayerKey = {
   periodNumber: number
 }
 
-export type ActiveTimetableChange = TimetableLayerKey & {
+export type ActiveTimetableChange = Omit<TimetableLayerKey, 'targetScopeType'> & {
   sourceId: string
   sharedInformationItemId: string
   latestChangeId: string
-  schoolYear: number
-  targetScopeValue: string
+  targetScope: TargetScope
   replacement: TimetableChangeReplacement
   changedByStudentAccountId: string
   changedAt: number
@@ -156,13 +164,12 @@ export type HistoricalTimetableChangeReplacement =
       referenceLabel: string
     }
 
-export type HistoricalTimetableChange = TimetableLayerKey & {
+export type HistoricalTimetableChange = Omit<TimetableLayerKey, 'targetScopeType'> & {
   sharedInformationChangeId: string
   sharedInformationItemId: string
   changeKind: 'add' | 'update' | 'remove'
   sourceType: 'direct' | 'proposal'
-  schoolYear: number
-  targetScopeValue: string
+  targetScope: TargetScope
   primaryActorDisplayName: string
   changedAt: number
   precedingChangeId: string | null
@@ -236,17 +243,12 @@ export type StudentAffiliationSetupStore = {
   ): Promise<StudentAccount>
 }
 
-export type DailyPlanStore = {
-  findCurrentSchoolYear(): Promise<SchoolYearRecord | null>
+export type DailyPlanStore = StudentOperationalContextStore & {
   findSchoolYearClassById(
     classId: string,
     schoolYear: number,
   ): Promise<SchoolYearClassRecord | null>
   findTrackById(trackId: string): Promise<TrackRecord | null>
-  findCurrentStudentAffiliation(
-    studentAccountId: string,
-    schoolYear: number,
-  ): Promise<StudentAffiliation | null>
   listStandardTimetableEntriesForWeekday(
     classId: string,
     trackId: string,
@@ -275,12 +277,7 @@ export type DailyPlanStore = {
   ): Promise<ActiveTimetableChange[]>
 }
 
-export type DirectTimetableChangeStore = {
-  findCurrentSchoolYear(): Promise<SchoolYearRecord | null>
-  findCurrentStudentAffiliation(
-    studentAccountId: string,
-    schoolYear: number,
-  ): Promise<StudentAffiliation | null>
+export type DirectTimetableChangeStore = StudentOperationalContextStore & {
   commitDirectTimetableChanges(
     changes: DirectTimetableChangeOperation[],
   ): Promise<
@@ -310,9 +307,10 @@ export type DirectTimetableChangeStore = {
 }
 
 export type TimetableChangeHistoryStore = {
-  listTimetableChangeHistory(input: TimetableLayerKey & {
-    schoolYear: number
-    targetScopeValue: string
+  listTimetableChangeHistory(input: {
+    targetScope: TargetScope
+    changeDate: string
+    periodNumber: number
   }): Promise<HistoricalTimetableChange[]>
   listTimetableChangeItemHistoryByChangeId(
     sharedInformationChangeId: string,
@@ -647,17 +645,9 @@ export class InMemoryPersistenceAdapters
   ) {
     return this.activeTimetableChanges.filter((change) => {
       if (change.changeDate < start || change.changeDate > end) return false
-      if (change.schoolYear !== affiliation.schoolYear) return false
-
-      return (
-        (change.targetScopeType === 'grade' &&
-          change.targetScopeValue === String(affiliation.grade)) ||
-        (change.targetScopeType === 'class' &&
-          change.targetScopeValue === affiliation.classId) ||
-        (change.targetScopeType === 'track' &&
-          change.targetScopeValue === affiliation.trackId) ||
-        (change.targetScopeType === 'student' &&
-          change.targetScopeValue === affiliation.studentAccountId)
+      return studentAffiliationIncludesTargetScope(
+        affiliation,
+        change.targetScope,
       )
     })
   }
@@ -692,13 +682,13 @@ export class InMemoryPersistenceAdapters
             (candidate) => candidate.sharedInformationItemId === change.sharedInformationItemId,
           )
         : this.activeTimetableChanges.find(
-            (candidate) => activeTimetableChangeSlotKey(candidate) === activeTimetableChangeSlotKey(change),
+            (candidate) => sameTimetableChangeSlot(candidate, change),
           )
         return change.changeKind === 'add'
           ? !!active
           : !active ||
             active.latestChangeId !== change.expectedLatestChangeId ||
-            activeTimetableChangeSlotKey(active) !== activeTimetableChangeSlotKey(change)
+            !sameTimetableChangeSlot(active, change)
       })
       .map((change) => change.sourceId)
     if (conflictingSourceIds.length > 0) {
@@ -726,15 +716,14 @@ export class InMemoryPersistenceAdapters
     }
   }
 
-  async listTimetableChangeHistory(input: TimetableLayerKey & {
-    schoolYear: number
-    targetScopeValue: string
+  async listTimetableChangeHistory(input: {
+    targetScope: TargetScope
+    changeDate: string
+    periodNumber: number
   }) {
     return [...this.directTimetableChangeOperations.values()]
       .filter((change) =>
-        change.schoolYear === input.schoolYear &&
-        change.targetScopeType === input.targetScopeType &&
-        change.targetScopeValue === input.targetScopeValue &&
+        targetScopesEqual(change.targetScope, input.targetScope) &&
         change.changeDate === input.changeDate &&
         change.periodNumber === input.periodNumber)
       .map((change) => this.mapHistoricalTimetableChange(change))
@@ -780,9 +769,7 @@ export class InMemoryPersistenceAdapters
       sharedInformationItemId: change.sharedInformationItemId,
       changeKind: change.changeKind,
       sourceType: 'direct',
-      schoolYear: change.schoolYear,
-      targetScopeType: change.targetScopeType,
-      targetScopeValue: change.targetScopeValue,
+      targetScope: change.targetScope,
       changeDate: change.changeDate,
       periodNumber: change.periodNumber,
       primaryActorDisplayName: this.studentAccounts.find(
@@ -1583,10 +1570,12 @@ export class D1PersistenceAdapters
          join target_scope_parts p on p.target_scope_id = s.target_scope_id
          join timetable_change_snapshots t
            on t.timetable_change_snapshot_id = i.current_timetable_change_snapshot_id
-         join shared_information_changes c
-           on c.shared_information_change_id = i.latest_change_id
-         where i.kind = 'timetable_change' and i.removed_at is null
-           and s.school_year = ? and t.change_date between ? and ?
+          join shared_information_changes c
+            on c.shared_information_change_id = i.latest_change_id
+          where i.kind = 'timetable_change' and i.removed_at is null
+            and (select count(*) from target_scope_parts scope_part_count
+                 where scope_part_count.target_scope_id = s.target_scope_id) = 1
+            and s.school_year = ? and t.change_date between ? and ?
            and ((p.scope_type = 'grade' and p.grade = ?)
              or (p.scope_type = 'class' and p.class_id = ?)
              or (p.scope_type = 'track' and p.track_id = ?)
@@ -1692,8 +1681,8 @@ export class D1PersistenceAdapters
         const targetScopeId = `${change.sourceId}:scope`
         const part = targetScopeColumns(change)
         statements.push(
-          this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.schoolYear, createdAt),
-          this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScopeType, part.grade, part.classId, part.trackId, part.studentAccountId),
+          this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.targetScope.schoolYear, createdAt),
+          this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScope.type, part.grade, part.classId, part.trackId, part.studentAccountId),
           this.db.prepare(`insert into timetable_change_snapshots (timetable_change_snapshot_id, change_date, period_number, replacement_type, replacement_lesson_name, reference_weekday, reference_period_number, reference_label, floating_lesson_reference_label_id, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(...snapshotValues),
           this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_timetable_change_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'timetable_change', ?, null, ?, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
           this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, timetable_change_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
@@ -1788,9 +1777,10 @@ export class D1PersistenceAdapters
     return { status: 'applied' as const, changes }
   }
 
-  async listTimetableChangeHistory(input: TimetableLayerKey & {
-    schoolYear: number
-    targetScopeValue: string
+  async listTimetableChangeHistory(input: {
+    targetScope: TargetScope
+    changeDate: string
+    periodNumber: number
   }) {
     return this.queryTimetableChangeHistory(
       `s.school_year = ? and p.scope_type = ?
@@ -1798,9 +1788,9 @@ export class D1PersistenceAdapters
                     p.student_account_id) = ?
        and slot.change_date = ? and slot.period_number = ?`,
       [
-        input.schoolYear,
-        input.targetScopeType,
-        input.targetScopeValue,
+        input.targetScope.schoolYear,
+        input.targetScope.type,
+        targetScopeValue(input.targetScope),
         input.changeDate,
         input.periodNumber,
       ],
@@ -1855,7 +1845,10 @@ export class D1PersistenceAdapters
          left join floating_lesson_reference_labels label
            on label.floating_lesson_reference_label_id =
              snapshot.floating_lesson_reference_label_id
-         where i.kind = 'timetable_change' and ${predicate}`,
+          where i.kind = 'timetable_change'
+            and (select count(*) from target_scope_parts scope_part_count
+                 where scope_part_count.target_scope_id = s.target_scope_id) = 1
+            and ${predicate}`,
       )
       .bind(...values)
       .all<HistoricalTimetableChangeRow>()
@@ -2285,17 +2278,39 @@ function mapFloatingStandardTimetableEntryRow(
   }
 }
 
+function mapTargetScopeRow(
+  row: Pick<
+    ActiveTimetableChangeRow,
+    | 'school_year'
+    | 'scope_type'
+    | 'grade'
+    | 'class_id'
+    | 'track_id'
+    | 'student_account_id'
+  >,
+): TargetScope {
+  if (row.scope_type === 'grade' && row.grade !== null) {
+    return { type: 'grade', schoolYear: row.school_year, grade: row.grade }
+  }
+  if (row.scope_type === 'class' && row.class_id !== null) {
+    return { type: 'class', schoolYear: row.school_year, classId: row.class_id }
+  }
+  if (row.scope_type === 'track' && row.track_id !== null) {
+    return { type: 'track', schoolYear: row.school_year, trackId: row.track_id }
+  }
+  if (row.scope_type === 'student' && row.student_account_id !== null) {
+    return {
+      type: 'student',
+      schoolYear: row.school_year,
+      studentAccountId: row.student_account_id,
+    }
+  }
+  throw new Error('invalid single-part Target Scope')
+}
+
 function mapActiveTimetableChangeRow(
   row: ActiveTimetableChangeRow,
 ): ActiveTimetableChange {
-  const targetScopeValue =
-    row.scope_type === 'grade'
-      ? String(row.grade)
-      : row.scope_type === 'class'
-        ? String(row.class_id)
-        : row.scope_type === 'track'
-          ? String(row.track_id)
-          : String(row.student_account_id)
   let replacement: TimetableChangeReplacement
 
   if (row.replacement_type === 'lesson_name') {
@@ -2320,9 +2335,7 @@ function mapActiveTimetableChangeRow(
     sourceId: row.source_id,
     sharedInformationItemId: row.shared_information_item_id,
     latestChangeId: row.shared_information_change_id,
-    schoolYear: row.school_year,
-    targetScopeType: row.scope_type,
-    targetScopeValue,
+    targetScope: mapTargetScopeRow(row),
     changeDate: row.change_date,
     periodNumber: row.period_number,
     replacement,
@@ -2334,13 +2347,6 @@ function mapActiveTimetableChangeRow(
 function mapHistoricalTimetableChangeRow(
   row: HistoricalTimetableChangeRow,
 ): HistoricalTimetableChange {
-  const targetScopeValue = row.scope_type === 'grade'
-    ? String(row.grade)
-    : row.scope_type === 'class'
-      ? String(row.class_id)
-      : row.scope_type === 'track'
-        ? String(row.track_id)
-        : String(row.student_account_id)
   let replacement: HistoricalTimetableChangeReplacement | null = null
   if (row.replacement_type === 'lesson_name') {
     replacement = {
@@ -2368,9 +2374,7 @@ function mapHistoricalTimetableChangeRow(
     sharedInformationItemId: row.shared_information_item_id,
     changeKind: row.change_kind,
     sourceType: row.source_type,
-    schoolYear: row.school_year,
-    targetScopeType: row.scope_type,
-    targetScopeValue,
+    targetScope: mapTargetScopeRow(row),
     changeDate: row.change_date,
     periodNumber: row.period_number,
     primaryActorDisplayName: row.display_name,
@@ -2381,26 +2385,36 @@ function mapHistoricalTimetableChangeRow(
 }
 
 function targetScopeColumns(change: ActiveTimetableChange) {
+  const { targetScope } = change
   return {
-    grade: change.targetScopeType === 'grade' ? Number(change.targetScopeValue) : null,
-    classId: change.targetScopeType === 'class' ? change.targetScopeValue : null,
-    trackId: change.targetScopeType === 'track' ? change.targetScopeValue : null,
+    grade: targetScope.type === 'grade' ? targetScope.grade : null,
+    classId: targetScope.type === 'class' ? targetScope.classId : null,
+    trackId: targetScope.type === 'track' ? targetScope.trackId : null,
     studentAccountId:
-      change.targetScopeType === 'student' ? change.targetScopeValue : null,
+      targetScope.type === 'student' ? targetScope.studentAccountId : null,
   }
 }
 
 function activeTimetableChangeSlotKey(change: Pick<
   ActiveTimetableChange,
-  'schoolYear' | 'targetScopeType' | 'targetScopeValue' | 'changeDate' | 'periodNumber'
+  'targetScope' | 'changeDate' | 'periodNumber'
 >) {
   return [
-    change.schoolYear,
-    change.targetScopeType,
-    change.targetScopeValue,
+    change.targetScope.schoolYear,
+    change.targetScope.type,
+    targetScopeValue(change.targetScope),
     change.changeDate,
     change.periodNumber,
   ].join(':')
+}
+
+function sameTimetableChangeSlot(
+  left: Pick<ActiveTimetableChange, 'targetScope' | 'changeDate' | 'periodNumber'>,
+  right: Pick<ActiveTimetableChange, 'targetScope' | 'changeDate' | 'periodNumber'>,
+) {
+  return targetScopesEqual(left.targetScope, right.targetScope) &&
+    left.changeDate === right.changeDate &&
+    left.periodNumber === right.periodNumber
 }
 
 function sameDirectChangeBase(
@@ -2409,9 +2423,7 @@ function sameDirectChangeBase(
 ) {
   return (
     left.sourceId === right.sourceId &&
-    left.schoolYear === right.schoolYear &&
-    left.targetScopeType === right.targetScopeType &&
-    left.targetScopeValue === right.targetScopeValue &&
+    targetScopesEqual(left.targetScope, right.targetScope) &&
     left.changeDate === right.changeDate &&
     left.periodNumber === right.periodNumber &&
     left.changedByStudentAccountId === right.changedByStudentAccountId

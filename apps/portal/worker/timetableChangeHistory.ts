@@ -3,11 +3,15 @@ import type {
   HistoricalTimetableChange,
   HistoricalTimetableChangeReplacement,
   StudentAccountAccessStore,
-  StudentAffiliation,
-  TargetScopeType,
   TimetableChangeHistoryStore,
 } from './persistence'
-import { readStudentSession } from './studentAccountAccess'
+import { resolveStudentOperationalContext } from './studentOperationalContext'
+import { targetScopeValue } from './targetScopeBoundary'
+import {
+  isTargetScopeType,
+  studentCanViewTargetScopeNamedAttribution,
+  targetScopeForStudentAffiliation,
+} from './targetScopePolicy'
 import { isValidSchoolDate } from './timetable'
 
 export type ProposalHistoryParticipants = {
@@ -18,7 +22,7 @@ export type ProposalHistoryParticipants = {
 
 export type TimetableChangeHistoryEntry = Omit<
   HistoricalTimetableChange,
-  'replacement' | 'schoolYear' | 'targetScopeType' | 'targetScopeValue' |
+  'replacement' | 'targetScope' |
   'changeDate' | 'periodNumber' | 'precedingChangeId'
 > & {
   before: HistoricalTimetableChangeReplacement | null
@@ -68,20 +72,18 @@ export async function readTimetableChangeHistory({
   ) {
     return { status: 'invalid-selection' as const }
   }
-  const targetScopeValue = affiliationScopeValue(
+  const targetScope = targetScopeForStudentAffiliation(
     access.affiliation,
     targetScopeType,
   )
   const changes = await historyStore.listTimetableChangeHistory({
-    schoolYear: access.schoolYear.schoolYear,
-    targetScopeType,
-    targetScopeValue,
+    targetScope,
     changeDate,
     periodNumber: selectedPeriod,
   })
   return {
     status: 'ready' as const,
-    targetScope: { type: targetScopeType, value: targetScopeValue },
+    targetScope: { type: targetScope.type, value: targetScopeValue(targetScope) },
     changeDate,
     periodNumber: selectedPeriod,
     entries: reconstructTransitions(changes),
@@ -112,7 +114,10 @@ export async function readDirectTimetableChangeDetail({
   if (
     !selected ||
     selected.sourceType !== 'direct' ||
-    !affiliationIncludes(access.affiliation, selected)
+    !studentCanViewTargetScopeNamedAttribution(
+      access.affiliation,
+      selected.targetScope,
+    )
   ) {
     return { status: 'not-found' as const }
   }
@@ -123,8 +128,8 @@ export async function readDirectTimetableChangeDetail({
     status: 'ready' as const,
     ...entry,
     targetScope: {
-      type: selected.targetScopeType,
-      value: selected.targetScopeValue,
+      type: selected.targetScope.type,
+      value: targetScopeValue(selected.targetScope),
     },
     changeDate: selected.changeDate,
     periodNumber: selected.periodNumber,
@@ -207,50 +212,25 @@ async function currentHistoryAccess({
   studentAccountStore,
   dailyPlanStore,
 }: Omit<HistoryAccess, 'historyStore'>) {
-  const session = await readStudentSession({
+  const context = await resolveStudentOperationalContext({
     sessionToken,
     now,
-    store: studentAccountStore,
+    studentAccountStore,
+    contextStore: dailyPlanStore,
   })
-  if (session.status === 'unauthenticated') return session
-  const schoolYear = await dailyPlanStore.findCurrentSchoolYear()
-  if (!schoolYear) return { status: 'unavailable' as const }
-  const affiliation = await dailyPlanStore.findCurrentStudentAffiliation(
-    session.studentAccount.studentAccountId,
-    schoolYear.schoolYear,
-  )
-  if (!affiliation) {
+  if (context.status === 'unauthenticated') return context
+  if (context.status === 'school-year-unavailable') {
+    return { status: 'unavailable' as const }
+  }
+  if (context.status === 'affiliation-renewal-needed') {
     return {
-      status: 'affiliation-renewal-needed' as const,
-      schoolYear: schoolYear.schoolYear,
+      status: context.status,
+      schoolYear: context.currentSchoolYear.schoolYear,
     }
   }
-  return { status: 'ready' as const, schoolYear, affiliation }
-}
-
-function affiliationIncludes(
-  affiliation: StudentAffiliation,
-  change: Pick<
-    HistoricalTimetableChange,
-    'schoolYear' | 'targetScopeType' | 'targetScopeValue'
-  >,
-) {
-  return change.schoolYear === affiliation.schoolYear &&
-    affiliationScopeValue(affiliation, change.targetScopeType) ===
-      change.targetScopeValue
-}
-
-function affiliationScopeValue(
-  affiliation: StudentAffiliation,
-  targetScopeType: TargetScopeType,
-) {
-  if (targetScopeType === 'grade') return String(affiliation.grade)
-  if (targetScopeType === 'class') return affiliation.classId
-  if (targetScopeType === 'track') return affiliation.trackId
-  return affiliation.studentAccountId
-}
-
-function isTargetScopeType(value: string | null): value is TargetScopeType {
-  return value === 'grade' || value === 'class' || value === 'track' ||
-    value === 'student'
+  return {
+    status: 'ready' as const,
+    schoolYear: context.currentSchoolYear,
+    affiliation: context.studentAffiliation,
+  }
 }

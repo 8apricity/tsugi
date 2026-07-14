@@ -1328,6 +1328,45 @@ describe('Timetable Change Edit History API', () => {
 })
 
 describe('Timetable Layer read API', () => {
+  it('keeps invalid selection precedence over Affiliation Renewal', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2025-2-3-humanities-1',
+    )
+
+    const response = await readTimetableChangeLayers(
+      env,
+      cookie,
+      '2026-02-31',
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      status: 'invalid-selection',
+    })
+  })
+
+  it('keeps invalid range precedence over Affiliation Renewal', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2025-2-3-humanities-1',
+    )
+
+    const response = await readTimetableChangeLayerRange(
+      env,
+      cookie,
+      '2026-02-31',
+      '2026-03-01',
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      status: 'invalid-selection',
+    })
+  })
+
   it('returns every period for a five-day selection window', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(
@@ -1908,6 +1947,41 @@ describe('Daily Plan read API', () => {
     )
 
     const response = await readDailyPlan(env, cookie, '2026-02-31')
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      status: 'invalid-date',
+    })
+  })
+
+  it('keeps invalid date precedence over Affiliation Renewal', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2025-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-02-31')
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      status: 'invalid-date',
+    })
+  })
+
+  it('keeps invalid date range precedence over Affiliation Renewal', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2025-2-3-humanities-1',
+    )
+
+    const response = await readDailyPlans(
+      env,
+      cookie,
+      '2026-02-31',
+      '2026-03-01',
+    )
 
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual({

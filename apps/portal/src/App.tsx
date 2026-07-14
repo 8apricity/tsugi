@@ -24,6 +24,7 @@ import {
   type TimetableLayerKey,
   type TimetableReplacement,
 } from "./timetableEditorClient";
+import { createDirectTimetableChangeTransport } from "./timetableSubmissionTransport";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -188,7 +189,10 @@ function App() {
   const [completedPlaceholderTaskIds, setCompletedPlaceholderTaskIds] =
     useState<Set<string>>(() => new Set());
   const [timetableEditorClient] = useState(() =>
-    createTimetableEditorClient({ storage: window.localStorage }),
+    createTimetableEditorClient({
+      storage: window.localStorage,
+      submitDirectTimetableChanges: createDirectTimetableChangeTransport(),
+    }),
   );
   const timetableLayerCacheRef = useRef(
     new TimetableLayerMemoryCache<TimetableLayerState>(),
@@ -774,7 +778,7 @@ function App() {
     setVerificationCode("");
     setSetupOptions(null);
     dailyPlanClient.reset();
-    timetableEditorClient.discard();
+    timetableEditorClient.reset();
     timetableLayerCacheRef.current.clear();
     setTimetableEditorForm(null);
     setTimetableLayerDialog(null);
@@ -835,6 +839,7 @@ function App() {
   function openLayerReplacement(targetScopeType: TargetScopeType) {
     if (
       !timetableEditor.editing ||
+      timetableEditor.submitting ||
       !timetableLayerDialog ||
       timetableLayerDialog.state.status !== "ready"
     )
@@ -919,7 +924,7 @@ function App() {
   }
 
   function planLayerRemoval(targetScopeType: TargetScopeType) {
-    if (!timetableLayerDialog) return;
+    if (!timetableLayerDialog || timetableEditor.submitting) return;
     const result = timetableEditorClient.removeDesiredState({
       targetScopeType,
       changeDate: timetableLayerDialog.schoolDate,
@@ -939,7 +944,7 @@ function App() {
   }
 
   function planTimetableRemoval() {
-    if (!timetableEditorForm) return;
+    if (!timetableEditorForm || timetableEditor.submitting) return;
     const result = timetableEditorClient.removeDesiredState({
       targetScopeType: timetableEditorForm.targetScopeType,
       changeDate: timetableEditorForm.changeDate,
@@ -994,7 +999,7 @@ function App() {
 
   function saveTimetableDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!timetableEditorForm) return;
+    if (!timetableEditorForm || timetableEditor.submitting) return;
     let replacement = timetableEditorForm.replacement;
     if (replacement.type === "lesson_name") {
       replacement = normalizeDirectLessonReplacement(replacement.lessonName);
@@ -1026,86 +1031,120 @@ function App() {
     setTimetableEditorMessage(null);
   }
 
+  async function refreshSubmittedTimetableLayers(
+    keys: readonly TimetableLayerKey[],
+    signal: AbortSignal,
+  ) {
+    const uniqueSlots = [
+      ...new Map(
+        keys.map((key) => [
+          `${key.changeDate}:${key.periodNumber}`,
+          key,
+        ]),
+      ).values(),
+    ];
+    if (uniqueSlots.length === 0) {
+      throw new Error("no Timetable Layer keys to refresh");
+    }
+    const states = await Promise.all(
+      uniqueSlots.map(async ({ changeDate, periodNumber }) => {
+        const response = await fetch(
+          `/api/timetable-changes/layers?date=${encodeURIComponent(
+            changeDate,
+          )}&period=${periodNumber}`,
+          { signal },
+        );
+        if (!response.ok) throw new Error("Timetable Layers unavailable");
+        const state = (await response.json()) as TimetableLayerState;
+        if (state.status !== "ready") {
+          throw new Error("invalid Timetable Layer response");
+        }
+        return state;
+      }),
+    );
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    timetableLayerCacheRef.current.store(states);
+    timetableEditorClient.reconcileLayerStates(states);
+    setTimetableLayerDialog((current) => {
+      if (!current) return current;
+      const state = states.find(
+        (candidate) =>
+          candidate.schoolDate === current.schoolDate &&
+          candidate.periodNumber === current.periodNumber,
+      );
+      return state ? { ...current, state } : current;
+    });
+  }
+
   async function commitTimetableDrafts() {
-    if (timetableEditor.conflictCount > 0) {
+    const result = await timetableEditorClient.submitCurrentBatch({
+      confirmSubmission: ({ changes }) => {
+        const summary = changes
+          .map(
+            (draft) =>
+              `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement)}`,
+          )
+          .join("\n");
+        const confirmed = window.confirm(
+          `${changes.length}件をDirect Changeとして確定します。\n\n${summary}`,
+        );
+        if (confirmed) setTimetableEditorMessage("確定しています。");
+        return confirmed;
+      },
+      applyFreshness: async (effect) => {
+        timetableLayerCacheRef.current.clear();
+        await refreshSubmittedTimetableLayers(
+          effect.type === "applied"
+            ? effect.affectedKeys
+            : effect.conflictingKeys,
+          effect.signal,
+        );
+        if (effect.type === "remote-conflict") return "refreshed" as const;
+        const dailyPlanState = await dailyPlanClient.reload();
+        if (effect.signal.aborted) return "stale" as const;
+        return dailyPlanState.status === "error"
+          ? "stale" as const
+          : "refreshed" as const;
+      },
+    });
+
+    if (result.status === "empty" || result.status === "cancelled") {
+      setTimetableEditorMessage(null);
+      return;
+    }
+    if (result.status === "local-conflict") {
       setTimetableEditorMessage(
         "競合する下書きを取り消すか、現在の状態から編集し直してください。",
       );
       return;
     }
-    const payload = timetableEditorClient.toCommitPayload();
-    if (payload.changes.length === 0) return;
-    const summary = payload.changes
-      .map(
-        (draft) =>
-          `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement!)}`,
-      )
-      .join("\n");
-    if (
-      !window.confirm(
-        `${payload.changes.length}件をDirect Changeとして確定します。\n\n${summary}`,
-      )
-    )
-      return;
-
-    setTimetableEditorMessage("確定しています。");
-    let response: Response;
-    try {
-      response = await fetch("/api/timetable-changes/direct", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      timetableEditorClient.commitFailed();
+    if (result.status === "already-submitting") return;
+    if (result.status === "network-error") {
       setTimetableEditorMessage(
         "通信できませんでした。下書きは保存されています。",
       );
       return;
     }
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as
-        | {
-            status?: string;
-            conflictingKeys?: TimetableLayerKey[];
-          }
-        | null;
-      timetableEditorClient.commitFailed(
-        body?.conflictingKeys ?? [],
-        body?.status === "idempotency-conflict",
-      );
-      if (response.status === 409) {
-        timetableLayerCacheRef.current.clear();
-        setTimetableLayerDialog((current) =>
-          current
-            ? {
-                ...current,
-                requestId: current.requestId + 1,
-                state: { status: "loading" },
-              }
-            : current,
-        );
-      }
+    if (
+      result.status === "remote-conflict" ||
+      result.status === "idempotency-conflict"
+    ) {
       setTimetableEditorMessage(
-        response.status === 409
-          ? "Active Timetable Changeが更新されています。競合する下書きを確認してください。"
-          : "変更を確定できませんでした。",
+        result.freshness === "stale"
+          ? "Active Timetable Changeが更新されています。表示を再読み込みして競合する下書きを確認してください。"
+          : "Active Timetable Changeが更新されています。競合する下書きを確認してください。",
       );
       return;
     }
-    timetableEditorClient.commitSucceeded();
-    timetableLayerCacheRef.current.clear();
-    setTimetableEditorMessage(null);
-    setTimetableLayerDialog((current) =>
-      current
-        ? {
-            ...current,
-            requestId: current.requestId + 1,
-            state: { status: "loading" },
-          }
-        : current,
-    );
-    await dailyPlanClient.reload();
+    if (result.status === "applied") {
+      setTimetableEditorMessage(
+        result.freshness === "stale"
+          ? "変更は確定しましたが、表示を更新できませんでした。"
+          : null,
+      );
+      return;
+    }
+    setTimetableEditorMessage("変更を確定できませんでした。");
   }
 
   async function submitInitialSetup(event: FormEvent<HTMLFormElement>) {
@@ -1448,6 +1487,7 @@ function App() {
                     className="button-secondary"
                     type="button"
                     disabled={
+                      timetableEditor.submitting ||
                       timetableEditor.drafts.length === 0 ||
                       timetableEditor.conflictCount > 0
                     }
@@ -1459,6 +1499,7 @@ function App() {
                 <button
                   className={`icon-button edit-mode-button${timetableEditor.editing ? " active" : ""}`}
                   type="button"
+                  disabled={timetableEditor.submitting}
                   aria-label={
                     timetableEditor.editing
                       ? "編集モードを終了"
@@ -1745,6 +1786,7 @@ function App() {
                       );
                       const editable =
                         timetableEditor.editing &&
+                        !timetableEditor.submitting &&
                         (!!existingDraft ||
                           (!!serverLayer && !timetableEditor.atLimit));
                       return (
@@ -1777,7 +1819,8 @@ function App() {
                             : undefined
                         }
                         menuActions={[
-                          ...(timetableEditor.editing ? [{
+                          ...(timetableEditor.editing &&
+                            !timetableEditor.submitting ? [{
                             label: serverLayer?.state === "active"
                               ? "更新"
                               : "追加",
@@ -1787,6 +1830,7 @@ function App() {
                             disabled: !editable,
                           }] : []),
                           ...(timetableEditor.editing &&
+                            !timetableEditor.submitting &&
                             serverLayer?.state === "active" ? [{
                               label: "削除",
                               onClick: () => planLayerRemoval(
@@ -1986,6 +2030,7 @@ function App() {
                       <button
                         className="button-secondary"
                         type="button"
+                        disabled={timetableEditor.submitting}
                         onClick={() => {
                           timetableEditorClient.restoreServerState(
                             timetableEditorForm.targetScopeType,
@@ -2008,12 +2053,17 @@ function App() {
                       <button
                         className="replacement-remove-button"
                         type="button"
+                        disabled={timetableEditor.submitting}
                         onClick={planTimetableRemoval}
                       >
                         Timetable Changeを削除
                       </button>
                     ) : null}
-                    <button className="button-primary" type="submit">
+                    <button
+                      className="button-primary"
+                      type="submit"
+                      disabled={timetableEditor.submitting}
+                    >
                       下書きに保存
                     </button>
                   </footer>

@@ -1,9 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import {
-  createTimetableEditorClient,
+  createTimetableEditorClient as createEditorClient,
   normalizeDirectLessonReplacement,
+  type DirectTimetableSubmissionTransportResult,
   type TimetableLayerState,
 } from './timetableEditorClient'
+import { createDirectTimetableChangeTransport } from './timetableSubmissionTransport'
+
+type EditorOptions = Omit<
+  Parameters<typeof createEditorClient>[0],
+  'submitDirectTimetableChanges'
+> & {
+  submitDirectTimetableChanges?: Parameters<
+    typeof createEditorClient
+  >[0]['submitDirectTimetableChanges']
+}
+
+function createTimetableEditorClient(options: EditorOptions) {
+  return createEditorClient({
+    submitDirectTimetableChanges: async () => ({ status: 'rejected' }),
+    ...options,
+  })
+}
 
 function memoryStorage() {
   const values = new Map<string, string>()
@@ -132,14 +150,12 @@ describe('Timetable editor client', () => {
       periodNumber: 2,
       replacement: { type: 'cancelled' },
     })).toMatchObject({ status: 'saved' })
-    expect(editor.toCommitPayload().changes).toEqual([
-      expect.objectContaining({
-        changeKind: 'update',
-        sharedInformationItemId: 'item-1',
-        expectedLatestChangeId: 'change-1',
-        replacement: { type: 'cancelled' },
-      }),
-    ])
+    expect(editor.findDraft('track', '2026-07-10', 2)).toMatchObject({
+      changeKind: 'update',
+      sharedInformationItemId: 'item-1',
+      expectedLatestChangeId: 'change-1',
+      replacement: { type: 'cancelled' },
+    })
 
     expect(editor.setDesiredState({
       targetScopeType: 'track',
@@ -202,14 +218,9 @@ describe('Timetable editor client', () => {
       replacement: { type: 'lesson_name', lessonName: '化学' },
       conflicted: true,
     })
-    expect(restored.toCommitPayload().changes[0]).toMatchObject({
-      expectedLatestChangeId: 'change-1',
-      replacement: { type: 'lesson_name', lessonName: '化学' },
-    })
   })
 
-  it('keeps an idempotency conflict sticky until the draft is explicitly restored', () => {
-    const editor = createTimetableEditorClient({ storage: memoryStorage() })
+  it('keeps an idempotency conflict sticky until the draft is explicitly restored', async () => {
     const server = layerState([
       { targetScopeType: 'grade', state: 'unchanged' },
       { targetScopeType: 'class', state: 'unchanged' },
@@ -228,13 +239,28 @@ describe('Timetable editor client', () => {
       changeDate: '2026-07-10',
       periodNumber: 2,
     }
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+        fetcher: async () => Response.json({
+          status: 'idempotency-conflict',
+          conflictingKeys: [key],
+        }, { status: 409 }),
+      }),
+    })
     editor.reconcileLayerState(server)
     editor.setDesiredState({
       ...key,
       replacement: { type: 'lesson_name', lessonName: '化学' },
     })
 
-    editor.commitFailed([key], true)
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => 'refreshed' as const,
+    })).resolves.toEqual({
+      status: 'idempotency-conflict',
+      freshness: 'refreshed',
+    })
     editor.reconcileLayerState(server)
 
     expect(editor.getSnapshot()).toMatchObject({ conflictCount: 1 })
@@ -324,14 +350,9 @@ describe('Timetable editor client', () => {
       sharedInformationItemId: 'track-item',
       expectedLatestChangeId: 'track-change',
     })
-    expect(editor.toCommitPayload().changes).toEqual([
-      expect.objectContaining({
-        changeKind: 'remove',
-        sharedInformationItemId: 'track-item',
-        expectedLatestChangeId: 'track-change',
-      }),
-    ])
-    expect(editor.toCommitPayload().changes[0]).not.toHaveProperty('replacement')
+    expect(editor.findDraft('track', '2026-07-10', 2)).not.toHaveProperty(
+      'replacement',
+    )
 
     expect(editor.previewLayerState(server, () => null)).toMatchObject({
       layers: [
@@ -354,7 +375,7 @@ describe('Timetable editor client', () => {
       periodNumber: 2,
       replacement: { type: 'lesson_name', lessonName: '化学' },
     })).toMatchObject({ status: 'saved' })
-    expect(editor.toCommitPayload().changes[0]).toMatchObject({
+    expect(editor.findDraft('track', '2026-07-10', 2)).toMatchObject({
       changeKind: 'update',
       sharedInformationItemId: 'track-item',
       expectedLatestChangeId: 'track-change',
@@ -362,7 +383,7 @@ describe('Timetable editor client', () => {
     })
   })
 
-  it('persists, restores, cancels, and retains a remove draft through conflict', () => {
+  it('persists, restores, cancels, and retains a remove draft through conflict', async () => {
     const storage = memoryStorage()
     const server = layerState([
       { targetScopeType: 'grade', state: 'unchanged' },
@@ -383,16 +404,30 @@ describe('Timetable editor client', () => {
       targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 2,
     })
 
-    const restored = createTimetableEditorClient({ storage })
+    const key = {
+      targetScopeType: 'track' as const,
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+    }
+    const restored = createTimetableEditorClient({
+      storage,
+      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+        fetcher: async () => Response.json({
+          status: 'timetable-change-conflict',
+          conflictingKeys: [key],
+        }, { status: 409 }),
+      }),
+    })
     restored.reconcileLayerState(server)
     expect(restored.findDraft('track', '2026-07-10', 2)).toMatchObject({
       changeKind: 'remove',
       serverReplacement: { type: 'lesson_name', lessonName: '物理' },
       conflicted: false,
     })
-    restored.commitFailed([
-      { targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 2 },
-    ])
+    await restored.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => 'refreshed' as const,
+    })
     expect(restored.findDraft('track', '2026-07-10', 2)).toMatchObject({
       changeKind: 'remove',
       conflicted: true,
@@ -403,9 +438,14 @@ describe('Timetable editor client', () => {
     expect(restored.getSnapshot()).toMatchObject({ draftCount: 0, conflictCount: 0 })
   })
 
-  it('persists only safe draft data, restores it, cancels one draft, and retains drafts after failure', () => {
+  it('persists only safe draft data, restores it, cancels one draft, and retains drafts after network failure', async () => {
     const storage = memoryStorage()
-    const editor = createTimetableEditorClient({ storage })
+    const editor = createTimetableEditorClient({
+      storage,
+      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+        fetcher: async () => { throw new Error('offline') },
+      }),
+    })
     editor.reconcileLayerState(layerState())
     editor.setDesiredState({
       targetScopeType: 'student',
@@ -413,20 +453,17 @@ describe('Timetable editor client', () => {
       periodNumber: 4,
       replacement: { type: 'lesson_name', lessonName: '面談' },
     })
-    editor.commitFailed([
-      {
-        targetScopeType: 'student',
-        changeDate: '2026-07-11',
-        periodNumber: 4,
-      },
-    ])
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => 'refreshed' as const,
+    })).resolves.toEqual({ status: 'network-error' })
     expect(editor.getSnapshot()).toMatchObject({
       draftCount: 1,
       lastCommitFailed: true,
-      conflictCount: 1,
+      conflictCount: 0,
     })
     expect(editor.findDraft('student', '2026-07-11', 4)).toMatchObject({
-      conflicted: true,
+      conflicted: false,
     })
 
     const persisted = [...storage.values.values()].join('')
@@ -440,6 +477,379 @@ describe('Timetable editor client', () => {
 
     restored.restoreServerState('student', '2026-07-11', 4)
     expect(restored.getSnapshot()).toMatchObject({ draftCount: 0, draftDates: [] })
+  })
+
+  it('submits one immutable batch and refreshes after the applied state is published', async () => {
+    const events: string[] = []
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: async (payload) => {
+        events.push('transport')
+        expect(payload).toEqual({
+          changes: [{
+            changeKind: 'add',
+            sourceId: expect.any(String),
+            targetScopeType: 'track',
+            changeDate: '2026-07-10',
+            periodNumber: 2,
+            replacement: { type: 'cancelled' },
+          }],
+        })
+        return { status: 'applied' }
+      },
+    })
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: async (preview) => {
+        events.push('confirm')
+        expect(preview.changes).toHaveLength(1)
+        expect(Object.isFrozen(preview.changes)).toBe(true)
+        return true
+      },
+      applyFreshness: async (effect) => {
+        events.push(`freshness:${effect.type}`)
+        expect(effect).toMatchObject({
+          type: 'applied',
+          affectedKeys: [{
+            targetScopeType: 'track',
+            changeDate: '2026-07-10',
+            periodNumber: 2,
+          }],
+          signal: expect.any(AbortSignal),
+        })
+        expect(editor.getSnapshot()).toMatchObject({
+          draftCount: 0,
+          submitting: true,
+        })
+        return 'refreshed' as const
+      },
+    })).resolves.toEqual({ status: 'applied', freshness: 'refreshed' })
+    expect(events).toEqual(['confirm', 'transport', 'freshness:applied'])
+    expect(editor.getSnapshot().submitting).toBe(false)
+  })
+
+  it('locks draft mutation during submission and ignores a late response after reset', async () => {
+    let finishRequest!: (
+      response: DirectTimetableSubmissionTransportResult,
+    ) => void
+    const request = new Promise<DirectTimetableSubmissionTransportResult>((resolve) => {
+      finishRequest = resolve
+    })
+    let freshnessCalls = 0
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({
+      storage,
+      submitDirectTimetableChanges: async () => request,
+    })
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })
+    const submission = editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => {
+        freshnessCalls += 1
+        return 'refreshed' as const
+      },
+    })
+    await Promise.resolve()
+
+    expect(editor.getSnapshot().submitting).toBe(true)
+    expect([...storage.values.values()].join('')).not.toContain('submitting')
+    expect(editor.setDesiredState({
+      targetScopeType: 'class',
+      changeDate: '2026-07-11',
+      periodNumber: 3,
+      replacement: { type: 'cancelled' },
+    })).toEqual({ status: 'submission-in-progress' })
+    expect(editor.discard()).toEqual({ status: 'submission-in-progress' })
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => 'refreshed' as const,
+    })).resolves.toEqual({ status: 'already-submitting' })
+
+    editor.reset()
+    expect(editor.getSnapshot()).toMatchObject({
+      submitting: false,
+      draftCount: 0,
+      editing: false,
+    })
+    finishRequest({ status: 'applied' })
+    await expect(submission).resolves.toEqual({ status: 'cancelled' })
+    expect(freshnessCalls).toBe(0)
+    expect(editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'lesson_name', lessonName: '再編集' },
+    })).toMatchObject({ status: 'saved' })
+    expect(editor.findDraft('track', '2026-07-10', 2)).toMatchObject({
+      changeKind: 'add',
+    })
+  })
+
+  it('maps a remote Timetable Change conflict, keeps drafts, and refreshes layers', async () => {
+    const key = {
+      targetScopeType: 'track' as const,
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+    }
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+        fetcher: async () => Response.json({
+          status: 'timetable-change-conflict',
+          conflictingKeys: [key],
+        }, { status: 409 }),
+      }),
+    })
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({ ...key, replacement: { type: 'cancelled' } })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async (effect) => {
+        expect(effect).toMatchObject({
+          type: 'remote-conflict',
+          conflictingKeys: [key],
+          signal: expect.any(AbortSignal),
+        })
+        return 'refreshed' as const
+      },
+    })).resolves.toEqual({
+      status: 'remote-conflict',
+      freshness: 'refreshed',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      submitting: false,
+      draftCount: 1,
+      conflictCount: 1,
+      lastCommitFailed: true,
+      unreconciledDrafts: [key],
+    })
+  })
+
+  it('maps Affiliation Renewal without treating it as a Timetable Change conflict', async () => {
+    let freshnessCalls = 0
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+        fetcher: async () => Response.json({
+          status: 'affiliation-renewal-needed',
+          schoolYear: 2026,
+        }, { status: 409 }),
+      }),
+    })
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => {
+        freshnessCalls += 1
+        return 'refreshed' as const
+      },
+    })).resolves.toEqual({
+      status: 'affiliation-renewal-needed',
+      schoolYear: 2026,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      submitting: false,
+      draftCount: 1,
+      conflictCount: 0,
+      lastCommitFailed: true,
+    })
+    expect(freshnessCalls).toBe(0)
+  })
+
+  it('does not transport an empty, locally conflicted, or cancelled batch', async () => {
+    let transportCalls = 0
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: async () => {
+        transportCalls += 1
+        return { status: 'applied' }
+      },
+    })
+    const options = {
+      confirmSubmission: () => false,
+      applyFreshness: async () => 'refreshed' as const,
+    }
+    await expect(editor.submitCurrentBatch(options)).resolves.toEqual({
+      status: 'empty',
+    })
+
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })
+    await expect(editor.submitCurrentBatch(options)).resolves.toEqual({
+      status: 'cancelled',
+    })
+    editor.reconcileLayerState(layerState([{
+      targetScopeType: 'track',
+      state: 'active',
+      sharedInformationItemId: 'item-1',
+      latestChangeId: 'change-1',
+      replacement: { type: 'cancelled' },
+      changedAt: 1,
+    }]))
+    await expect(editor.submitCurrentBatch(options)).resolves.toEqual({
+      status: 'local-conflict',
+    })
+    expect(transportCalls).toBe(0)
+  })
+
+  it('unlocks and retains drafts when confirmation fails', async () => {
+    let transportCalls = 0
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: async () => {
+        transportCalls += 1
+        return { status: 'applied' }
+      },
+    })
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: async () => { throw new Error('dialog unavailable') },
+      applyFreshness: async () => 'refreshed' as const,
+    })).resolves.toEqual({ status: 'rejected' })
+    expect(editor.getSnapshot()).toMatchObject({
+      submitting: false,
+      draftCount: 1,
+      lastCommitFailed: false,
+    })
+    expect(transportCalls).toBe(0)
+    expect(editor.setDesiredState({
+      targetScopeType: 'class',
+      changeDate: '2026-07-11',
+      periodNumber: 3,
+      replacement: { type: 'cancelled' },
+    })).toMatchObject({ status: 'saved' })
+  })
+
+  it('does not apply freshness when reset runs after the server result is published', async () => {
+    let freshnessCalls = 0
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: async () => ({ status: 'applied' }),
+    })
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })
+    let reset = false
+    editor.subscribe(() => {
+      const state = editor.getSnapshot()
+      if (!reset && state.submitting && state.draftCount === 0) {
+        reset = true
+        editor.reset()
+      }
+    })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => {
+        freshnessCalls += 1
+        return 'refreshed' as const
+      },
+    })).resolves.toEqual({ status: 'cancelled' })
+    expect(freshnessCalls).toBe(0)
+    expect(editor.getSnapshot()).toMatchObject({
+      submitting: false,
+      draftCount: 0,
+      editing: false,
+    })
+  })
+
+  it('aborts in-progress freshness when reset invalidates the submission', async () => {
+    let freshnessStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      freshnessStarted = resolve
+    })
+    let finishFreshness!: (result: 'refreshed') => void
+    const freshness = new Promise<'refreshed'>((resolve) => {
+      finishFreshness = resolve
+    })
+    let freshnessSignal: AbortSignal | undefined
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: async () => ({ status: 'applied' }),
+    })
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })
+    const submission = editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async (effect) => {
+        freshnessSignal = effect.signal
+        freshnessStarted()
+        return freshness
+      },
+    })
+    await started
+
+    editor.reset()
+    expect(freshnessSignal?.aborted).toBe(true)
+    finishFreshness('refreshed')
+    await expect(submission).resolves.toEqual({ status: 'cancelled' })
+    expect(editor.getSnapshot()).toMatchObject({
+      submitting: false,
+      draftCount: 0,
+      editing: false,
+    })
+  })
+
+  it('keeps an applied result when freshness cannot be restored', async () => {
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: async () => ({ status: 'applied' }),
+    })
+    editor.reconcileLayerState(layerState())
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => { throw new Error('refresh failed') },
+    })).resolves.toEqual({ status: 'applied', freshness: 'stale' })
+    expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
   })
 
   it('limits new draft keys to 50 while allowing replacement and cancellation', () => {

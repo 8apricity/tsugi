@@ -76,6 +76,56 @@ export type TimetableLayerState = {
 type StorageLike = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>
 type DesiredStateInput = TimetableLayerKey & { replacement: TimetableReplacement }
 
+type TimetableSubmissionChangeBase = TimetableLayerKey & { sourceId: string }
+
+export type TimetableSubmissionChange = TimetableSubmissionChangeBase & (
+  | { changeKind: 'add'; replacement: Readonly<TimetableReplacement> }
+  | {
+      changeKind: 'update'
+      replacement: Readonly<TimetableReplacement>
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+    }
+  | {
+      changeKind: 'remove'
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+    }
+)
+
+export type TimetableSubmissionPreview = Readonly<{
+  changes: readonly Readonly<TimetableSubmissionChange>[]
+}>
+
+type TimetableSubmissionFreshnessInput =
+  | { type: 'applied'; affectedKeys: readonly TimetableLayerKey[] }
+  | { type: 'remote-conflict'; conflictingKeys: readonly TimetableLayerKey[] }
+
+export type TimetableSubmissionFreshnessEffect =
+  TimetableSubmissionFreshnessInput & { signal: AbortSignal }
+
+export type DirectTimetableSubmissionTransportResult =
+  | { status: 'applied' }
+  | {
+      status: 'remote-conflict' | 'idempotency-conflict'
+      conflictingKeys: readonly TimetableLayerKey[]
+    }
+  | { status: 'affiliation-renewal-needed'; schoolYear: number }
+  | { status: 'rejected' }
+
+export type SubmitDirectTimetableChanges = (
+  payload: Readonly<{ changes: readonly TimetableSubmissionChange[] }>,
+) => Promise<DirectTimetableSubmissionTransportResult>
+
+type SubmitCurrentBatchOptions = {
+  confirmSubmission(
+    preview: TimetableSubmissionPreview,
+  ): boolean | Promise<boolean>
+  applyFreshness(
+    effect: TimetableSubmissionFreshnessEffect,
+  ): 'refreshed' | 'stale' | Promise<'refreshed' | 'stale'>
+}
+
 const storageKey = 'tsugi:timetable-direct-add-drafts:v1'
 const maximumDraftKeys = 50
 
@@ -100,15 +150,20 @@ export function normalizeDirectLessonReplacement(
 export function createTimetableEditorClient({
   storage,
   createId = () => crypto.randomUUID(),
+  submitDirectTimetableChanges,
 }: {
   storage: StorageLike
   createId?: () => string
+  submitDirectTimetableChanges: SubmitDirectTimetableChanges
 }) {
   const restored = restore(storage)
   let editing = restored.editing
   let lastTargetScopeType = restored.lastTargetScopeType
   let drafts = restored.drafts
   let lastCommitFailed = false
+  let submitting = false
+  let lifecycleGeneration = 0
+  let activeFreshnessController: AbortController | null = null
   const loadedServerLayers = new Map<
     string,
     TimetableLayerState['layers'][number]
@@ -138,6 +193,7 @@ export function createTimetableEditorClient({
           periodNumber,
         })),
       lastCommitFailed,
+      submitting,
       draftDates: [...new Set(drafts.map((draft) => draft.changeDate))].sort(),
     }
   }
@@ -158,6 +214,58 @@ export function createTimetableEditorClient({
     return removed
   }
 
+  function commitPayload(batch: readonly TimetableChangeDraft[] = drafts) {
+    return {
+      changes: batch.map(toTimetableSubmissionChange),
+    }
+  }
+
+  function clearEditorState() {
+    editing = false
+    drafts = []
+    lastCommitFailed = false
+    conflictKeys.clear()
+    stickyConflictKeys.clear()
+    reconciledKeys.clear()
+    lastTargetScopeType = 'track'
+    storage.removeItem(storageKey)
+    snapshot = buildSnapshot()
+    listeners.forEach((listener) => listener())
+  }
+
+  function recordCommitFailure(
+    conflictingKeys: readonly TimetableLayerKey[] = [],
+    sticky = false,
+    refreshPending = false,
+  ) {
+    submitting = refreshPending
+    lastCommitFailed = true
+    conflictingKeys.forEach((key) => {
+      const serializedKey = draftKey(key)
+      conflictKeys.add(serializedKey)
+      if (sticky) stickyConflictKeys.add(serializedKey)
+      reconciledKeys.delete(serializedKey)
+    })
+    publish()
+  }
+
+  async function applyFreshnessSafely(
+    adapter: SubmitCurrentBatchOptions['applyFreshness'],
+    effect: TimetableSubmissionFreshnessInput,
+  ) {
+    const controller = new AbortController()
+    activeFreshnessController = controller
+    try {
+      return await adapter({ ...effect, signal: controller.signal })
+    } catch {
+      return 'stale' as const
+    } finally {
+      if (activeFreshnessController === controller) {
+        activeFreshnessController = null
+      }
+    }
+  }
+
   return {
     subscribe(listener: () => void) {
       listeners.add(listener)
@@ -167,23 +275,26 @@ export function createTimetableEditorClient({
       return snapshot
     },
     enterEditing() {
+      if (submitting) return { status: 'submission-in-progress' as const }
       editing = true
       publish()
+      return { status: 'editing' as const }
     },
     shouldConfirmExit() {
       return drafts.length > 0
     },
     discard() {
-      editing = false
-      drafts = []
-      lastCommitFailed = false
-      conflictKeys.clear()
-      stickyConflictKeys.clear()
-      reconciledKeys.clear()
-      lastTargetScopeType = 'track'
-      storage.removeItem(storageKey)
-      snapshot = buildSnapshot()
-      listeners.forEach((listener) => listener())
+      if (submitting) return { status: 'submission-in-progress' as const }
+      clearEditorState()
+      return { status: 'discarded' as const }
+    },
+    reset() {
+      lifecycleGeneration += 1
+      submitting = false
+      activeFreshnessController?.abort()
+      activeFreshnessController = null
+      loadedServerLayers.clear()
+      clearEditorState()
     },
     reconcileLayerState(state: TimetableLayerState) {
       applyLayerState(state)
@@ -194,6 +305,7 @@ export function createTimetableEditorClient({
       publish()
     },
     setDesiredState(input: DesiredStateInput) {
+      if (submitting) return { status: 'submission-in-progress' as const }
       const key = draftKey(input)
       const existing = drafts.find((draft) => draftKey(draft) === key)
       const serverLayer = loadedServerLayers.get(key)
@@ -242,6 +354,7 @@ export function createTimetableEditorClient({
       return { status: 'saved' as const, sourceId }
     },
     removeDesiredState(keyInput: TimetableLayerKey) {
+      if (submitting) return { status: 'submission-in-progress' as const }
       const { targetScopeType } = keyInput
       const key = draftKey(keyInput)
       const existing = drafts.find((draft) => draftKey(draft) === key)
@@ -276,6 +389,7 @@ export function createTimetableEditorClient({
       changeDate: string,
       periodNumber: number,
     ) {
+      if (submitting) return { status: 'submission-in-progress' as const }
       const key = draftKey({ targetScopeType, changeDate, periodNumber })
       if (removeDraftByKey(key)) {
         conflictKeys.delete(key)
@@ -357,40 +471,99 @@ export function createTimetableEditorClient({
         finalDailyLesson: hasDraft ? finalDailyLesson : state.finalDailyLesson,
       }
     },
-    toCommitPayload() {
-      return {
-        changes: drafts.map((draft) => ({
-          changeKind: draft.changeKind,
-          sourceId: draft.sourceId,
-          ...(draft.changeKind === 'update' || draft.changeKind === 'remove'
-            ? {
-                sharedInformationItemId: draft.sharedInformationItemId,
-                expectedLatestChangeId: draft.expectedLatestChangeId,
-              }
-            : {}),
-          targetScopeType: draft.targetScopeType,
-          changeDate: draft.changeDate,
-          periodNumber: draft.periodNumber,
-          ...(draft.changeKind === 'remove'
-            ? {}
-            : { replacement: draft.replacement }),
-        })),
-      }
-    },
-    commitFailed(
-      conflictingKeys: TimetableLayerKey[] = [],
-      sticky = false,
-    ) {
-      lastCommitFailed = true
-      conflictingKeys.forEach((key) => {
-        const serializedKey = draftKey(key)
-        conflictKeys.add(serializedKey)
-        if (sticky) stickyConflictKeys.add(serializedKey)
-        reconciledKeys.delete(serializedKey)
+    async submitCurrentBatch({
+      confirmSubmission,
+      applyFreshness,
+    }: SubmitCurrentBatchOptions) {
+      if (submitting) return { status: 'already-submitting' as const }
+      if (conflictKeys.size > 0) return { status: 'local-conflict' as const }
+      if (drafts.length === 0) return { status: 'empty' as const }
+
+      const generation = lifecycleGeneration
+      const batch = drafts.map((draft) => ({ ...draft }))
+      const payload = commitPayload(batch)
+      const preview = Object.freeze({
+        changes: Object.freeze(
+          payload.changes.map((change) => Object.freeze(change)),
+        ),
       })
+      submitting = true
       publish()
-    },
-    commitSucceeded() {
+
+      let confirmed: boolean
+      try {
+        confirmed = await confirmSubmission(preview)
+      } catch {
+        if (generation !== lifecycleGeneration) {
+          return { status: 'cancelled' as const }
+        }
+        submitting = false
+        publish()
+        return { status: 'rejected' as const }
+      }
+      if (generation !== lifecycleGeneration) {
+        return { status: 'cancelled' as const }
+      }
+      if (!confirmed) {
+        submitting = false
+        publish()
+        return { status: 'cancelled' as const }
+      }
+
+      let transportResult: DirectTimetableSubmissionTransportResult
+      try {
+        transportResult = await submitDirectTimetableChanges(payload)
+      } catch {
+        if (generation !== lifecycleGeneration) {
+          return { status: 'cancelled' as const }
+        }
+        submitting = false
+        lastCommitFailed = true
+        publish()
+        return { status: 'network-error' as const }
+      }
+      if (generation !== lifecycleGeneration) {
+        return { status: 'cancelled' as const }
+      }
+      if (transportResult.status !== 'applied') {
+        if (
+          transportResult.status === 'remote-conflict' ||
+          transportResult.status === 'idempotency-conflict'
+        ) {
+          const { conflictingKeys } = transportResult
+          const idempotencyConflict =
+            transportResult.status === 'idempotency-conflict'
+          recordCommitFailure(conflictingKeys, idempotencyConflict, true)
+          if (generation !== lifecycleGeneration) {
+            return { status: 'cancelled' as const }
+          }
+          const freshness = await applyFreshnessSafely(applyFreshness, {
+            type: 'remote-conflict',
+            conflictingKeys,
+          })
+          if (generation !== lifecycleGeneration) {
+            return { status: 'cancelled' as const }
+          }
+          submitting = false
+          publish()
+          return {
+            status: idempotencyConflict
+              ? 'idempotency-conflict' as const
+              : 'remote-conflict' as const,
+            freshness,
+          }
+        }
+        if (transportResult.status === 'affiliation-renewal-needed') {
+          recordCommitFailure()
+          return {
+            status: 'affiliation-renewal-needed' as const,
+            schoolYear: transportResult.schoolYear,
+          }
+        }
+        recordCommitFailure()
+        return { status: 'rejected' as const }
+      }
+
       editing = false
       drafts = []
       lastCommitFailed = false
@@ -400,6 +573,26 @@ export function createTimetableEditorClient({
       storage.removeItem(storageKey)
       snapshot = buildSnapshot()
       listeners.forEach((listener) => listener())
+      if (generation !== lifecycleGeneration) {
+        return { status: 'cancelled' as const }
+      }
+      const freshness = await applyFreshnessSafely(
+        applyFreshness,
+        {
+          type: 'applied',
+          affectedKeys: payload.changes.map((change) => ({
+            targetScopeType: change.targetScopeType,
+            changeDate: change.changeDate,
+            periodNumber: change.periodNumber,
+          })),
+        },
+      )
+      if (generation !== lifecycleGeneration) {
+        return { status: 'cancelled' as const }
+      }
+      submitting = false
+      publish()
+      return { status: 'applied' as const, freshness }
     },
   }
 
@@ -448,6 +641,36 @@ function draftKey(
   draft: TimetableLayerKey,
 ) {
   return `${draft.targetScopeType}:${draft.changeDate}:${draft.periodNumber}`
+}
+
+function toTimetableSubmissionChange(
+  draft: TimetableChangeDraft,
+): TimetableSubmissionChange {
+  const base = {
+    sourceId: draft.sourceId,
+    targetScopeType: draft.targetScopeType,
+    changeDate: draft.changeDate,
+    periodNumber: draft.periodNumber,
+  }
+  if (draft.changeKind === 'remove') {
+    return {
+      ...base,
+      changeKind: draft.changeKind,
+      sharedInformationItemId: draft.sharedInformationItemId,
+      expectedLatestChangeId: draft.expectedLatestChangeId,
+    }
+  }
+  const replacement = Object.freeze({ ...draft.replacement })
+  if (draft.changeKind === 'update') {
+    return {
+      ...base,
+      changeKind: draft.changeKind,
+      replacement,
+      sharedInformationItemId: draft.sharedInformationItemId,
+      expectedLatestChangeId: draft.expectedLatestChangeId,
+    }
+  }
+  return { ...base, changeKind: draft.changeKind, replacement }
 }
 
 function restore(storage: StorageLike): {

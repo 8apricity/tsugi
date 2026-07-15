@@ -197,13 +197,42 @@ export type ActiveTask = {
   createdAt: number
 }
 
-export type DirectTaskAddOperation = ActiveTask & {
-  changeKind: 'add'
+type DirectTaskOperationBase = {
+  sourceId: string
+  sharedInformationItemId: string
+  latestChangeId: string
+  targetScope: TargetScope
+  changedByStudentAccountId: string
+  changedAt: number
 }
+
+type DirectTaskSnapshot = Pick<
+  ActiveTask,
+  'title' | 'dueDate' | 'relatedLessonName'
+>
+
+export type DirectTaskAddOperation = DirectTaskOperationBase &
+  DirectTaskSnapshot & {
+    changeKind: 'add'
+    createdAt: number
+    expectedLatestChangeId?: never
+  }
+
+export type DirectTaskOperation =
+  | DirectTaskAddOperation
+  | (DirectTaskOperationBase &
+      DirectTaskSnapshot & {
+        changeKind: 'update'
+        expectedLatestChangeId: string
+      })
+  | (DirectTaskOperationBase & {
+      changeKind: 'remove'
+      expectedLatestChangeId: string
+    })
 
 export type DirectChangeOperation =
   | ({ kind: 'timetable_change' } & DirectTimetableChangeOperation)
-  | ({ kind: 'task' } & DirectTaskAddOperation)
+  | ({ kind: 'task' } & DirectTaskOperation)
 
 export type HistoricalTimetableChangeReplacement =
   | Exclude<TimetableChangeReplacement, { type: 'floating_lesson_reference' }>
@@ -885,7 +914,12 @@ export class InMemoryPersistenceAdapters
       (change): change is Extract<DirectChangeOperation, { kind: 'timetable_change' }> =>
         change.kind === 'timetable_change',
     )
-    const conflictingSourceIds = pendingTimetableChanges
+    const pendingTaskChanges = pending.filter(
+      (change): change is Extract<DirectChangeOperation, { kind: 'task' }> =>
+        change.kind === 'task',
+    )
+    const conflictingSourceIds = [
+      ...pendingTimetableChanges
       .filter((change) => {
         const active = change.changeKind !== 'add'
         ? this.activeTimetableChanges.find(
@@ -900,7 +934,21 @@ export class InMemoryPersistenceAdapters
             active.latestChangeId !== change.expectedLatestChangeId ||
             !sameTimetableChangeSlot(active, change)
       })
-      .map((change) => change.sourceId)
+      .map((change) => change.sourceId),
+      ...pendingTaskChanges
+        .filter((change) => {
+          if (change.changeKind === 'add') return false
+          const active = this.activeTasks.find(
+            (candidate) =>
+              candidate.sharedInformationItemId ===
+              change.sharedInformationItemId,
+          )
+          return !active ||
+            active.latestChangeId !== change.expectedLatestChangeId ||
+            !targetScopesEqual(active.targetScope, change.targetScope)
+        })
+        .map((change) => change.sourceId),
+    ]
     if (conflictingSourceIds.length > 0) {
       return { status: 'conflict' as const, conflictingSourceIds }
     }
@@ -908,7 +956,32 @@ export class InMemoryPersistenceAdapters
     for (const change of pending) {
       if (change.kind === 'task') {
         this.directTaskOperations.set(change.sourceId, change)
-        this.activeTasks.push(change)
+        if (change.changeKind === 'add') {
+          this.activeTasks.push(change)
+        } else if (change.changeKind === 'update') {
+          const index = this.activeTasks.findIndex(
+            (candidate) =>
+              candidate.sharedInformationItemId ===
+              change.sharedInformationItemId,
+          )
+          const previous = this.activeTasks[index]
+          this.activeTasks[index] = {
+            ...previous,
+            sourceId: change.sourceId,
+            latestChangeId: change.latestChangeId,
+            title: change.title,
+            dueDate: change.dueDate,
+            relatedLessonName: change.relatedLessonName,
+            changedByStudentAccountId: change.changedByStudentAccountId,
+            changedAt: change.changedAt,
+          }
+        } else {
+          this.activeTasks = this.activeTasks.filter(
+            (candidate) =>
+              candidate.sharedInformationItemId !==
+              change.sharedInformationItemId,
+          )
+        }
         continue
       }
       this.directTimetableChangeOperations.set(change.sourceId, change)
@@ -1240,6 +1313,19 @@ type ActiveTaskRow = {
   changed_by_student_account_id: string
   changed_at: string
   created_at: string
+}
+
+type StoredDirectTaskOperationRow = Omit<
+  ActiveTaskRow,
+  'title' | 'due_date' | 'related_lesson_name' |
+  'registered_related_lesson_name_id'
+> & {
+  change_kind: 'add' | 'update' | 'remove'
+  preceding_change_id: string | null
+  title: string | null
+  due_date: string | null
+  related_lesson_name: string | null
+  registered_related_lesson_name_id: string | null
 }
 
 type HistoricalTimetableChangeRow = {
@@ -2095,7 +2181,7 @@ export class D1PersistenceAdapters
     ]
     const [storedTimetable, storedTasks] = await Promise.all([
       this.findDirectChangesBySourceIds(changes.map((change) => change.sourceId)),
-      this.findDirectTaskAddsBySourceIds(changes.map((change) => change.sourceId)),
+      this.findDirectTaskOperationsBySourceIds(changes.map((change) => change.sourceId)),
     ])
     const existingBySource = new Map<string, DirectChangeOperation>([
       ...storedTimetable.map((change) => [
@@ -2139,6 +2225,19 @@ export class D1PersistenceAdapters
     const activeByItem = new Map(
       activeUpdates.map((change) => [change.sharedInformationItemId, change]),
     )
+    const pendingTasks = pending.filter(
+      (change): change is Extract<DirectChangeOperation, { kind: 'task' }> =>
+        change.kind === 'task',
+    )
+    const taskItemChanges = pendingTasks.filter(
+      (change) => change.changeKind !== 'add',
+    )
+    const activeTasks = await this.findActiveTasksByItemIds(
+      taskItemChanges.map((change) => change.sharedInformationItemId),
+    )
+    const activeTaskByItem = new Map(
+      activeTasks.map((task) => [task.sharedInformationItemId, task]),
+    )
     const addSlotKeys = pendingTimetable
       .filter((change) => change.changeKind === 'add')
       .map(activeTimetableChangeSlotKey)
@@ -2154,7 +2253,8 @@ export class D1PersistenceAdapters
         .all<{ timetable_change_slot_key: string }>()
       results.forEach((row) => occupied.add(row.timetable_change_slot_key))
     }
-    const conflictingSourceIds = pendingTimetable
+    const conflictingSourceIds = [
+      ...pendingTimetable
       .filter((change) => {
         if (change.changeKind === 'add') {
           return occupied.has(activeTimetableChangeSlotKey(change))
@@ -2165,7 +2265,16 @@ export class D1PersistenceAdapters
           activeTimetableChangeSlotKey(active) !==
             activeTimetableChangeSlotKey(change)
       })
-      .map((change) => change.sourceId)
+      .map((change) => change.sourceId),
+      ...taskItemChanges
+        .filter((change) => {
+          const active = activeTaskByItem.get(change.sharedInformationItemId)
+          return !active ||
+            active.latestChangeId !== change.expectedLatestChangeId ||
+            !targetScopesEqual(active.targetScope, change.targetScope)
+        })
+        .map((change) => change.sourceId),
+    ]
     if (conflictingSourceIds.length > 0) {
       return { status: 'conflict' as const, conflictingSourceIds }
     }
@@ -2177,11 +2286,9 @@ export class D1PersistenceAdapters
       const sharedChangeId = `${change.sourceId}:change`
       const createdAt = new Date(change.changedAt).toISOString()
       if (change.kind === 'task') {
-        const part = targetScopeColumns(change)
-        statements.push(
-          this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.targetScope.schoolYear, createdAt),
-          this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScope.type, part.grade, part.classId, part.trackId, part.studentAccountId),
-          this.db.prepare(`insert into task_snapshots (task_snapshot_id, title, due_date, registered_related_lesson_name_id, related_lesson_name, normalized_custom_lesson_name, created_at) values (?, ?, ?, ?, ?, ?, ?)`).bind(
+        const taskSnapshotValues = change.changeKind === 'remove'
+          ? null
+          : [
             snapshotId,
             change.title,
             change.dueDate,
@@ -2193,11 +2300,66 @@ export class D1PersistenceAdapters
               ? normalizeLessonName(change.relatedLessonName.lessonName)
               : null,
             createdAt,
-          ),
-          this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_task_snapshot_id, current_timetable_change_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'task', ?, null, ?, null, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
-          this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, task_snapshot_id, timetable_change_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, ?, null)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
-          this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
-        )
+          ]
+        if (change.changeKind === 'add') {
+          const part = targetScopeColumns(change)
+          statements.push(
+            this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.targetScope.schoolYear, createdAt),
+            this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScope.type, part.grade, part.classId, part.trackId, part.studentAccountId),
+            this.db.prepare(`insert into task_snapshots (task_snapshot_id, title, due_date, registered_related_lesson_name_id, related_lesson_name, normalized_custom_lesson_name, created_at) values (?, ?, ?, ?, ?, ?, ?)`).bind(...taskSnapshotValues!),
+            this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_task_snapshot_id, current_timetable_change_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'task', ?, null, ?, null, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
+            this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, task_snapshot_id, timetable_change_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, ?, null)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
+            this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
+          )
+        } else if (change.changeKind === 'update') {
+          statements.push(
+            this.db.prepare(
+              `insert into task_snapshots (
+                 task_snapshot_id, title, due_date,
+                 registered_related_lesson_name_id, related_lesson_name,
+                 normalized_custom_lesson_name, created_at
+               )
+               select ?, ?, ?, ?, ?, ?, ?
+               from shared_information_items
+               where shared_information_item_id = ? and kind = 'task'
+                 and latest_change_id = ? and removed_at is null`,
+            ).bind(
+              ...taskSnapshotValues!,
+              change.sharedInformationItemId,
+              change.expectedLatestChangeId,
+            ),
+            this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, task_snapshot_id, timetable_change_snapshot_id, preceding_change_id) values (?, ?, 'update', 'direct', ?, ?, ?, ?, null, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId, change.expectedLatestChangeId),
+            this.db.prepare(`update shared_information_items set latest_change_id = ?, current_task_snapshot_id = ? where shared_information_item_id = ? and latest_change_id = ? and removed_at is null`).bind(sharedChangeId, snapshotId, change.sharedInformationItemId, change.expectedLatestChangeId),
+          )
+        } else {
+          statements.push(
+            this.db.prepare(
+              `insert into shared_information_changes (
+                 shared_information_change_id, shared_information_item_id,
+                 change_kind, source_type, source_id,
+                 changed_by_student_account_id, changed_at,
+                 task_snapshot_id, timetable_change_snapshot_id,
+                 preceding_change_id
+               ) values (
+                 ?,
+                 (select shared_information_item_id
+                  from shared_information_items
+                  where shared_information_item_id = ? and kind = 'task'
+                    and latest_change_id = ? and removed_at is null),
+                 'remove', 'direct', ?, ?, ?, null, null, ?
+               )`,
+            ).bind(
+              sharedChangeId,
+              change.sharedInformationItemId,
+              change.expectedLatestChangeId,
+              change.sourceId,
+              change.changedByStudentAccountId,
+              createdAt,
+              change.expectedLatestChangeId,
+            ),
+            this.db.prepare(`update shared_information_items set latest_change_id = ?, removed_at = ? where shared_information_item_id = ? and latest_change_id = ? and removed_at is null`).bind(sharedChangeId, createdAt, change.sharedInformationItemId, change.expectedLatestChangeId),
+          )
+        }
         continue
       }
       const replacement = change.changeKind === 'remove'
@@ -2307,7 +2469,7 @@ export class D1PersistenceAdapters
     } catch {
       const [retriedTimetable, retriedTasks] = await Promise.all([
         this.findDirectChangesBySourceIds(changes.map((change) => change.sourceId)),
-        this.findDirectTaskAddsBySourceIds(changes.map((change) => change.sourceId)),
+        this.findDirectTaskOperationsBySourceIds(changes.map((change) => change.sourceId)),
       ])
       const retried = new Map<string, DirectChangeOperation>([
         ...retriedTimetable.map((change) => [
@@ -2686,12 +2848,45 @@ export class D1PersistenceAdapters
     return results.map(mapStoredDirectOperation)
   }
 
-  private async findDirectTaskAddsBySourceIds(sourceIds: string[]) {
+  private async findActiveTasksByItemIds(itemIds: string[]) {
+    if (itemIds.length === 0) return []
+    const placeholders = itemIds.map(() => '?').join(', ')
+    const { results } = await this.db
+      .prepare(
+        `select latest.source_id, latest.shared_information_change_id,
+                i.shared_information_item_id, s.school_year,
+                p.scope_type, p.grade, p.class_id, p.track_id,
+                p.student_account_id, task.title, task.due_date,
+                task.registered_related_lesson_name_id,
+                coalesce(registered_lesson.short_lesson_name,
+                         task.related_lesson_name) as related_lesson_name,
+                latest.changed_by_student_account_id, latest.changed_at,
+                i.created_at
+         from shared_information_items i
+         join shared_information_changes latest
+           on latest.shared_information_change_id = i.latest_change_id
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         join task_snapshots task
+           on task.task_snapshot_id = i.current_task_snapshot_id
+         left join registered_lesson_names registered_lesson
+           on registered_lesson.registered_lesson_name_id =
+              task.registered_related_lesson_name_id
+         where i.kind = 'task' and i.removed_at is null
+           and i.shared_information_item_id in (${placeholders})`,
+      )
+      .bind(...itemIds)
+      .all<ActiveTaskRow>()
+    return results.map(mapActiveTaskRow)
+  }
+
+  private async findDirectTaskOperationsBySourceIds(sourceIds: string[]) {
     if (sourceIds.length === 0) return []
     const placeholders = sourceIds.map(() => '?').join(', ')
     const { results } = await this.db
       .prepare(
         `select c.source_id, c.shared_information_change_id,
+                c.change_kind, c.preceding_change_id,
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, task.title, task.due_date,
@@ -2704,7 +2899,7 @@ export class D1PersistenceAdapters
            on i.shared_information_item_id = c.shared_information_item_id
          join target_scopes s on s.target_scope_id = i.target_scope_id
          join target_scope_parts p on p.target_scope_id = s.target_scope_id
-         join task_snapshots task
+         left join task_snapshots task
            on task.task_snapshot_id = c.task_snapshot_id
          left join registered_lesson_names registered_lesson
            on registered_lesson.registered_lesson_name_id =
@@ -2713,12 +2908,8 @@ export class D1PersistenceAdapters
            and c.source_id in (${placeholders})`,
       )
       .bind(...sourceIds)
-      .all<ActiveTaskRow>()
-    return results.map((row) => ({
-      ...mapActiveTaskRow(row),
-      kind: 'task' as const,
-      changeKind: 'add' as const,
-    }))
+      .all<StoredDirectTaskOperationRow>()
+    return results.map(mapStoredDirectTaskOperation)
   }
 
   async listFloatingLessonReferenceLabels(schoolYear: number, grade: number) {
@@ -3186,6 +3377,55 @@ function mapActiveTaskRow(row: ActiveTaskRow): ActiveTask {
   }
 }
 
+function mapStoredDirectTaskOperation(
+  row: StoredDirectTaskOperationRow,
+): Extract<DirectChangeOperation, { kind: 'task' }> {
+  const base = {
+    kind: 'task' as const,
+    sourceId: row.source_id,
+    sharedInformationItemId: row.shared_information_item_id,
+    latestChangeId: row.shared_information_change_id,
+    targetScope: mapTargetScopeRow(row),
+    changedByStudentAccountId: row.changed_by_student_account_id,
+    changedAt: Date.parse(row.changed_at),
+  }
+  if (row.change_kind === 'remove') {
+    return {
+      ...base,
+      changeKind: 'remove',
+      expectedLatestChangeId: row.preceding_change_id ?? '',
+    }
+  }
+  const snapshot = {
+    title: row.title ?? '',
+    dueDate: row.due_date,
+    relatedLessonName: row.related_lesson_name
+      ? {
+          lessonName: row.related_lesson_name,
+          ...(row.registered_related_lesson_name_id
+            ? {
+                registeredLessonNameId:
+                  row.registered_related_lesson_name_id,
+              }
+            : {}),
+        }
+      : null,
+  }
+  return row.change_kind === 'update'
+    ? {
+        ...base,
+        ...snapshot,
+        changeKind: 'update',
+        expectedLatestChangeId: row.preceding_change_id ?? '',
+      }
+    : {
+        ...base,
+        ...snapshot,
+        changeKind: 'add',
+        createdAt: Date.parse(row.created_at),
+      }
+}
+
 function mapHistoricalTimetableChangeRow(
   row: HistoricalTimetableChangeRow,
 ): HistoricalTimetableChange {
@@ -3344,13 +3584,16 @@ function sameDirectChangeOperationPayload(
   return left.changeKind === right.changeKind &&
     left.sourceId === right.sourceId &&
     left.sharedInformationItemId === right.sharedInformationItemId &&
+    left.expectedLatestChangeId === right.expectedLatestChangeId &&
     targetScopesEqual(left.targetScope, right.targetScope) &&
-    left.title === right.title &&
-    left.dueDate === right.dueDate &&
     left.changedByStudentAccountId === right.changedByStudentAccountId &&
-    left.relatedLessonName?.registeredLessonNameId ===
-      right.relatedLessonName?.registeredLessonNameId &&
-    left.relatedLessonName?.lessonName === right.relatedLessonName?.lessonName
+    (left.changeKind === 'remove' || right.changeKind === 'remove'
+      ? left.changeKind === right.changeKind
+      : left.title === right.title &&
+        left.dueDate === right.dueDate &&
+        left.relatedLessonName?.registeredLessonNameId ===
+          right.relatedLessonName?.registeredLessonNameId &&
+        left.relatedLessonName?.lessonName === right.relatedLessonName?.lessonName)
 }
 
 function compareActiveTasks(left: ActiveTask, right: ActiveTask) {

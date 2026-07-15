@@ -23,9 +23,11 @@ import {
 
 type DailyPlanTask = {
   taskId: string
+  latestChangeId: string
   title: string
   dueDate: string | null
   relatedLessonName?: string
+  registeredRelatedLessonNameId?: string
   targetScopeType: 'grade' | 'class' | 'track' | 'student'
   createdAt: number
 }
@@ -399,10 +401,19 @@ function buildReadyDailyPlan({
     }),
     tasks: tasks.map((task) => ({
       taskId: task.sharedInformationItemId,
+      latestChangeId: task.latestChangeId,
       title: task.title,
       dueDate: task.dueDate,
       ...(task.relatedLessonName
-        ? { relatedLessonName: task.relatedLessonName.lessonName }
+        ? {
+            relatedLessonName: task.relatedLessonName.lessonName,
+            ...(task.relatedLessonName.registeredLessonNameId
+              ? {
+                  registeredRelatedLessonNameId:
+                    task.relatedLessonName.registeredLessonNameId,
+                }
+              : {}),
+          }
         : {}),
       targetScopeType: task.targetScope.type,
       createdAt: task.createdAt,

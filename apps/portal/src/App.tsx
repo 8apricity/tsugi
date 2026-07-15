@@ -89,6 +89,7 @@ type TimetableEditorForm = TimetableLayerKey & {
 
 type TaskEditorForm = Omit<NewTaskDraftForm, "relatedLessonName"> & {
   relatedLessonInput: string;
+  editingTask: DailyPlanTaskForCache | null;
 };
 
 type TimetableLayerDialog = {
@@ -859,7 +860,22 @@ function App() {
       dueDate: initial.dueDate,
       targetScopeType: initial.targetScopeType,
       relatedLessonInput: "",
+      editingTask: null,
     });
+  }
+
+  function openTaskUpdateEditor(task: DailyPlanTaskForCache) {
+    setTaskLessonNamesExpanded(false);
+    setTaskLessonNameListOpen(false);
+    setActiveTaskLessonNameOption(-1);
+    setTaskEditorForm({
+      title: task.title,
+      dueDate: task.dueDate,
+      targetScopeType: task.targetScopeType,
+      relatedLessonInput: task.relatedLessonName ?? "",
+      editingTask: task,
+    });
+    setTaskDetail(null);
   }
 
   function saveTaskDraft(event: FormEvent<HTMLFormElement>) {
@@ -874,22 +890,42 @@ function App() {
             timetableEditorOptions?.allRegisteredLessonNames ?? [],
         }).resolveInput(lessonInput).replacement
       : null;
-    const result = timetableEditorClient.saveTaskDraft({
-      title: taskEditorForm.title,
-      dueDate: taskEditorForm.dueDate,
-      targetScopeType: taskEditorForm.targetScopeType,
-      relatedLessonName: resolvedLesson
+    const relatedLessonName =
+      taskEditorForm.editingTask?.registeredRelatedLessonNameId &&
+        lessonInput === taskEditorForm.editingTask.relatedLessonName
         ? {
-            lessonName: resolvedLesson.lessonName,
-            ...(resolvedLesson.registeredLessonNameId
-              ? {
-                  registeredLessonNameId:
-                    resolvedLesson.registeredLessonNameId,
-                }
-              : {}),
+            lessonName: lessonInput,
+            registeredLessonNameId:
+              taskEditorForm.editingTask.registeredRelatedLessonNameId,
           }
-        : null,
-    });
+        : resolvedLesson
+          ? {
+              lessonName: resolvedLesson.lessonName,
+              ...(resolvedLesson.registeredLessonNameId
+                ? {
+                    registeredLessonNameId:
+                      resolvedLesson.registeredLessonNameId,
+                  }
+                : {}),
+            }
+          : lessonInput
+            ? { lessonName: lessonInput }
+            : null;
+    const result = taskEditorForm.editingTask
+      ? timetableEditorClient.saveTaskUpdateDraft(
+          editableTask(taskEditorForm.editingTask),
+          {
+            title: taskEditorForm.title,
+            dueDate: taskEditorForm.dueDate,
+            relatedLessonName,
+          },
+        )
+      : timetableEditorClient.saveTaskDraft({
+          title: taskEditorForm.title,
+          dueDate: taskEditorForm.dueDate,
+          targetScopeType: taskEditorForm.targetScopeType,
+          relatedLessonName,
+        });
     if (result.status === "invalid-task") {
       setTimetableEditorMessage(
         "Title、Due Date、Related Lesson Name、Target Scopeを確認してください。",
@@ -1191,7 +1227,9 @@ function App() {
           .map((draft) =>
             "changeDate" in draft
               ? `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement)}`
-              : `Task / ${scopeLabel(draft.targetScopeType)} / ${draft.title} / ${draft.dueDate ?? "期限なし"}`,
+              : draft.changeKind === "remove"
+                ? `Task / ${scopeLabel(draft.targetScopeType)} / 削除`
+                : `Task / ${scopeLabel(draft.targetScopeType)} / ${draft.title} / ${draft.dueDate ?? "期限なし"}`,
           )
           .join("\n");
         const confirmed = window.confirm(
@@ -1239,8 +1277,8 @@ function App() {
     ) {
       setTimetableEditorMessage(
         result.freshness === "stale"
-          ? "Active Timetable Changeが更新されています。表示を再読み込みして競合する下書きを確認してください。"
-          : "Active Timetable Changeが更新されています。競合する下書きを確認してください。",
+          ? "Active Shared Informationが更新されています。表示を再読み込みして競合する下書きを確認してください。"
+          : "Active Shared Informationが更新されています。競合する下書きを確認してください。",
       );
       return;
     }
@@ -1553,7 +1591,13 @@ function App() {
                             {scopeLabel(task.targetScopeType)}
                           </span>
                           <small>
-                            {task.conflicted ? "競合あり" : "下書き"}
+                            {task.conflicted
+                              ? "競合あり"
+                              : task.changeKind === "remove"
+                                ? "削除の下書き"
+                                : task.changeKind === "update"
+                                  ? "更新の下書き"
+                                  : "追加の下書き"}
                           </small>
                         </span>
                         <button
@@ -1700,7 +1744,11 @@ function App() {
                 aria-labelledby="task-editor-title"
               >
                 <header className="editor-dialog-header">
-                  <h2 id="task-editor-title">Taskを追加</h2>
+                  <h2 id="task-editor-title">
+                    {taskEditorForm.editingTask
+                      ? "Taskを更新"
+                      : "Taskを追加"}
+                  </h2>
                   <button
                     className="icon-button"
                     type="button"
@@ -1876,36 +1924,52 @@ function App() {
                       More
                     </button>
                   ) : null}
-                  {taskLessonResolution?.custom ? (
+                  {taskLessonResolution?.custom &&
+                  !(
+                    taskEditorForm.editingTask
+                      ?.registeredRelatedLessonNameId &&
+                    taskEditorForm.relatedLessonInput.trim() ===
+                      taskEditorForm.editingTask.relatedLessonName
+                  ) ? (
                     <p className="field-warning" role="status">
                       custom Lesson Nameとして保存されます。
                     </p>
                   ) : null}
-                  <label>
-                    <span>Target Scope</span>
-                    <select
-                      required
-                      value={taskEditorForm.targetScopeType ?? ""}
-                      onChange={(event) =>
-                        setTaskEditorForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                targetScopeType:
-                                  (event.target.value || null) as
-                                    TargetScopeType | null,
-                              }
-                            : current,
-                        )
-                      }
-                    >
-                      <option value="">選択してください</option>
-                      <option value="grade">Grade</option>
-                      <option value="class">Class</option>
-                      <option value="track">Track</option>
-                      <option value="student">Student</option>
-                    </select>
-                  </label>
+                  {taskEditorForm.editingTask ? (
+                    <div className="readonly-field">
+                      <span>Target Scope</span>
+                      <strong>
+                        {scopeLabel(taskEditorForm.editingTask.targetScopeType)}
+                      </strong>
+                      <small>Target Scopeは変更できません。</small>
+                    </div>
+                  ) : (
+                    <label>
+                      <span>Target Scope</span>
+                      <select
+                        required
+                        value={taskEditorForm.targetScopeType ?? ""}
+                        onChange={(event) =>
+                          setTaskEditorForm((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  targetScopeType:
+                                    (event.target.value || null) as
+                                      TargetScopeType | null,
+                                }
+                              : current,
+                          )
+                        }
+                      >
+                        <option value="">選択してください</option>
+                        <option value="grade">Grade</option>
+                        <option value="class">Class</option>
+                        <option value="track">Track</option>
+                        <option value="student">Student</option>
+                      </select>
+                    </label>
+                  )}
                   <div className="editor-dialog-actions">
                     <button
                       className="button-secondary"
@@ -1915,7 +1979,9 @@ function App() {
                       キャンセル
                     </button>
                     <button className="button-primary" type="submit">
-                      下書きに保存
+                      {taskEditorForm.editingTask
+                        ? "更新を下書きに保存"
+                        : "下書きに保存"}
                     </button>
                   </div>
                 </form>
@@ -1948,6 +2014,29 @@ function App() {
                   <div><dt>Related Lesson Name</dt><dd>{taskDetail.relatedLessonName ?? "なし"}</dd></div>
                   <div><dt>Target Scope</dt><dd>{scopeLabel(taskDetail.targetScopeType)}</dd></div>
                 </dl>
+                {timetableEditor.editing ? (
+                  <div className="editor-dialog-actions">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => openTaskUpdateEditor(taskDetail)}
+                    >
+                      更新
+                    </button>
+                    <button
+                      className="button-danger"
+                      type="button"
+                      onClick={() => {
+                        timetableEditorClient.saveTaskRemoveDraft(
+                          editableTask(taskDetail),
+                        );
+                        setTaskDetail(null);
+                      }}
+                    >
+                      削除
+                    </button>
+                  </div>
+                ) : null}
               </section>
             </div>
           ) : null}
@@ -3475,6 +3564,27 @@ function formatRelativeTime(timestamp: number) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}時間前`;
   return `${Math.floor(hours / 24)}日前`;
+}
+
+function editableTask(task: DailyPlanTaskForCache) {
+  return {
+    taskId: task.taskId,
+    latestChangeId: task.latestChangeId,
+    title: task.title,
+    dueDate: task.dueDate,
+    relatedLessonName: task.relatedLessonName
+      ? {
+          lessonName: task.relatedLessonName,
+          ...(task.registeredRelatedLessonNameId
+            ? {
+                registeredLessonNameId:
+                  task.registeredRelatedLessonNameId,
+              }
+            : {}),
+        }
+      : null,
+    targetScopeType: task.targetScopeType,
+  };
 }
 
 function scopeLabel(scope: TargetScopeType) {

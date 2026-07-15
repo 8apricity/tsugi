@@ -551,6 +551,37 @@ body.page-scroll-locked {
   font-weight: 700;
 }
 
+.readonly-field {
+  display: grid;
+  gap: 7px;
+  color: var(--color-primary);
+  font-size: 13px;
+}
+
+.readonly-field > span,
+.readonly-field > strong {
+  font-weight: 700;
+}
+
+.readonly-field > small {
+  color: var(--color-muted);
+}
+
+.task-detail-dialog > .editor-dialog-actions {
+  padding: 0 22px 22px;
+}
+
+.button-danger {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid #b42318;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: #8f1d14;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .lesson-name-options {
   display: grid;
   max-height: 180px;

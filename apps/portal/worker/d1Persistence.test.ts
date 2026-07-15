@@ -105,6 +105,148 @@ function createTestDatabase(maximumMigration?: string) {
 }
 
 describe('D1 Direct Timetable Change persistence', () => {
+  it('migrates Standard Timetable values to the approved Registered Lesson Names', () => {
+    const database = createTestDatabase()
+
+    const registeredLessonNames = database.prepare(`
+      select short_lesson_name, full_lesson_name
+      from registered_lesson_names
+    `).all()
+    expect(registeredLessonNames).toHaveLength(20)
+    expect(registeredLessonNames).toEqual(expect.arrayContaining([
+      { short_lesson_name: 'CSⅡ', full_lesson_name: 'Creative SolutionsⅡ' },
+      { short_lesson_name: 'DD', full_lesson_name: 'ディベート・ディスカッションⅠ' },
+      { short_lesson_name: 'HR', full_lesson_name: 'ホームルーム活動' },
+      { short_lesson_name: '三丘SHSP', full_lesson_name: '三丘SHSP' },
+      { short_lesson_name: '保健', full_lesson_name: '保健' },
+      { short_lesson_name: '古典', full_lesson_name: '古典探究' },
+      { short_lesson_name: '地理', full_lesson_name: '地理総合' },
+      { short_lesson_name: '家庭', full_lesson_name: '家庭基礎' },
+      { short_lesson_name: '数Ⅱα', full_lesson_name: '理数数学Ⅱα' },
+      { short_lesson_name: '数Ⅱβ', full_lesson_name: '理数数学Ⅱβ' },
+      { short_lesson_name: '歴史α', full_lesson_name: '歴史総合α' },
+      { short_lesson_name: '歴史β', full_lesson_name: '歴史総合β' },
+      { short_lesson_name: '現代文', full_lesson_name: '現代文探究' },
+      { short_lesson_name: '理科', full_lesson_name: '理数理科特講' },
+      { short_lesson_name: '生物', full_lesson_name: '理数生物特講Ⅰ' },
+      { short_lesson_name: '自走', full_lesson_name: '自走' },
+      { short_lesson_name: '英語G', full_lesson_name: '総合英語ⅡG' },
+      { short_lesson_name: '英語R', full_lesson_name: '総合英語ⅡR' },
+      { short_lesson_name: '化学', full_lesson_name: '理数化学特講Ⅰ' },
+      { short_lesson_name: '体育', full_lesson_name: '体育' },
+    ]))
+
+    expect(() => database.prepare(`
+      insert into registered_lesson_names (
+        registered_lesson_name_id, full_lesson_name, short_lesson_name,
+        normalized_full_lesson_name
+      ) values (
+        'duplicate-full', char(12288) || '理数数学Ⅱβ' || char(12288),
+        '別名', '理数数学iiβ'
+      )
+    `).run()).toThrow()
+    expect(() => database.prepare(`
+      insert into registered_lesson_names (
+        registered_lesson_name_id, full_lesson_name, short_lesson_name,
+        normalized_full_lesson_name
+      ) values ('duplicate-short', '別の体育', '体育', '別の体育')
+    `).run()).not.toThrow()
+
+    const physicalEducationIds = database.prepare(`
+      select distinct registered_lesson_name_id
+      from standard_timetable_entries
+      where standard_timetable_entry_id in (
+        '2026-grade-2-class-3-common-mon-7',
+        '2026-grade-2-class-3-common-wed-2',
+        '2026-grade-2-class-3-common-thu-1'
+      )
+    `).all()
+    expect(physicalEducationIds).toEqual([
+      { registered_lesson_name_id: 'physical-education' },
+    ])
+
+    const standardColumns = database.prepare(
+      'pragma table_info(standard_timetable_entries)',
+    ).all() as Array<{ name: string }>
+    expect(standardColumns.map(({ name }) => name)).toContain(
+      'registered_lesson_name_id',
+    )
+    expect(standardColumns.map(({ name }) => name)).not.toContain('lesson_name')
+    expect(() => database.prepare(`
+      insert into standard_timetable_entries (
+        standard_timetable_entry_id, class_id, track_id, reference_type,
+        weekday, period_number, reference_label, registered_lesson_name_id
+      ) values (
+        'custom-text-is-not-an-identity', '2026-grade-2-class-3', null,
+        'period', 7, 1, null, '未登録授業'
+      )
+    `).run()).toThrow()
+  })
+
+  it('reads current Short Lesson Names for Period and Floating Lesson References', async () => {
+    const adapters = createD1PersistenceAdapters(
+      new SqliteD1Database(createTestDatabase()) as unknown as D1Database,
+    )
+
+    await expect(
+      adapters.dailyPlan.findStandardTimetableEntryForPeriodReference(
+        '2026-grade-2-class-3',
+        '2026-grade-2-class-3-humanities',
+        1,
+        7,
+      ),
+    ).resolves.toMatchObject({
+      registeredLessonNameId: 'physical-education',
+      lessonName: '体育',
+    })
+    await expect(
+      adapters.dailyPlan.findStandardTimetableEntryForFloatingReference(
+        '2026-grade-2-class-3',
+        '2026-grade-2-class-3-humanities',
+        '★',
+      ),
+    ).resolves.toMatchObject({
+      registeredLessonNameId: 'self-directed-study',
+      lessonName: '自走',
+    })
+    await expect(
+      adapters.dailyPlan.findStandardTimetableEntryForFloatingReference(
+        '2026-grade-2-class-3',
+        '2026-grade-2-class-3-science',
+        '★',
+      ),
+    ).resolves.toMatchObject({
+      registeredLessonNameId: 'biology',
+      lessonName: '生物',
+    })
+
+    await adapters.seed.saveRegisteredLessonName({
+      registeredLessonNameId: 'geography',
+      fullLessonName: '地理総合',
+      shortLessonName: '地理新名',
+      normalizedFullLessonName: '地理総合',
+    })
+    await adapters.seed.saveStandardTimetableEntry({
+      standardTimetableEntryId: 'floating-star-common-test',
+      classId: '2026-grade-2-class-3',
+      trackId: null,
+      referenceType: 'floating',
+      referenceLabel: '★',
+      floatingLessonReferenceLabelId: '2026-grade-2-floating-e29885',
+      registeredLessonNameId: 'geography',
+    })
+    await expect(
+      adapters.dailyPlan.findStandardTimetableEntryForFloatingReference(
+        '2026-grade-2-class-3',
+        'unconfigured-track',
+        '★',
+      ),
+    ).resolves.toMatchObject({
+      registeredLessonNameId: 'geography',
+      lessonName: '地理新名',
+    })
+  })
+
   it('backfills applied predecessors for existing Shared Information Changes', () => {
     const database = createTestDatabase('0010_timetable_direct_change_integrity.sql')
     database.exec('pragma foreign_keys = off')

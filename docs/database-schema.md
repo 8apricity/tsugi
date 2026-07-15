@@ -163,6 +163,19 @@ create table floating_lesson_reference_labels (
 ```
 
 ```sql
+create table registered_lesson_names (
+  registered_lesson_name_id text primary key,
+  full_lesson_name text not null,
+  short_lesson_name text not null,
+  normalized_full_lesson_name text not null unique,
+
+  check (length(full_lesson_name) between 1 and 80),
+  check (length(short_lesson_name) between 1 and 40),
+  check (instr(full_lesson_name, char(10)) = 0 and instr(full_lesson_name, char(13)) = 0),
+  check (instr(short_lesson_name, char(10)) = 0 and instr(short_lesson_name, char(13)) = 0),
+  check (length(normalized_full_lesson_name) > 0)
+);
+
 create table standard_timetable_entries (
   standard_timetable_entry_id text primary key,
   class_id text not null references school_year_classes(class_id),
@@ -173,7 +186,8 @@ create table standard_timetable_entries (
   reference_label text,
   floating_lesson_reference_label_id text
     references floating_lesson_reference_labels(floating_lesson_reference_label_id),
-  lesson_name text not null,
+  registered_lesson_name_id text not null
+    references registered_lesson_names(registered_lesson_name_id),
 
   check (reference_type in ('period', 'floating')),
   check (weekday is null or weekday between 1 and 7),
@@ -201,7 +215,9 @@ create unique index standard_timetable_entries_unique_track_floating
   where track_id is not null and reference_type = 'floating';
 ```
 
-`standard_timetable_entries` stores lesson references. A `period` entry represents a recurring lesson slot; a `floating` entry represents a floating lesson reference, such as `★`, that is not bound to a weekday and period number. `track_id is null` means the class-common value. A track-specific value overrides the class-common value for the same lesson slot or reference label.
+`registered_lesson_names` stores School Community-wide stable Lesson identities. Full Lesson Name normalized keys are unique; Short Lesson Names may repeat. Ordinary views resolve a Registered Lesson Name to its current Short Lesson Name.
+
+`standard_timetable_entries` stores lesson references backed only by Registered Lesson Name identities. A `period` entry represents a recurring lesson slot; a `floating` entry represents a floating lesson reference, such as `★`, that is not bound to a weekday and period number. `track_id is null` means the class-common value. A track-specific value overrides the class-common value for the same lesson slot or reference label.
 
 Standard Timetable entries are sparse rather than materializing every weekday, period, and Track combination. Resolution selects the Track-specific value first, then the class-common value, and otherwise produces a Daily Lesson with no Lesson Name. Tsugi does not distinguish an intentionally empty Lesson Slot from an unset Lesson Slot.
 

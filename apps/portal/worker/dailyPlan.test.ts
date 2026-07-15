@@ -41,6 +41,18 @@ async function createReadyDailyPlanStore() {
     selectedAt: Date.UTC(2026, 3, 1),
     endedAt: null,
   })
+  await Promise.all([
+    ['geography', '地理'],
+    ['class-common', '共通授業'],
+    ['modern-japanese', '現代文'],
+  ].map(([registeredLessonNameId, shortLessonName]) =>
+    store.seed.saveRegisteredLessonName({
+      registeredLessonNameId,
+      fullLessonName: shortLessonName,
+      shortLessonName,
+      normalizedFullLessonName: shortLessonName,
+    }),
+  ))
   await store.seed.saveStandardTimetableEntry({
     standardTimetableEntryId: 'fri-1-common',
     classId: '2026-grade-2-class-3',
@@ -48,7 +60,7 @@ async function createReadyDailyPlanStore() {
     referenceType: 'period',
     weekday: 5,
     periodNumber: 1,
-    lessonName: '地理',
+    registeredLessonNameId: 'geography',
   })
   await store.seed.saveStandardTimetableEntry({
     standardTimetableEntryId: 'fri-4-common',
@@ -57,7 +69,7 @@ async function createReadyDailyPlanStore() {
     referenceType: 'period',
     weekday: 5,
     periodNumber: 4,
-    lessonName: '共通授業',
+    registeredLessonNameId: 'class-common',
   })
   await store.seed.saveStandardTimetableEntry({
     standardTimetableEntryId: 'fri-4-humanities',
@@ -66,7 +78,7 @@ async function createReadyDailyPlanStore() {
     referenceType: 'period',
     weekday: 5,
     periodNumber: 4,
-    lessonName: '現代文',
+    registeredLessonNameId: 'modern-japanese',
   })
   await createStudentAccountAccess({
     studentAccountStore: store.studentAccount,

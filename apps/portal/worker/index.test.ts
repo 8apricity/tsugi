@@ -192,6 +192,16 @@ function createDailyPlanTestEnv() {
         endedAt: null,
       },
     ],
+    TEST_REGISTERED_LESSON_NAMES: [
+      { registeredLessonNameId: 'mathematics-2-beta', fullLessonName: '理数数学Ⅱβ', shortLessonName: '数Ⅱβ', normalizedFullLessonName: '理数数学iiβ' },
+      { registeredLessonNameId: 'classics', fullLessonName: '古典探究', shortLessonName: '古典', normalizedFullLessonName: '古典探究' },
+      { registeredLessonNameId: 'biology', fullLessonName: '理数生物特講Ⅰ', shortLessonName: '生物', normalizedFullLessonName: '理数生物特講i' },
+      { registeredLessonNameId: 'geography', fullLessonName: '地理総合', shortLessonName: '地理', normalizedFullLessonName: '地理総合' },
+      { registeredLessonNameId: 'class-common-fallback', fullLessonName: 'class-common fallback', shortLessonName: 'class-common fallback', normalizedFullLessonName: 'class-common fallback' },
+      { registeredLessonNameId: 'modern-japanese', fullLessonName: '現代文探究', shortLessonName: '現代文', normalizedFullLessonName: '現代文探究' },
+      { registeredLessonNameId: 'mioka-shsp', fullLessonName: '三丘SHSP', shortLessonName: '三丘SHSP', normalizedFullLessonName: '三丘shsp' },
+      { registeredLessonNameId: 'self-directed-study', fullLessonName: '自走', shortLessonName: '自走', normalizedFullLessonName: '自走' },
+    ],
     TEST_STANDARD_TIMETABLE_ENTRIES: [
       {
         standardTimetableEntryId: 'mon-1-common',
@@ -200,7 +210,7 @@ function createDailyPlanTestEnv() {
         referenceType: 'period',
         weekday: 1,
         periodNumber: 1,
-        lessonName: '数Ⅱβ',
+        registeredLessonNameId: 'mathematics-2-beta',
       },
       {
         standardTimetableEntryId: 'tue-2-humanities',
@@ -209,7 +219,7 @@ function createDailyPlanTestEnv() {
         referenceType: 'period',
         weekday: 2,
         periodNumber: 2,
-        lessonName: '古典',
+        registeredLessonNameId: 'classics',
       },
       {
         standardTimetableEntryId: 'tue-2-science',
@@ -218,7 +228,7 @@ function createDailyPlanTestEnv() {
         referenceType: 'period',
         weekday: 2,
         periodNumber: 2,
-        lessonName: '生物',
+        registeredLessonNameId: 'biology',
       },
       {
         standardTimetableEntryId: 'fri-1-common',
@@ -227,7 +237,7 @@ function createDailyPlanTestEnv() {
         referenceType: 'period',
         weekday: 5,
         periodNumber: 1,
-        lessonName: '地理',
+        registeredLessonNameId: 'geography',
       },
       {
         standardTimetableEntryId: 'fri-4-common',
@@ -236,7 +246,7 @@ function createDailyPlanTestEnv() {
         referenceType: 'period',
         weekday: 5,
         periodNumber: 4,
-        lessonName: 'class-common fallback',
+        registeredLessonNameId: 'class-common-fallback',
       },
       {
         standardTimetableEntryId: 'fri-4-humanities',
@@ -245,7 +255,7 @@ function createDailyPlanTestEnv() {
         referenceType: 'period',
         weekday: 5,
         periodNumber: 4,
-        lessonName: '現代文',
+        registeredLessonNameId: 'modern-japanese',
       },
       {
         standardTimetableEntryId: 'sat-1-common',
@@ -254,7 +264,7 @@ function createDailyPlanTestEnv() {
         referenceType: 'period',
         weekday: 6,
         periodNumber: 1,
-        lessonName: '三丘SHSP',
+        registeredLessonNameId: 'mioka-shsp',
       },
       {
         standardTimetableEntryId: 'floating-star-humanities',
@@ -262,7 +272,17 @@ function createDailyPlanTestEnv() {
         trackId: '2026-grade-2-class-3-humanities',
         referenceType: 'floating',
         referenceLabel: '★',
-        lessonName: '自走',
+        floatingLessonReferenceLabelId: '2026:2:★',
+        registeredLessonNameId: 'self-directed-study',
+      },
+      {
+        standardTimetableEntryId: 'floating-star-science',
+        classId: '2026-grade-2-class-3',
+        trackId: '2026-grade-2-class-3-science',
+        referenceType: 'floating',
+        referenceLabel: '★',
+        floatingLessonReferenceLabelId: '2026:2:★',
+        registeredLessonNameId: 'biology',
       },
     ],
   } as unknown as Env
@@ -1033,7 +1053,7 @@ describe('Timetable Direct Add API', () => {
       env,
       'test-student-2026-2-3-science-1',
     )
-    const unresolved = await addDirectTimetableChanges(env, scienceCookie, [
+    const scienceResponse = await addDirectTimetableChanges(env, scienceCookie, [
       {
         sourceId: '62111111-1111-4111-8111-111111111111',
         targetScopeType: 'student',
@@ -1045,14 +1065,14 @@ describe('Timetable Direct Add API', () => {
         },
       },
     ])
-    expect(unresolved.status).toBe(201)
+    expect(scienceResponse.status).toBe(201)
     const sciencePlanResponse = await readDailyPlan(env, scienceCookie, '2026-07-10')
     const sciencePlan = (await sciencePlanResponse.json()) as {
       periods: Array<{ lessonName: string; timetableChangeState?: string }>
     }
     expect(sciencePlan.periods[1]).toMatchObject({
-      lessonName: 'エラー',
-      timetableChangeState: 'unresolved-reference',
+      lessonName: '生物',
+      timetableChangeState: 'resolved',
     })
   })
 

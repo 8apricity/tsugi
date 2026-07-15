@@ -2,9 +2,10 @@ import {
   createD1PersistenceAdapters,
   createInMemoryPersistenceAdapters,
   type PersistenceAdapters,
+  type RegisteredLessonName,
   type SchoolYearClassRecord,
   type SchoolYearRecord,
-  type StandardTimetableEntry,
+  type StandardTimetableEntrySeed,
   type StudentAffiliation,
   type StudentAccount,
   type TrackRecord,
@@ -61,8 +62,13 @@ async function getPersistenceAdapters(env: Env) {
   const testStudentAffiliations = (
     env as Env & { TEST_STUDENT_AFFILIATIONS?: StudentAffiliation[] }
   ).TEST_STUDENT_AFFILIATIONS;
+  const testRegisteredLessonNames = (
+    env as Env & { TEST_REGISTERED_LESSON_NAMES?: RegisteredLessonName[] }
+  ).TEST_REGISTERED_LESSON_NAMES;
   const testStandardTimetableEntries = (
-    env as Env & { TEST_STANDARD_TIMETABLE_ENTRIES?: StandardTimetableEntry[] }
+    env as Env & {
+      TEST_STANDARD_TIMETABLE_ENTRIES?: StandardTimetableEntrySeed[];
+    }
   ).TEST_STANDARD_TIMETABLE_ENTRIES;
 
   if (testStudentAccounts) {
@@ -93,6 +99,14 @@ async function getPersistenceAdapters(env: Env) {
     await Promise.all(
       testStudentAffiliations.map((studentAffiliation) =>
         adapters.seed.saveStudentAffiliation(studentAffiliation),
+      ),
+    );
+  }
+
+  if (testRegisteredLessonNames) {
+    await Promise.all(
+      testRegisteredLessonNames.map((registeredLessonName) =>
+        adapters.seed.saveRegisteredLessonName(registeredLessonName),
       ),
     );
   }

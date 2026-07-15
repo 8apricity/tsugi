@@ -89,7 +89,15 @@ type StandardTimetableEntryBase = {
   standardTimetableEntryId: string
   classId: string
   trackId: string | null
+  registeredLessonNameId: string
   lessonName: string
+}
+
+export type RegisteredLessonName = {
+  registeredLessonNameId: string
+  fullLessonName: string
+  shortLessonName: string
+  normalizedFullLessonName: string
 }
 
 export type PeriodStandardTimetableEntry = StandardTimetableEntryBase & {
@@ -101,12 +109,26 @@ export type PeriodStandardTimetableEntry = StandardTimetableEntryBase & {
 export type FloatingStandardTimetableEntry = StandardTimetableEntryBase & {
   referenceType: 'floating'
   referenceLabel: string
-  floatingLessonReferenceLabelId?: string
+  floatingLessonReferenceLabelId: string
 }
 
 export type StandardTimetableEntry =
   | PeriodStandardTimetableEntry
   | FloatingStandardTimetableEntry
+
+export type PeriodStandardTimetableEntrySeed = Omit<
+  PeriodStandardTimetableEntry,
+  'lessonName'
+>
+
+export type FloatingStandardTimetableEntrySeed = Omit<
+  FloatingStandardTimetableEntry,
+  'lessonName'
+>
+
+export type StandardTimetableEntrySeed =
+  | PeriodStandardTimetableEntrySeed
+  | FloatingStandardTimetableEntrySeed
 
 export type FloatingLessonReferenceLabel = {
   floatingLessonReferenceLabelId: string
@@ -322,7 +344,8 @@ export type PersistenceSeedStore = {
   saveSchoolYearClass(record: SchoolYearClassRecord): Promise<void>
   saveTrack(record: TrackRecord): Promise<void>
   saveStudentAffiliation(record: StudentAffiliation): Promise<void>
-  saveStandardTimetableEntry(record: StandardTimetableEntry): Promise<void>
+  saveRegisteredLessonName(record: RegisteredLessonName): Promise<void>
+  saveStandardTimetableEntry(record: StandardTimetableEntrySeed): Promise<void>
 }
 
 export type PersistenceAdapters = {
@@ -350,7 +373,8 @@ export class InMemoryPersistenceAdapters
   private schoolYearClasses: SchoolYearClassRecord[] = []
   private tracks: TrackRecord[] = []
   private studentAffiliations: StudentAffiliation[] = []
-  private standardTimetableEntries: StandardTimetableEntry[] = []
+  private registeredLessonNames: RegisteredLessonName[] = []
+  private standardTimetableEntries: StandardTimetableEntrySeed[] = []
   private activeTimetableChanges: ActiveTimetableChange[] = []
   private directTimetableChangeOperations = new Map<
     string,
@@ -541,7 +565,28 @@ export class InMemoryPersistenceAdapters
     this.studentAffiliations.push(record)
   }
 
-  async saveStandardTimetableEntry(record: StandardTimetableEntry) {
+  async saveRegisteredLessonName(record: RegisteredLessonName) {
+    const normalizedNameConflict = this.registeredLessonNames.find(
+      (candidate) =>
+        candidate.registeredLessonNameId !== record.registeredLessonNameId &&
+        candidate.normalizedFullLessonName === record.normalizedFullLessonName,
+    )
+    if (normalizedNameConflict) {
+      throw new Error('normalized Full Lesson Name must be unique')
+    }
+    const existingIndex = this.registeredLessonNames.findIndex(
+      (candidate) =>
+        candidate.registeredLessonNameId === record.registeredLessonNameId,
+    )
+    if (existingIndex === -1) {
+      this.registeredLessonNames.push(record)
+    } else {
+      this.registeredLessonNames[existingIndex] = record
+    }
+  }
+
+  async saveStandardTimetableEntry(record: StandardTimetableEntrySeed) {
+    this.requireRegisteredLessonName(record.registeredLessonNameId)
     this.standardTimetableEntries.push(record)
   }
 
@@ -573,12 +618,12 @@ export class InMemoryPersistenceAdapters
     weekday: number,
   ) {
     return this.standardTimetableEntries.filter(
-      (entry): entry is PeriodStandardTimetableEntry =>
+      (entry): entry is PeriodStandardTimetableEntrySeed =>
         entry.referenceType === 'period' &&
         entry.classId === classId &&
         entry.weekday === weekday &&
         (entry.trackId === null || entry.trackId === trackId),
-    )
+    ).map((entry) => this.resolveStandardTimetableEntry(entry))
   }
 
   async findStandardTimetableEntryForPeriodReference(
@@ -603,13 +648,15 @@ export class InMemoryPersistenceAdapters
     referenceLabel: string,
   ) {
     const entries = this.standardTimetableEntries.filter(
-      (entry): entry is FloatingStandardTimetableEntry =>
+      (entry): entry is FloatingStandardTimetableEntrySeed =>
         entry.referenceType === 'floating' &&
         entry.classId === classId &&
         (entry.trackId === null || entry.trackId === trackId) &&
         entry.referenceLabel === referenceLabel,
     )
-    return entries.find((entry) => entry.trackId === trackId) ?? entries[0] ?? null
+    const selected =
+      entries.find((entry) => entry.trackId === trackId) ?? entries[0] ?? null
+    return selected ? this.resolveStandardTimetableEntry(selected) : null
   }
 
   async findStandardTimetableEntryForFloatingReferenceLabelId(
@@ -626,7 +673,7 @@ export class InMemoryPersistenceAdapters
     )
     if (!label) return null
     const entries = this.standardTimetableEntries.filter(
-      (entry): entry is FloatingStandardTimetableEntry =>
+      (entry): entry is FloatingStandardTimetableEntrySeed =>
         entry.referenceType === 'floating' &&
         entry.classId === classId &&
         (entry.trackId === null || entry.trackId === trackId) &&
@@ -634,7 +681,35 @@ export class InMemoryPersistenceAdapters
           entry.referenceLabel === label.referenceLabel),
     )
 
-    return entries.find((entry) => entry.trackId === trackId) ?? entries[0] ?? null
+    const selected =
+      entries.find((entry) => entry.trackId === trackId) ?? entries[0] ?? null
+    return selected ? this.resolveStandardTimetableEntry(selected) : null
+  }
+
+  private resolveStandardTimetableEntry(
+    record: PeriodStandardTimetableEntrySeed,
+  ): PeriodStandardTimetableEntry
+  private resolveStandardTimetableEntry(
+    record: FloatingStandardTimetableEntrySeed,
+  ): FloatingStandardTimetableEntry
+  private resolveStandardTimetableEntry(
+    record: StandardTimetableEntrySeed,
+  ): StandardTimetableEntry {
+    const registeredLessonName = this.requireRegisteredLessonName(
+      record.registeredLessonNameId,
+    )
+    return { ...record, lessonName: registeredLessonName.shortLessonName }
+  }
+
+  private requireRegisteredLessonName(registeredLessonNameId: string) {
+    const registeredLessonName = this.registeredLessonNames.find(
+      (candidate) =>
+        candidate.registeredLessonNameId === registeredLessonNameId,
+    )
+    if (!registeredLessonName) {
+      throw new Error('Standard Timetable requires a Registered Lesson Name')
+    }
+    return registeredLessonName
   }
 
   async listActiveTimetableChangesForStudent(
@@ -952,8 +1027,21 @@ type StandardTimetableEntryRow = {
   weekday: number | null
   period_number: number | null
   reference_label: string | null
+  floating_lesson_reference_label_id: string | null
+  registered_lesson_name_id: string
   lesson_name: string
 }
+
+const standardTimetableEntryReadSql = `
+  select entry.standard_timetable_entry_id, entry.class_id, entry.track_id,
+         entry.reference_type, entry.weekday, entry.period_number,
+         entry.reference_label, entry.floating_lesson_reference_label_id,
+         entry.registered_lesson_name_id,
+         lesson.short_lesson_name as lesson_name
+  from standard_timetable_entries entry
+  join registered_lesson_names lesson
+    on lesson.registered_lesson_name_id = entry.registered_lesson_name_id
+`
 
 type ActiveTimetableChangeRow = {
   change_kind?: 'add' | 'update' | 'remove'
@@ -1435,7 +1523,30 @@ export class D1PersistenceAdapters
       .run()
   }
 
-  async saveStandardTimetableEntry(record: StandardTimetableEntry) {
+  async saveRegisteredLessonName(record: RegisteredLessonName) {
+    await this.db
+      .prepare(
+        `insert into registered_lesson_names (
+          registered_lesson_name_id,
+          full_lesson_name,
+          short_lesson_name,
+          normalized_full_lesson_name
+        ) values (?, ?, ?, ?)
+        on conflict(registered_lesson_name_id) do update set
+          full_lesson_name = excluded.full_lesson_name,
+          short_lesson_name = excluded.short_lesson_name,
+          normalized_full_lesson_name = excluded.normalized_full_lesson_name`,
+      )
+      .bind(
+        record.registeredLessonNameId,
+        record.fullLessonName,
+        record.shortLessonName,
+        record.normalizedFullLessonName,
+      )
+      .run()
+  }
+
+  async saveStandardTimetableEntry(record: StandardTimetableEntrySeed) {
     await this.db
       .prepare(
         `insert into standard_timetable_entries (
@@ -1446,8 +1557,9 @@ export class D1PersistenceAdapters
           weekday,
           period_number,
           reference_label,
-          lesson_name
-        ) values (?, ?, ?, ?, ?, ?, ?, ?)`,
+          floating_lesson_reference_label_id,
+          registered_lesson_name_id
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.standardTimetableEntryId,
@@ -1457,7 +1569,10 @@ export class D1PersistenceAdapters
         record.referenceType === 'period' ? record.weekday : null,
         record.referenceType === 'period' ? record.periodNumber : null,
         record.referenceType === 'floating' ? record.referenceLabel : null,
-        record.lessonName,
+        record.referenceType === 'floating'
+          ? record.floatingLessonReferenceLabelId
+          : null,
+        record.registeredLessonNameId,
       )
       .run()
   }
@@ -1469,14 +1584,12 @@ export class D1PersistenceAdapters
   ) {
     const { results } = await this.db
       .prepare(
-        `select standard_timetable_entry_id, class_id, track_id, reference_type,
-                weekday, period_number, reference_label, lesson_name
-         from standard_timetable_entries
-         where class_id = ?
-           and reference_type = 'period'
-           and weekday = ?
-           and (track_id is null or track_id = ?)
-         order by period_number asc, track_id is not null asc`,
+        `${standardTimetableEntryReadSql}
+         where entry.class_id = ?
+           and entry.reference_type = 'period'
+           and entry.weekday = ?
+           and (entry.track_id is null or entry.track_id = ?)
+         order by entry.period_number asc, entry.track_id is not null asc`,
       )
       .bind(classId, weekday, trackId)
       .all<StandardTimetableEntryRow>()
@@ -1492,13 +1605,11 @@ export class D1PersistenceAdapters
   ) {
     const row = await this.db
       .prepare(
-        `select standard_timetable_entry_id, class_id, track_id, reference_type,
-                weekday, period_number, reference_label, lesson_name
-         from standard_timetable_entries
-         where class_id = ? and reference_type = 'period'
-           and weekday = ? and period_number = ?
-           and (track_id is null or track_id = ?)
-         order by track_id is not null desc
+        `${standardTimetableEntryReadSql}
+         where entry.class_id = ? and entry.reference_type = 'period'
+           and entry.weekday = ? and entry.period_number = ?
+           and (entry.track_id is null or entry.track_id = ?)
+         order by entry.track_id is not null desc
          limit 1`,
       )
       .bind(classId, weekday, periodNumber, trackId)
@@ -1514,12 +1625,11 @@ export class D1PersistenceAdapters
   ) {
     const row = await this.db
       .prepare(
-        `select standard_timetable_entry_id, class_id, track_id, reference_type,
-                weekday, period_number, reference_label, lesson_name
-         from standard_timetable_entries
-         where class_id = ? and reference_type = 'floating'
-           and reference_label = ? and (track_id is null or track_id = ?)
-         order by track_id is not null desc limit 1`,
+        `${standardTimetableEntryReadSql}
+         where entry.class_id = ? and entry.reference_type = 'floating'
+           and entry.reference_label = ?
+           and (entry.track_id is null or entry.track_id = ?)
+         order by entry.track_id is not null desc limit 1`,
       )
       .bind(classId, referenceLabel, trackId)
       .first<StandardTimetableEntryRow>()
@@ -1533,14 +1643,12 @@ export class D1PersistenceAdapters
   ) {
     const row = await this.db
       .prepare(
-        `select standard_timetable_entry_id, class_id, track_id, reference_type,
-                weekday, period_number, reference_label, lesson_name
-         from standard_timetable_entries
-         where class_id = ?
-           and reference_type = 'floating'
-           and floating_lesson_reference_label_id = ?
-           and (track_id is null or track_id = ?)
-         order by track_id is not null desc
+        `${standardTimetableEntryReadSql}
+         where entry.class_id = ?
+           and entry.reference_type = 'floating'
+           and entry.floating_lesson_reference_label_id = ?
+           and (entry.track_id is null or entry.track_id = ?)
+         order by entry.track_id is not null desc
          limit 1`,
       )
       .bind(classId, floatingLessonReferenceLabelId, trackId)
@@ -2256,6 +2364,7 @@ function mapPeriodStandardTimetableEntryRow(
     referenceType: 'period',
     weekday: row.weekday,
     periodNumber: row.period_number,
+    registeredLessonNameId: row.registered_lesson_name_id,
     lessonName: row.lesson_name,
   }
 }
@@ -2263,7 +2372,11 @@ function mapPeriodStandardTimetableEntryRow(
 function mapFloatingStandardTimetableEntryRow(
   row: StandardTimetableEntryRow,
 ): FloatingStandardTimetableEntry {
-  if (row.reference_type !== 'floating' || row.reference_label === null) {
+  if (
+    row.reference_type !== 'floating' ||
+    row.reference_label === null ||
+    row.floating_lesson_reference_label_id === null
+  ) {
     throw new Error('invalid floating Standard Timetable entry')
   }
 
@@ -2273,6 +2386,8 @@ function mapFloatingStandardTimetableEntryRow(
     trackId: row.track_id,
     referenceType: 'floating',
     referenceLabel: row.reference_label,
+    floatingLessonReferenceLabelId: row.floating_lesson_reference_label_id,
+    registeredLessonNameId: row.registered_lesson_name_id,
     lessonName: row.lesson_name,
   }
 }

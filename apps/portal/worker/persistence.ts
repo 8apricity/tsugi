@@ -891,8 +891,10 @@ export class InMemoryPersistenceAdapters
 
     for (const change of changes) {
       const existing = change.kind === 'task'
-        ? this.directTaskOperations.get(change.sourceId)
-        : this.directTimetableChangeOperations.get(change.sourceId)
+        ? this.directTaskOperations.get(change.sourceId) ??
+          this.directTimetableChangeOperations.get(change.sourceId)
+        : this.directTimetableChangeOperations.get(change.sourceId) ??
+          this.directTaskOperations.get(change.sourceId)
 
       if (existing) {
         if (!sameDirectChangeOperationPayload(existing, change)) {

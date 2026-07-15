@@ -1942,6 +1942,20 @@ describe('Unified Direct Change API', () => {
       status: 'idempotency-conflict',
     })
 
+    const crossKindReuse = await addDirectTimetableChanges(env, cookie, [{
+      kind: 'timetable_change',
+      sourceId: validTask.sourceId,
+      changeKind: 'add',
+      targetScopeType: 'student',
+      changeDate: '2026-07-12',
+      periodNumber: 7,
+      replacement: { type: 'cancelled' },
+    }])
+    expect(crossKindReuse.status).toBe(409)
+    await expect(crossKindReuse.json()).resolves.toMatchObject({
+      status: 'idempotency-conflict',
+    })
+
     const invalidTasks = [
       { ...validTask, sourceId: '33600000-0000-4000-8000-000000000001', title: '' },
       { ...validTask, sourceId: '33600000-0000-4000-8000-000000000002', title: 'x'.repeat(121) },

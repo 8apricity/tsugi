@@ -143,8 +143,9 @@ describe('Timetable editor client', () => {
 
   it('retains and marks a Task draft after an idempotency conflict', async () => {
     const sourceId = '33000000-0000-4000-8000-000000000201'
+    const storage = memoryStorage()
     const editor = createTimetableEditorClient({
-      storage: memoryStorage(),
+      storage,
       createId: () => sourceId,
       submitDirectTimetableChanges: async () => ({
         status: 'idempotency-conflict',
@@ -167,6 +168,14 @@ describe('Timetable editor client', () => {
       freshness: 'refreshed',
     })
     expect(editor.getSnapshot()).toMatchObject({
+      editing: true,
+      draftCount: 1,
+      conflictCount: 1,
+      taskDrafts: [{ sourceId, conflicted: true }],
+    })
+
+    const restored = createTimetableEditorClient({ storage })
+    expect(restored.getSnapshot()).toMatchObject({
       editing: true,
       draftCount: 1,
       conflictCount: 1,

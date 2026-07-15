@@ -257,7 +257,7 @@ export function createTimetableEditorClient({
     TimetableLayerState['layers'][number]
   >()
   const conflictKeys = new Set<string>()
-  const taskConflictSourceIds = new Set<string>()
+  const taskConflictSourceIds = new Set(restored.taskConflictSourceIds)
   const stickyConflictKeys = new Set<string>()
   const reconciledKeys = new Set<string>()
   let snapshot = buildSnapshot()
@@ -298,7 +298,13 @@ export function createTimetableEditorClient({
     snapshot = buildSnapshot()
     storage.setItem(
       storageKey,
-      JSON.stringify({ editing, lastTargetScopeType, drafts, taskDrafts }),
+      JSON.stringify({
+        editing,
+        lastTargetScopeType,
+        drafts,
+        taskDrafts,
+        taskConflictSourceIds: [...taskConflictSourceIds],
+      }),
     )
     listeners.forEach((listener) => listener())
   }
@@ -950,6 +956,7 @@ function restore(storage: StorageLike): {
   lastTargetScopeType: TargetScopeType
   drafts: TimetableChangeDraft[]
   taskDrafts: TaskDraft[]
+  taskConflictSourceIds: string[]
 } {
   try {
     const value = storage.getItem(storageKey)
@@ -967,6 +974,16 @@ function restore(storage: StorageLike): {
           .filter((draft): draft is TaskDraft => draft !== null)
           .slice(0, maximumDraftKeys - drafts.length)
       : []
+    const taskDraftSourceIds = new Set(
+      taskDrafts.map((draft) => draft.sourceId),
+    )
+    const taskConflictSourceIds = Array.isArray(parsed.taskConflictSourceIds)
+      ? parsed.taskConflictSourceIds.filter(
+          (sourceId): sourceId is string =>
+            typeof sourceId === 'string' &&
+            taskDraftSourceIds.has(sourceId),
+        )
+      : []
 
     return {
       editing: parsed.editing === true || drafts.length + taskDrafts.length > 0,
@@ -975,6 +992,7 @@ function restore(storage: StorageLike): {
         : 'track',
       drafts,
       taskDrafts,
+      taskConflictSourceIds,
     }
   } catch {
     return {
@@ -982,6 +1000,7 @@ function restore(storage: StorageLike): {
       lastTargetScopeType: 'track',
       drafts: [],
       taskDrafts: [],
+      taskConflictSourceIds: [],
     }
   }
 }

@@ -26,6 +26,7 @@ import {
   readTimetableChangeHistory,
 } from "./timetableChangeHistory";
 import { readReferenceTasks } from "./referenceTasks";
+import { readTaskEditHistory } from "./taskEditHistory";
 
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
@@ -537,6 +538,32 @@ export default {
       }
       if (result.status === "daily-plan-unavailable") {
         return Response.json(result, { status: 503 });
+      }
+      return Response.json(result);
+    }
+
+    const taskHistoryMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/history$/);
+    if (taskHistoryMatch && request.method === "GET") {
+      const persistence = await getPersistenceAdapters(env);
+      const result = await readTaskEditHistory({
+        sessionToken: readCookie(request, sessionCookieName),
+        sharedInformationItemId: decodeURIComponent(taskHistoryMatch[1]),
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        dailyPlanStore: persistence.dailyPlan,
+        historyStore: persistence.taskEditHistory,
+      });
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "unavailable") {
+        return Response.json(result, { status: 503 });
+      }
+      if (result.status === "not-found") {
+        return new Response(null, { status: 404 });
       }
       return Response.json(result);
     }

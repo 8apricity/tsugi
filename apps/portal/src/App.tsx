@@ -31,6 +31,10 @@ import {
 import { createDirectTimetableChangeTransport } from "./timetableSubmissionTransport";
 import type { RegisteredLessonNameOption } from "../shared/lessonNames";
 import type { DailyPlanTaskForCache } from "./dailyPlanCache";
+import {
+  TaskEditHistoryDialog,
+  type TaskEditHistoryState,
+} from "./taskEditHistoryView";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -144,6 +148,13 @@ type TimetableHistoryDialog = {
     | DirectTimetableChangeDetail;
 };
 
+type TaskHistoryDialog = {
+  taskId: string;
+  taskTitle: string;
+  requestId: number;
+  state: TaskEditHistoryState;
+};
+
 function App() {
   const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
   const [schoolEmail, setSchoolEmail] = useState<string | null>(null);
@@ -221,6 +232,8 @@ function App() {
     useState<TaskEditorForm | null>(null);
   const [taskDetail, setTaskDetail] =
     useState<DailyPlanTaskForCache | null>(null);
+  const [taskHistoryDialog, setTaskHistoryDialog] =
+    useState<TaskHistoryDialog | null>(null);
   const [taskLessonNamesExpanded, setTaskLessonNamesExpanded] =
     useState(false);
   const [taskLessonNameListOpen, setTaskLessonNameListOpen] =
@@ -242,7 +255,7 @@ function App() {
   >(null);
   const timetableDialogOpen = Boolean(
     timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
-      taskEditorForm || taskDetail,
+      taskEditorForm || taskDetail || taskHistoryDialog,
   );
 
   useEffect(() => {
@@ -506,6 +519,39 @@ function App() {
       });
     return () => controller.abort();
   }, [timetableHistoryDialog]);
+
+  useEffect(() => {
+    if (!taskHistoryDialog || taskHistoryDialog.state.status !== "loading") {
+      return;
+    }
+    const { taskId, requestId } = taskHistoryDialog;
+    const controller = new AbortController();
+    fetch(`/api/tasks/${encodeURIComponent(taskId)}/history`, {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Task Edit History unavailable");
+        return response.json() as Promise<
+          Extract<TaskEditHistoryState, { status: "ready" }>
+        >;
+      })
+      .then((history) => {
+        setTaskHistoryDialog((current) =>
+          current?.taskId === taskId && current.requestId === requestId
+            ? { ...current, state: history }
+            : current,
+        );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setTaskHistoryDialog((current) =>
+          current?.taskId === taskId && current.requestId === requestId
+            ? { ...current, state: { status: "error" } }
+            : current,
+        );
+      });
+    return () => controller.abort();
+  }, [taskHistoryDialog]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -823,6 +869,7 @@ function App() {
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setTaskDetail(null);
+    setTaskHistoryDialog(null);
     setTimetableLayerDialog(null);
     setTimetableEditorOptions(null);
     setMenuOpen(false);
@@ -1011,6 +1058,16 @@ function App() {
       requestId: 0,
       history: { status: "loading" },
       detail: null,
+    });
+  }
+
+  function openTaskHistory(task: DailyPlanTaskForCache) {
+    setTaskDetail(null);
+    setTaskHistoryDialog({
+      taskId: task.taskId,
+      taskTitle: task.title,
+      requestId: 0,
+      state: { status: "loading" },
     });
   }
 
@@ -2014,31 +2071,54 @@ function App() {
                   <div><dt>Related Lesson Name</dt><dd>{taskDetail.relatedLessonName ?? "なし"}</dd></div>
                   <div><dt>Target Scope</dt><dd>{scopeLabel(taskDetail.targetScopeType)}</dd></div>
                 </dl>
-                {timetableEditor.editing ? (
-                  <div className="editor-dialog-actions">
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={() => openTaskUpdateEditor(taskDetail)}
-                    >
-                      更新
-                    </button>
-                    <button
-                      className="button-danger"
-                      type="button"
-                      onClick={() => {
-                        timetableEditorClient.saveTaskRemoveDraft(
-                          editableTask(taskDetail),
-                        );
-                        setTaskDetail(null);
-                      }}
-                    >
-                      削除
-                    </button>
-                  </div>
-                ) : null}
+                <div className="editor-dialog-actions">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => openTaskHistory(taskDetail)}
+                  >
+                    編集履歴
+                  </button>
+                  {timetableEditor.editing ? (
+                    <>
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => openTaskUpdateEditor(taskDetail)}
+                      >
+                        更新
+                      </button>
+                      <button
+                        className="button-danger"
+                        type="button"
+                        onClick={() => {
+                          timetableEditorClient.saveTaskRemoveDraft(
+                            editableTask(taskDetail),
+                          );
+                          setTaskDetail(null);
+                        }}
+                      >
+                        削除
+                      </button>
+                    </>
+                  ) : null}
+                </div>
               </section>
             </div>
+          ) : null}
+
+          {taskHistoryDialog ? (
+            <TaskEditHistoryDialog
+              taskTitle={taskHistoryDialog.taskTitle}
+              state={taskHistoryDialog.state}
+              onClose={() => setTaskHistoryDialog(null)}
+              onRetry={() => setTaskHistoryDialog((current) =>
+                current ? {
+                  ...current,
+                  requestId: current.requestId + 1,
+                  state: { status: "loading" },
+                } : current)}
+            />
           ) : null}
 
           {timetableHistoryDialog ? (

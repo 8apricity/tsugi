@@ -540,6 +540,83 @@ describe('D1 Direct Timetable Change persistence', () => {
     ).get(`${rolledBackTask.sourceId}:snapshot`)).toEqual({ count: 0 })
   })
 
+  it('retains applied Task proposal changes without exposing proposal participants', async () => {
+    const database = createTestDatabase()
+    const adapters = createD1PersistenceAdapters(
+      new SqliteD1Database(database) as unknown as D1Database,
+    )
+    await adapters.seed.saveStudentAccount({
+      studentAccountId: 'proposal-history-student',
+      schoolEmail: 'proposal-history@example.invalid',
+      displayName: 'Proposal Student',
+    })
+    const taskId = '33a11111-1111-4111-8111-111111111111'
+    const add = {
+      kind: 'task',
+      changeKind: 'add',
+      sourceId: taskId,
+      sharedInformationItemId: taskId,
+      latestChangeId: `${taskId}:change`,
+      targetScope: {
+        type: 'student',
+        schoolYear: 2026,
+        studentAccountId: 'proposal-history-student',
+      },
+      title: '提案前',
+      dueDate: null,
+      relatedLessonName: null,
+      changedByStudentAccountId: 'proposal-history-student',
+      changedAt: 1,
+      createdAt: 1,
+    } satisfies DirectChangeOperation
+    await adapters.directTimetableChange.commitDirectChanges([add])
+
+    database.prepare(`
+      insert into task_snapshots (
+        task_snapshot_id, title, due_date,
+        registered_related_lesson_name_id, related_lesson_name,
+        normalized_custom_lesson_name, created_at
+      ) values (?, '提案後', '2026-07-12', null, null, null, ?)
+    `).run('proposal-history-snapshot', '1970-01-01T00:00:00.002Z')
+    database.prepare(`
+      insert into shared_information_changes (
+        shared_information_change_id, shared_information_item_id,
+        change_kind, source_type, source_id, preceding_change_id,
+        changed_by_student_account_id, changed_at, task_snapshot_id,
+        timetable_change_snapshot_id
+      ) values (?, ?, 'update', 'proposal', null, ?, ?, ?, ?, null)
+    `).run(
+      'proposal-history-change',
+      taskId,
+      add.latestChangeId,
+      'proposal-history-student',
+      '1970-01-01T00:00:00.002Z',
+      'proposal-history-snapshot',
+    )
+    database.prepare(`
+      update shared_information_items
+      set latest_change_id = ?, current_task_snapshot_id = ?
+      where shared_information_item_id = ?
+    `).run('proposal-history-change', 'proposal-history-snapshot', taskId)
+
+    const history = await adapters.taskEditHistory.listTaskEditHistory(taskId)
+    expect(history).toHaveLength(2)
+    expect(history[0]).toMatchObject({
+      sourceType: 'direct',
+      primaryActorDisplayName: 'Proposal Student',
+    })
+    expect(history[1]).toMatchObject({
+      sourceType: 'proposal',
+      precedingChangeId: add.latestChangeId,
+      snapshot: {
+        title: '提案後',
+        dueDate: '2026-07-12',
+        relatedLessonName: null,
+      },
+    })
+    expect('primaryActorDisplayName' in history[1]).toBe(false)
+  })
+
   it('backfills applied predecessors for existing Shared Information Changes', () => {
     const database = createTestDatabase('0010_timetable_direct_change_integrity.sql')
     database.exec('pragma foreign_keys = off')
@@ -927,6 +1004,115 @@ describe.each(targetScopeMembershipAdapterCases)(
           },
         }),
       ])
+    })
+  },
+)
+
+describe.each(targetScopeMembershipAdapterCases)(
+  'Task Edit History adapter conformance: %s',
+  (_name, createAdapters) => {
+    it('retains every applied snapshot and resolves current Short Lesson Names', async () => {
+      const adapters = createAdapters()
+      await adapters.seed.saveStudentAccount({
+        studentAccountId: 'task-history-student',
+        schoolEmail: 'task-history@example.invalid',
+        displayName: 'Task Historian',
+      })
+      await adapters.seed.saveRegisteredLessonName({
+        registeredLessonNameId: 'task-history-geography',
+        fullLessonName: '履歴地理総合',
+        shortLessonName: '履歴地理',
+        normalizedFullLessonName: '履歴地理総合',
+      })
+      const taskId = '40711111-1111-4111-8111-111111111111'
+      const add = {
+        kind: 'task',
+        changeKind: 'add',
+        sourceId: taskId,
+        sharedInformationItemId: taskId,
+        latestChangeId: `${taskId}:change`,
+        targetScope: {
+          type: 'student',
+          schoolYear: 2026,
+          studentAccountId: 'task-history-student',
+        },
+        title: '地理の準備',
+        dueDate: '2026-07-10',
+        relatedLessonName: null,
+        changedByStudentAccountId: 'task-history-student',
+        changedAt: 1,
+        createdAt: 1,
+      } satisfies DirectChangeOperation
+      const updateId = '40722222-2222-4222-8222-222222222222'
+      const update = {
+        ...add,
+        changeKind: 'update',
+        sourceId: updateId,
+        latestChangeId: `${updateId}:change`,
+        expectedLatestChangeId: add.latestChangeId,
+        title: '地理ワークを提出',
+        dueDate: '2026-07-11',
+        relatedLessonName: {
+          registeredLessonNameId: 'task-history-geography',
+          lessonName: '履歴地理',
+        },
+        changedAt: 2,
+      } satisfies DirectChangeOperation
+      const removeId = '40733333-3333-4333-8333-333333333333'
+      const remove = {
+        kind: 'task',
+        changeKind: 'remove',
+        sourceId: removeId,
+        sharedInformationItemId: taskId,
+        latestChangeId: `${removeId}:change`,
+        expectedLatestChangeId: update.latestChangeId,
+        targetScope: add.targetScope,
+        changedByStudentAccountId: 'task-history-student',
+        changedAt: 3,
+      } satisfies DirectChangeOperation
+
+      await expect(adapters.directTimetableChange.commitDirectChanges([add]))
+        .resolves.toMatchObject({ status: 'applied' })
+      await expect(adapters.directTimetableChange.commitDirectChanges([update]))
+        .resolves.toMatchObject({ status: 'applied' })
+      await expect(adapters.directTimetableChange.commitDirectChanges([remove]))
+        .resolves.toMatchObject({ status: 'applied' })
+      await adapters.seed.saveRegisteredLessonName({
+        registeredLessonNameId: 'task-history-geography',
+        fullLessonName: '履歴地理総合',
+        shortLessonName: '履歴地理（新）',
+        normalizedFullLessonName: '履歴地理総合',
+      })
+
+      await expect(adapters.taskEditHistory.listTaskEditHistory(taskId))
+        .resolves.toEqual([
+          expect.objectContaining({
+            sharedInformationChangeId: add.latestChangeId,
+            precedingChangeId: null,
+            primaryActorDisplayName: 'Task Historian',
+            snapshot: {
+              title: '地理の準備',
+              dueDate: '2026-07-10',
+              relatedLessonName: null,
+            },
+          }),
+          expect.objectContaining({
+            sharedInformationChangeId: update.latestChangeId,
+            precedingChangeId: add.latestChangeId,
+            primaryActorDisplayName: 'Task Historian',
+            snapshot: {
+              title: '地理ワークを提出',
+              dueDate: '2026-07-11',
+              relatedLessonName: '履歴地理（新）',
+            },
+          }),
+          expect.objectContaining({
+            sharedInformationChangeId: remove.latestChangeId,
+            precedingChangeId: update.latestChangeId,
+            primaryActorDisplayName: 'Task Historian',
+            snapshot: null,
+          }),
+        ])
     })
   },
 )

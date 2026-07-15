@@ -1136,6 +1136,11 @@ button.timetable-layer-row {
   padding: 12px;
 }
 
+.task-history-transition .transition-arrow {
+  align-self: center;
+  justify-self: center;
+}
+
 .task-history-snapshot {
   min-width: 0;
   padding: 12px;

@@ -46,7 +46,7 @@ Showing a student's display name as the source of Tsugi activity in edit history
 _Avoid_: Real-name attribution, anonymous identity, reputation
 
 **Edit History**:
-The Target Scope student view of Shared Information Changes for one Target Scope, Change Date, and period. Timetable Change edit history includes current and removed Shared Information Items that occupied the slot, keeps a removed item and a later add as separate item histories, and shows Named Attribution only after Target Scope membership is established. Direct Change detail derives before values from the preceding applied change of the same item and displays stored Lesson References without claiming a reconstructed historical Lesson Name.
+The Target Scope student view of applied Shared Information Changes. Timetable Change edit history includes current and removed Shared Information Items that occupied one Target Scope, Change Date, and period, while Task edit history follows the add, update, and removal of one Task. Edit history shows Named Attribution only after Target Scope membership is established, derives before values from the preceding applied change of the same item, and displays stored Lesson References without claiming a reconstructed historical Lesson Name.
 _Avoid_: Audit log, Reference Scope history, reactivation history
 
 **Student Affiliation**:
@@ -150,7 +150,7 @@ A target scope outside a student's own current target scopes that the student ch
 _Avoid_: Reference view, public feed, unrestricted access
 
 **Standard Timetable**:
-The baseline timetable information for a class and track in a school year. A standard timetable contains recurring lesson slots and may also contain floating lesson references such as "★". Track-specific standard timetable values override class-common values, and timetable changes may refer back to this baseline with lesson references. A lesson slot without an applicable value has no lesson name; Tsugi does not distinguish an intentionally empty slot from an unset slot.
+The baseline timetable information for a class and track in a school year. A standard timetable contains recurring lesson slots whose values are registered lesson names and may also contain floating lesson references such as "★". Track-specific standard timetable values override class-common values, and timetable changes may refer back to this baseline with lesson references. A lesson slot without an applicable value has no lesson name; Tsugi does not distinguish an intentionally empty slot from an unset slot.
 _Avoid_: Default calendar, school-wide timetable
 
 **Timetable Change**:
@@ -189,6 +189,26 @@ _Avoid_: Lesson, subject, period, course
 The displayed name assigned to a daily lesson or lesson slot, such as Mathematics, English, or homeroom. A task may be related to a lesson name without being related to one specific daily lesson on a school date.
 _Avoid_: Subject, course
 
+**Full Lesson Name**:
+The complete school-community name that distinguishes one registered lesson identity from another, such as Geography Integrated or Advanced Geography.
+_Avoid_: Short lesson name, preferred lesson name, official subject
+
+**Short Lesson Name**:
+The concise school-community name ordinarily shown for a registered lesson identity, such as Geography for either Geography Integrated or Advanced Geography.
+_Avoid_: Full lesson name, preferred lesson name, display name
+
+**Preferred Lesson Name**:
+A student's private preferred name for one registered lesson identity. It changes only how that student sees and searches for the lesson, not the shared information or another student's view.
+_Avoid_: Display name, shared lesson name, full lesson name
+
+**Related Lesson Name**:
+The optional lesson name associated with a task. A related lesson name identifies the task's lesson context without tying the task to one specific daily lesson on a school date.
+_Avoid_: Related daily lesson, lesson reference, subject
+
+**Registered Lesson Name**:
+A stable lesson identity registered inside the school community for consistent selection and search, with a full lesson name and a short lesson name. Standard timetables use registered lesson names, while timetable changes and tasks may also use lesson names that are not registered; names may be corrected without changing the registered identity.
+_Avoid_: Standard lesson name, official subject, required lesson name
+
 **Lesson Reference**:
 A shorthand reference defined by the standard timetable that resolves to a lesson name for a class or track. A lesson reference may be a period reference or a floating lesson reference.
 _Avoid_: Lesson slot, subject name, lesson name
@@ -202,7 +222,7 @@ A lesson reference used in timetable changes that is not bound to a weekday and 
 _Avoid_: Lesson slot, period reference, subject name
 
 **Task**:
-A school-life obligation shared inside the school community with a due date and target scope. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete. A task may optionally be related to a daily lesson, a lesson name, or both. A task can have an individual student as its target scope without becoming a separate personal-task concept.
+A school-life obligation shared inside the school community with a target scope and an optional due date. A task may be homework, preparation, a form to submit, something to bring, or another action students need to complete. A task may optionally have a related lesson name, but is not related to one specific daily lesson. A task can have an individual student as its target scope without becoming a separate personal-task concept.
 _Avoid_: Assignment, homework, todo
 
 **Note**:
@@ -300,13 +320,13 @@ Developer: Is bringing a calculator tomorrow an assignment?
 Domain expert: No. In Tsugi it is a task, because tasks include more than homework.
 
 Developer: Does every task need to be tied to a lesson?
-Domain expert: No. A task has a target scope and due date; a daily lesson or lesson name is only an optional relation.
+Domain expert: No. A task has a target scope and may have a due date; a related lesson name is optional.
 
 Developer: Can a task be due at a period-level timing such as "before third period"?
 Domain expert: Not as formal task data. A task's due timing is date-level; period-level instructions can be written in a note related to that task.
 
-Developer: Can a task be related to a lesson name without being related to one daily lesson on one school date?
-Domain expert: Yes. A task may be related to a lesson name, a specific daily lesson, both, or neither.
+Developer: Can a task be related to one specific daily lesson on one school date?
+Domain expert: No. A task may have a related lesson name, but that does not tie the task to one specific daily lesson.
 
 Developer: If a student marks a task complete, does that approve the task information?
 Domain expert: No. Task completion is personal progress, while approval is about accepting a proposed change to shared information.

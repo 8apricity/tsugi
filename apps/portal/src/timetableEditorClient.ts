@@ -1,5 +1,6 @@
 import {
   projectTimetableSlot,
+  timetableReplacementsEqual,
   type DesiredTimetableLayer,
   type TargetScopeType as ProjectionTargetScopeType,
   type TimetableReference as ProjectionTimetableReference,
@@ -322,7 +323,7 @@ export function createTimetableEditorClient({
         (serverLayer?.state === 'active' ? serverLayer.replacement : undefined)
       if (
         serverReplacement &&
-        replacementsEqual(input.replacement, serverReplacement)
+        timetableReplacementsEqual(input.replacement, serverReplacement)
       ) {
         if (removeDraftByKey(key)) {
           conflictKeys.delete(key)
@@ -781,25 +782,15 @@ function restoreTimetableChangeDraft(value: unknown): TimetableChangeDraft | nul
     : null
 }
 
-function replacementsEqual(left: TimetableReplacement, right: TimetableReplacement) {
-  if (left.type !== right.type) return false
-  if (left.type === 'cancelled') return true
-  if (left.type === 'lesson_name' && right.type === 'lesson_name') {
-    return left.lessonName === right.lessonName
-  }
-  if (left.type === 'period_reference' && right.type === 'period_reference') {
-    return left.weekday === right.weekday && left.periodNumber === right.periodNumber
-  }
-  return left.type === 'floating_lesson_reference' &&
-    right.type === 'floating_lesson_reference' &&
-    left.floatingLessonReferenceLabelId === right.floatingLessonReferenceLabelId
-}
-
 function isReplacement(value: unknown): value is TimetableReplacement {
   if (!value || typeof value !== 'object') return false
   const replacement = value as Record<string, unknown>
   if (replacement.type === 'cancelled') return true
-  if (replacement.type === 'lesson_name') return typeof replacement.lessonName === 'string'
+  if (replacement.type === 'lesson_name') {
+    return typeof replacement.lessonName === 'string' &&
+      (replacement.registeredLessonNameId === undefined ||
+        typeof replacement.registeredLessonNameId === 'string')
+  }
   if (replacement.type === 'period_reference') {
     return Number.isInteger(replacement.weekday) && Number.isInteger(replacement.periodNumber)
   }

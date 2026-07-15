@@ -1,8 +1,10 @@
 // Domain-local seams share storage implementations without sharing caller interfaces.
 import type { StudentOperationalContextStore } from './studentOperationalContext'
+import { timetableReplacementsEqual } from '../shared/timetableProjection'
 import type {
   TimetableReplacement as ProjectionTimetableReplacement,
 } from '../shared/timetableProjection'
+import { normalizeLessonName } from '../shared/lessonNames'
 import { targetScopeValue } from './targetScopeBoundary'
 import {
   studentAffiliationIncludesTargetScope,
@@ -325,6 +327,10 @@ export type DirectTimetableChangeStore = StudentOperationalContextStore & {
     trackId: string,
     floatingLessonReferenceLabelId: string,
   ): Promise<FloatingStandardTimetableEntry | null>
+  findRegisteredLessonName(
+    registeredLessonNameId: string,
+  ): Promise<RegisteredLessonName | null>
+  listRegisteredLessonNames(): Promise<RegisteredLessonName[]>
 }
 
 export type TimetableChangeHistoryStore = {
@@ -585,6 +591,17 @@ export class InMemoryPersistenceAdapters
     }
   }
 
+  async findRegisteredLessonName(registeredLessonNameId: string) {
+    return this.registeredLessonNames.find(
+      (candidate) =>
+        candidate.registeredLessonNameId === registeredLessonNameId,
+    ) ?? null
+  }
+
+  async listRegisteredLessonNames() {
+    return [...this.registeredLessonNames]
+  }
+
   async saveStandardTimetableEntry(record: StandardTimetableEntrySeed) {
     this.requireRegisteredLessonName(record.registeredLessonNameId)
     this.standardTimetableEntries.push(record)
@@ -723,7 +740,12 @@ export class InMemoryPersistenceAdapters
         affiliation,
         change.targetScope,
       )
-    })
+    }).map((change) => ({
+      ...change,
+      replacement: change.replacement.type === 'lesson_name'
+        ? this.resolveLessonNameReplacement(change.replacement)
+        : change.replacement,
+    }))
   }
 
   async commitDirectTimetableChanges(changes: DirectTimetableChangeOperation[]) {
@@ -835,7 +857,9 @@ export class InMemoryPersistenceAdapters
           )?.referenceLabel ?? floatingReferenceId,
         }
       } else {
-        replacement = change.replacement
+        replacement = change.replacement.type === 'lesson_name'
+          ? this.resolveLessonNameReplacement(change.replacement)
+          : change.replacement
       }
     }
     return {
@@ -854,6 +878,18 @@ export class InMemoryPersistenceAdapters
         ? null
         : change.expectedLatestChangeId,
       replacement,
+    }
+  }
+
+  private resolveLessonNameReplacement(
+    replacement: Extract<TimetableChangeReplacement, { type: 'lesson_name' }>,
+  ) {
+    if (!replacement.registeredLessonNameId) return replacement
+    return {
+      ...replacement,
+      lessonName: this.requireRegisteredLessonName(
+        replacement.registeredLessonNameId,
+      ).shortLessonName,
     }
   }
 
@@ -1059,6 +1095,7 @@ type ActiveTimetableChangeRow = {
   period_number: number
   replacement_type: 'lesson_name' | 'period_reference' | 'floating_lesson_reference' | 'cancelled'
   replacement_lesson_name: string | null
+  registered_lesson_name_id: string | null
   reference_weekday: number | null
   reference_period_number: number | null
   reference_label: string | null
@@ -1082,6 +1119,7 @@ type HistoricalTimetableChangeRow = {
   period_number: number
   replacement_type: TimetableChangeReplacement['type'] | null
   replacement_lesson_name: string | null
+  registered_lesson_name_id: string | null
   reference_weekday: number | null
   reference_period_number: number | null
   reference_label: string | null
@@ -1089,6 +1127,48 @@ type HistoricalTimetableChangeRow = {
   display_name: string
   changed_at: string
   preceding_change_id: string | null
+}
+
+type LegacyCustomLessonNameRow = {
+  timetable_change_snapshot_id: string
+  replacement_lesson_name: string
+}
+
+const lessonNameNormalizationBackfills = new WeakMap<
+  D1Database,
+  Promise<void>
+>()
+
+export function backfillLegacyCustomLessonNameNormalization(db: D1Database) {
+  const existing = lessonNameNormalizationBackfills.get(db)
+  if (existing) return existing
+
+  const backfill = (async () => {
+    while (true) {
+      const { results } = await db.prepare(
+        `select timetable_change_snapshot_id, replacement_lesson_name
+         from timetable_change_snapshots
+         where replacement_type = 'lesson_name'
+           and registered_lesson_name_id is null
+           and normalized_custom_lesson_name is null
+         limit 100`,
+      ).all<LegacyCustomLessonNameRow>()
+      if (results.length === 0) return
+
+      await db.batch(results.map((row) => db.prepare(
+        `update timetable_change_snapshots
+         set normalized_custom_lesson_name = ?
+         where timetable_change_snapshot_id = ?
+           and normalized_custom_lesson_name is null`,
+      ).bind(
+        normalizeLessonName(row.replacement_lesson_name),
+        row.timetable_change_snapshot_id,
+      )))
+    }
+  })()
+  lessonNameNormalizationBackfills.set(db, backfill)
+  backfill.catch(() => lessonNameNormalizationBackfills.delete(db))
+  return backfill
 }
 
 export class D1PersistenceAdapters
@@ -1546,6 +1626,41 @@ export class D1PersistenceAdapters
       .run()
   }
 
+  async findRegisteredLessonName(registeredLessonNameId: string) {
+    const row = await this.db
+      .prepare(
+        `select registered_lesson_name_id, full_lesson_name,
+                short_lesson_name, normalized_full_lesson_name
+         from registered_lesson_names
+         where registered_lesson_name_id = ?`,
+      )
+      .bind(registeredLessonNameId)
+      .first<{
+        registered_lesson_name_id: string
+        full_lesson_name: string
+        short_lesson_name: string
+        normalized_full_lesson_name: string
+      }>()
+    return row ? mapRegisteredLessonNameRow(row) : null
+  }
+
+  async listRegisteredLessonNames() {
+    const { results } = await this.db
+      .prepare(
+        `select registered_lesson_name_id, full_lesson_name,
+                short_lesson_name, normalized_full_lesson_name
+         from registered_lesson_names
+         order by rowid`,
+      )
+      .all<{
+        registered_lesson_name_id: string
+        full_lesson_name: string
+        short_lesson_name: string
+        normalized_full_lesson_name: string
+      }>()
+    return results.map(mapRegisteredLessonNameRow)
+  }
+
   async saveStandardTimetableEntry(record: StandardTimetableEntrySeed) {
     await this.db
       .prepare(
@@ -1668,7 +1783,10 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id, p.student_account_id,
                 t.change_date, t.period_number, t.replacement_type,
-                t.replacement_lesson_name, t.reference_weekday,
+                t.registered_lesson_name_id,
+                coalesce(registered_lesson.short_lesson_name,
+                         t.replacement_lesson_name) as replacement_lesson_name,
+                t.reference_weekday,
                 t.reference_period_number, t.reference_label,
                 t.floating_lesson_reference_label_id,
                 c.changed_by_student_account_id, c.changed_at
@@ -1677,6 +1795,9 @@ export class D1PersistenceAdapters
          join target_scope_parts p on p.target_scope_id = s.target_scope_id
          join timetable_change_snapshots t
            on t.timetable_change_snapshot_id = i.current_timetable_change_snapshot_id
+         left join registered_lesson_names registered_lesson
+           on registered_lesson.registered_lesson_name_id =
+             t.registered_lesson_name_id
           join shared_information_changes c
             on c.shared_information_change_id = i.latest_change_id
           where i.kind = 'timetable_change' and i.removed_at is null
@@ -1772,7 +1893,14 @@ export class D1PersistenceAdapters
         change.changeDate,
         change.periodNumber,
         replacement?.type,
+        replacement?.type === 'lesson_name'
+          ? replacement.registeredLessonNameId ?? null
+          : null,
         replacement?.type === 'lesson_name' ? replacement.lessonName : null,
+        replacement?.type === 'lesson_name' &&
+            !replacement.registeredLessonNameId
+          ? normalizeLessonName(replacement.lessonName)
+          : null,
         replacement?.type === 'period_reference' ? replacement.weekday : null,
         replacement?.type === 'period_reference' ? replacement.periodNumber : null,
         replacement?.type === 'floating_lesson_reference'
@@ -1790,7 +1918,7 @@ export class D1PersistenceAdapters
         statements.push(
           this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.targetScope.schoolYear, createdAt),
           this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScope.type, part.grade, part.classId, part.trackId, part.studentAccountId),
-          this.db.prepare(`insert into timetable_change_snapshots (timetable_change_snapshot_id, change_date, period_number, replacement_type, replacement_lesson_name, reference_weekday, reference_period_number, reference_label, floating_lesson_reference_label_id, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(...snapshotValues),
+          this.db.prepare(`insert into timetable_change_snapshots (timetable_change_snapshot_id, change_date, period_number, replacement_type, registered_lesson_name_id, replacement_lesson_name, normalized_custom_lesson_name, reference_weekday, reference_period_number, reference_label, floating_lesson_reference_label_id, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(...snapshotValues),
           this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_timetable_change_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'timetable_change', ?, null, ?, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
           this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, timetable_change_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
           this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
@@ -1801,11 +1929,12 @@ export class D1PersistenceAdapters
           this.db.prepare(
             `insert into timetable_change_snapshots (
                timetable_change_snapshot_id, change_date, period_number,
-               replacement_type, replacement_lesson_name, reference_weekday,
-               reference_period_number, reference_label,
+               replacement_type, registered_lesson_name_id,
+               replacement_lesson_name, normalized_custom_lesson_name,
+               reference_weekday, reference_period_number, reference_label,
                floating_lesson_reference_label_id, created_at
              )
-             select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+             select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              from shared_information_items i
              join active_timetable_change_slots a
                on a.shared_information_item_id = i.shared_information_item_id
@@ -1927,7 +2056,10 @@ export class D1PersistenceAdapters
                 c.shared_information_item_id, c.change_kind, c.source_type,
                 s.school_year, p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, slot.change_date, slot.period_number,
-                snapshot.replacement_type, snapshot.replacement_lesson_name,
+                snapshot.replacement_type,
+                snapshot.registered_lesson_name_id,
+                coalesce(registered_lesson.short_lesson_name,
+                         snapshot.replacement_lesson_name) as replacement_lesson_name,
                 snapshot.reference_weekday, snapshot.reference_period_number,
                 coalesce(label.reference_label, snapshot.reference_label) as reference_label,
                 snapshot.floating_lesson_reference_label_id,
@@ -1949,6 +2081,9 @@ export class D1PersistenceAdapters
          )
          left join timetable_change_snapshots snapshot
            on snapshot.timetable_change_snapshot_id = c.timetable_change_snapshot_id
+         left join registered_lesson_names registered_lesson
+           on registered_lesson.registered_lesson_name_id =
+             snapshot.registered_lesson_name_id
          left join floating_lesson_reference_labels label
            on label.floating_lesson_reference_label_id =
              snapshot.floating_lesson_reference_label_id
@@ -1971,7 +2106,10 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id, p.student_account_id,
                 t.change_date, t.period_number, t.replacement_type,
-                t.replacement_lesson_name, t.reference_weekday,
+                t.registered_lesson_name_id,
+                coalesce(registered_lesson.short_lesson_name,
+                         t.replacement_lesson_name) as replacement_lesson_name,
+                t.reference_weekday,
                 t.reference_period_number, t.reference_label,
                 t.floating_lesson_reference_label_id,
                 c.changed_by_student_account_id, c.changed_at
@@ -1980,6 +2118,9 @@ export class D1PersistenceAdapters
          join target_scope_parts p on p.target_scope_id = s.target_scope_id
          join timetable_change_snapshots t
            on t.timetable_change_snapshot_id = i.current_timetable_change_snapshot_id
+         left join registered_lesson_names registered_lesson
+           on registered_lesson.registered_lesson_name_id =
+             t.registered_lesson_name_id
          join shared_information_changes c
            on c.shared_information_change_id = i.latest_change_id
          join active_timetable_change_slots a
@@ -2008,7 +2149,10 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id, p.student_account_id,
                 t.change_date, t.period_number, t.replacement_type,
-                t.replacement_lesson_name, t.reference_weekday,
+                t.registered_lesson_name_id,
+                coalesce(registered_lesson.short_lesson_name,
+                         t.replacement_lesson_name) as replacement_lesson_name,
+                t.reference_weekday,
                 t.reference_period_number, t.reference_label,
                 t.floating_lesson_reference_label_id,
                 c.changed_by_student_account_id, c.changed_at
@@ -2017,6 +2161,9 @@ export class D1PersistenceAdapters
          join target_scopes s on s.target_scope_id = i.target_scope_id
          join target_scope_parts p on p.target_scope_id = s.target_scope_id
          join timetable_change_snapshots t on t.timetable_change_snapshot_id = coalesce(c.timetable_change_snapshot_id, i.current_timetable_change_snapshot_id)
+         left join registered_lesson_names registered_lesson
+           on registered_lesson.registered_lesson_name_id =
+             t.registered_lesson_name_id
          where c.source_type = 'direct' and c.source_id in (${placeholders})`,
       )
       .bind(...sourceIds)
@@ -2428,7 +2575,13 @@ function mapActiveTimetableChangeRow(
   let replacement: TimetableChangeReplacement
 
   if (row.replacement_type === 'lesson_name') {
-    replacement = { type: 'lesson_name', lessonName: row.replacement_lesson_name ?? '' }
+    replacement = {
+      type: 'lesson_name',
+      lessonName: row.replacement_lesson_name ?? '',
+      ...(row.registered_lesson_name_id
+        ? { registeredLessonNameId: row.registered_lesson_name_id }
+        : {}),
+    }
   } else if (row.replacement_type === 'period_reference') {
     replacement = {
       type: 'period_reference',
@@ -2466,6 +2619,9 @@ function mapHistoricalTimetableChangeRow(
     replacement = {
       type: 'lesson_name',
       lessonName: row.replacement_lesson_name ?? '',
+      ...(row.registered_lesson_name_id
+        ? { registeredLessonNameId: row.registered_lesson_name_id }
+        : {}),
     }
   } else if (row.replacement_type === 'period_reference') {
     replacement = {
@@ -2495,6 +2651,20 @@ function mapHistoricalTimetableChangeRow(
     changedAt: Date.parse(row.changed_at),
     precedingChangeId: row.preceding_change_id,
     replacement,
+  }
+}
+
+function mapRegisteredLessonNameRow(row: {
+  registered_lesson_name_id: string
+  full_lesson_name: string
+  short_lesson_name: string
+  normalized_full_lesson_name: string
+}): RegisteredLessonName {
+  return {
+    registeredLessonNameId: row.registered_lesson_name_id,
+    fullLessonName: row.full_lesson_name,
+    shortLessonName: row.short_lesson_name,
+    normalizedFullLessonName: row.normalized_full_lesson_name,
   }
 }
 
@@ -2580,6 +2750,6 @@ function sameDirectOperationPayload(
     sameDirectChangeBase(left, right) &&
     (left.changeKind === 'remove' || right.changeKind === 'remove'
       ? left.changeKind === right.changeKind
-      : JSON.stringify(left.replacement) === JSON.stringify(right.replacement))
+      : timetableReplacementsEqual(left.replacement, right.replacement))
   )
 }

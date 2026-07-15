@@ -6,6 +6,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  backfillLegacyCustomLessonNameNormalization,
   createD1PersistenceAdapters,
   createInMemoryPersistenceAdapters,
   type DirectTimetableChangeOperation,
@@ -247,6 +248,18 @@ describe('D1 Direct Timetable Change persistence', () => {
     })
   })
 
+  it('stores Registered identity separately from normalized custom Lesson Name text', () => {
+    const database = createTestDatabase()
+    const columns = database.prepare(
+      'pragma table_info(timetable_change_snapshots)',
+    ).all() as Array<{ name: string }>
+
+    expect(columns.map(({ name }) => name)).toEqual(expect.arrayContaining([
+      'registered_lesson_name_id',
+      'normalized_custom_lesson_name',
+    ]))
+  })
+
   it('backfills applied predecessors for existing Shared Information Changes', () => {
     const database = createTestDatabase('0010_timetable_direct_change_integrity.sql')
     database.exec('pragma foreign_keys = off')
@@ -327,7 +340,7 @@ describe('D1 Direct Timetable Change persistence', () => {
     const add = operation({
       sourceId: '30111111-1111-4111-8111-111111111111',
       changeKind: 'add',
-      replacement: { type: 'lesson_name', lessonName: '変更前' },
+      replacement: { type: 'lesson_name', lessonName: 'Ｓｐｅｃｉａｌ   LESSON' },
     })
     const remove = operation({
       sourceId: '30222222-2222-4222-8222-222222222222',
@@ -339,6 +352,28 @@ describe('D1 Direct Timetable Change persistence', () => {
     await expect(
       adapters.directTimetableChange.commitDirectTimetableChanges([add]),
     ).resolves.toMatchObject({ status: 'applied' })
+    expect(database.prepare(
+      `select normalized_custom_lesson_name
+       from timetable_change_snapshots
+       where timetable_change_snapshot_id = ?`,
+    ).get(`${add.sourceId}:snapshot`)).toEqual({
+      normalized_custom_lesson_name: 'special lesson',
+    })
+    database.prepare(
+      `update timetable_change_snapshots
+       set normalized_custom_lesson_name = null
+       where timetable_change_snapshot_id = ?`,
+    ).run(`${add.sourceId}:snapshot`)
+    await backfillLegacyCustomLessonNameNormalization(
+      new SqliteD1Database(database) as unknown as D1Database,
+    )
+    expect(database.prepare(
+      `select normalized_custom_lesson_name
+       from timetable_change_snapshots
+       where timetable_change_snapshot_id = ?`,
+    ).get(`${add.sourceId}:snapshot`)).toEqual({
+      normalized_custom_lesson_name: 'special lesson',
+    })
     await expect(
       adapters.directTimetableChange.commitDirectTimetableChanges([remove]),
     ).resolves.toMatchObject({ status: 'applied' })
@@ -383,7 +418,10 @@ describe('D1 Direct Timetable Change persistence', () => {
         sharedInformationChangeId: add.latestChangeId,
         changeKind: 'add',
         primaryActorDisplayName: 'Student',
-        replacement: { type: 'lesson_name', lessonName: '変更前' },
+        replacement: {
+          type: 'lesson_name',
+          lessonName: 'Ｓｐｅｃｉａｌ   LESSON',
+        },
       }),
       expect.objectContaining({
         sharedInformationChangeId: remove.latestChangeId,
@@ -513,6 +551,105 @@ const targetScopeMembershipAdapterCases: Array<
     ),
   ],
 ]
+
+describe.each(targetScopeMembershipAdapterCases)(
+  'Registered Timetable Change Lesson Name adapter conformance: %s',
+  (_name, createAdapters) => {
+    it('renders the current Short Lesson Name in projection and history and retries by identity', async () => {
+      const adapters = createAdapters()
+      const affiliation: StudentAffiliation = {
+        studentAffiliationId: 'affiliation-registered',
+        studentAccountId: 'student-1',
+        schoolYear: 2026,
+        grade: 2,
+        classId: 'class-registered',
+        trackId: 'track-registered',
+        selectedAt: 1,
+        endedAt: null,
+      }
+      await adapters.seed.saveStudentAccount({
+        studentAccountId: affiliation.studentAccountId,
+        schoolEmail: 'registered@example.invalid',
+        displayName: 'Registered Student',
+      })
+      await adapters.seed.saveSchoolYearClass({
+        classId: affiliation.classId,
+        schoolYear: 2026,
+        grade: 2,
+        classNumber: 1,
+      })
+      await adapters.seed.saveTrack({
+        trackId: affiliation.trackId,
+        classId: affiliation.classId,
+        trackName: 'Track',
+      })
+      await adapters.seed.saveRegisteredLessonName({
+        registeredLessonNameId: 'geography',
+        fullLessonName: '地理総合',
+        shortLessonName: '地理',
+        normalizedFullLessonName: '地理総合',
+      })
+      const change = operation({
+        sourceId: '40666666-6666-4666-8666-666666666666',
+        changeKind: 'add',
+        targetScope: {
+          type: 'track',
+          schoolYear: 2026,
+          trackId: affiliation.trackId,
+        },
+        replacement: {
+          type: 'lesson_name',
+          registeredLessonNameId: 'geography',
+          lessonName: '地理',
+        },
+      })
+
+      await expect(
+        adapters.directTimetableChange.commitDirectTimetableChanges([change]),
+      ).resolves.toMatchObject({ status: 'applied' })
+      await adapters.seed.saveRegisteredLessonName({
+        registeredLessonNameId: 'geography',
+        fullLessonName: '地理総合',
+        shortLessonName: '地理（新）',
+        normalizedFullLessonName: '地理総合',
+      })
+      await expect(
+        adapters.directTimetableChange.commitDirectTimetableChanges([change]),
+      ).resolves.toMatchObject({ status: 'applied' })
+
+      await expect(
+        adapters.dailyPlan.listActiveTimetableChangesForStudent(
+          affiliation,
+          '2026-07-10',
+          '2026-07-10',
+        ),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          replacement: {
+            type: 'lesson_name',
+            registeredLessonNameId: 'geography',
+            lessonName: '地理（新）',
+          },
+        }),
+      ])
+      await expect(
+        adapters.timetableChangeHistory.listTimetableChangeHistory({
+          targetScope: change.targetScope,
+          changeDate: change.changeDate,
+          periodNumber: change.periodNumber,
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          replacement: {
+            type: 'lesson_name',
+            registeredLessonNameId: 'geography',
+            lessonName: '地理（新）',
+          },
+        }),
+      ])
+    })
+  },
+)
 
 describe.each(targetScopeMembershipAdapterCases)(
   'Target Scope membership adapter conformance: %s',

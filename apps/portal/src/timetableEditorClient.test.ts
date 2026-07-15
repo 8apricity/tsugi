@@ -166,6 +166,58 @@ describe('Timetable editor client', () => {
     expect(editor.getSnapshot().drafts).toEqual([])
   })
 
+  it('persists Registered identity and compares Registered Lesson Names by identity', () => {
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({ storage })
+    editor.reconcileLayerState(layerState([
+      { targetScopeType: 'grade', state: 'unchanged' },
+      { targetScopeType: 'class', state: 'unchanged' },
+      {
+        targetScopeType: 'track',
+        state: 'active',
+        sharedInformationItemId: 'item-registered',
+        latestChangeId: 'change-registered',
+        replacement: {
+          type: 'lesson_name',
+          registeredLessonNameId: 'geography',
+          lessonName: '地理（新）',
+        },
+        changedAt: 1,
+      },
+      { targetScopeType: 'student', state: 'unchanged' },
+    ]))
+
+    expect(editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: {
+        type: 'lesson_name',
+        registeredLessonNameId: 'geography',
+        lessonName: '地理',
+      },
+    })).toEqual({ status: 'removed-noop' })
+
+    editor.setDesiredState({
+      targetScopeType: 'student',
+      changeDate: '2026-07-11',
+      periodNumber: 4,
+      replacement: {
+        type: 'lesson_name',
+        registeredLessonNameId: 'geography',
+        lessonName: '地理',
+      },
+    })
+    const restored = createTimetableEditorClient({ storage })
+    expect(restored.findDraft('student', '2026-07-11', 4)).toMatchObject({
+      replacement: {
+        type: 'lesson_name',
+        registeredLessonNameId: 'geography',
+        lessonName: '地理',
+      },
+    })
+  })
+
   it('marks a restored update draft stale without rebasing or dropping its desired state', () => {
     const storage = memoryStorage()
     const initial = createTimetableEditorClient({ storage })

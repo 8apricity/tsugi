@@ -947,7 +947,11 @@ describe('Timetable Direct Add API', () => {
 
     const response = await readDirectTimetableChangeOptions(env, cookie)
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({
+    const body = await response.json() as {
+      registeredLessonNames: Array<{ registeredLessonNameId: string }>
+      [key: string]: unknown
+    }
+    expect(body).toMatchObject({
       periodReferences: expect.arrayContaining([
         { weekday: 1, periodNumber: 1, lessonName: '数Ⅱβ' },
         { weekday: 2, periodNumber: 2, lessonName: '古典' },
@@ -955,6 +959,80 @@ describe('Timetable Direct Add API', () => {
       floatingLessonReferenceLabels: expect.arrayContaining([
         expect.objectContaining({ referenceLabel: '★', lessonName: '自走' }),
       ]),
+      registeredLessonNames: expect.arrayContaining([
+        expect.objectContaining({ registeredLessonNameId: 'mathematics-2-beta' }),
+        expect.objectContaining({ registeredLessonNameId: 'classics' }),
+        expect.objectContaining({ registeredLessonNameId: 'self-directed-study' }),
+      ]),
+      allRegisteredLessonNames: expect.arrayContaining([
+        expect.objectContaining({ registeredLessonNameId: 'geography' }),
+        expect.objectContaining({ registeredLessonNameId: 'biology' }),
+      ]),
+    })
+    const prioritizedIds = body.registeredLessonNames.map(
+      ({ registeredLessonNameId }) => registeredLessonNameId,
+    )
+    expect(prioritizedIds).not.toContain('class-common-fallback')
+    expect(prioritizedIds).not.toContain('biology')
+  })
+
+  it('persists Registered and custom direct Lesson Names through projection, history, and retries', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(env, 'test-student-2026-2-3-humanities-1')
+    const registeredId = '12111111-1111-4111-8111-111111111111'
+    const customId = '13111111-1111-4111-8111-111111111111'
+    const changes = [
+      {
+        sourceId: registeredId,
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+        replacement: {
+          type: 'lesson_name',
+          registeredLessonNameId: 'mathematics-2-beta',
+        },
+      },
+      {
+        sourceId: customId,
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 3,
+        replacement: { type: 'lesson_name', lessonName: '  特別   LESSON  ' },
+      },
+    ]
+
+    expect((await addDirectTimetableChanges(env, cookie, changes)).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, changes)).status).toBe(201)
+
+    const plan = await (await readDailyPlan(env, cookie, '2026-07-10')).json() as {
+      periods: Array<{ lessonName: string }>
+    }
+    expect(plan.periods[1].lessonName).toBe('数Ⅱβ')
+    expect(plan.periods[2].lessonName).toBe('特別   LESSON')
+
+    const registeredHistory = await (await readTimetableChangeHistory(
+      env,
+      cookie,
+      'track',
+      '2026-07-10',
+      2,
+    )).json() as { entries: Array<{ after: unknown }> }
+    expect(registeredHistory.entries[0].after).toEqual({
+      type: 'lesson_name',
+      registeredLessonNameId: 'mathematics-2-beta',
+      lessonName: '数Ⅱβ',
+    })
+
+    const customHistory = await (await readTimetableChangeHistory(
+      env,
+      cookie,
+      'track',
+      '2026-07-10',
+      3,
+    )).json() as { entries: Array<{ after: unknown }> }
+    expect(customHistory.entries[0].after).toEqual({
+      type: 'lesson_name',
+      lessonName: '特別   LESSON',
     })
   })
 

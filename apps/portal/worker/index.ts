@@ -1,4 +1,5 @@
 import {
+  backfillLegacyCustomLessonNameNormalization,
   createD1PersistenceAdapters,
   createInMemoryPersistenceAdapters,
   type PersistenceAdapters,
@@ -37,6 +38,7 @@ class EmailDeliveryError extends Error {
 
 async function getPersistenceAdapters(env: Env) {
   if (env.DB) {
+    await backfillLegacyCustomLessonNameNormalization(env.DB);
     return createD1PersistenceAdapters(env.DB);
   }
 

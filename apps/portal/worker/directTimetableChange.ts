@@ -5,7 +5,6 @@ import type {
   TimetableLayerKey,
   TimetableChangeReplacement,
 } from './persistence'
-import { projectTimetableSlot } from '../shared/timetableProjection'
 import { resolveStudentOperationalContext } from './studentOperationalContext'
 import {
   isTargetScopeType,
@@ -78,48 +77,62 @@ export async function readDirectTimetableChangeOptions({
       ),
     ),
   )
-  const periodReferences = entriesByWeekday
-    .flatMap((entries, weekdayIndex) =>
-      Array.from({ length: 7 }, (_, periodIndex) => {
-        const periodNumber = periodIndex + 1
-        const projection = projectTimetableSlot({
-          standardTimetable: {
-            type: 'candidates',
-            selectedTrackId: affiliation.trackId,
-            candidates: entries.filter(
-              (entry) => entry.periodNumber === periodNumber,
-            ),
-          },
-          activeLayers: [],
-          resolveReference: () => null,
-        })
-        return projection.standardTimetable
-        ? {
-            weekday: weekdayIndex + 1,
-            periodNumber,
-            lessonName: projection.standardTimetable.lessonName,
-          }
-          : null
-      }),
-    )
+  const resolvedPeriodEntries = entriesByWeekday.flatMap((entries) =>
+    Array.from({ length: 7 }, (_, periodIndex) => {
+      const periodNumber = periodIndex + 1
+      return entries.find((entry) =>
+        entry.periodNumber === periodNumber &&
+        entry.trackId === affiliation.trackId
+      ) ?? entries.find((entry) =>
+        entry.periodNumber === periodNumber && entry.trackId === null
+      ) ?? null
+    }),
+  ).filter((entry) => entry !== null)
+  const periodReferences = resolvedPeriodEntries
+    .map(({ weekday, periodNumber, lessonName }) => ({
+      weekday,
+      periodNumber,
+      lessonName,
+    }))
     .filter((entry) => entry !== null)
+  const resolvedFloatingEntries = await Promise.all(
+    floatingLabels.map((label) =>
+      store.findStandardTimetableEntryForFloatingReferenceLabelId(
+          affiliation.classId,
+          affiliation.trackId,
+          label.floatingLessonReferenceLabelId,
+      ),
+    ),
+  )
+  const floatingLessonReferenceLabels = floatingLabels.map((label, index) => ({
+    floatingLessonReferenceLabelId: label.floatingLessonReferenceLabelId,
+    referenceLabel: label.referenceLabel,
+    lessonName: resolvedFloatingEntries[index]?.lessonName ?? null,
+  }))
+  const prioritizedIds = new Set([
+    ...resolvedPeriodEntries.map((entry) => entry.registeredLessonNameId),
+    ...resolvedFloatingEntries.flatMap((entry) =>
+      entry ? [entry.registeredLessonNameId] : []),
+  ])
+  const allRegisteredLessonNames = await store.listRegisteredLessonNames()
+  const toOption = ({
+    registeredLessonNameId,
+    fullLessonName,
+    shortLessonName,
+  }: typeof allRegisteredLessonNames[number]) => ({
+    registeredLessonNameId,
+    fullLessonName,
+    shortLessonName,
+  })
   return {
     status: 'ready' as const,
     schoolYearRange: { startsOn: schoolYear.startsOn, endsOn: schoolYear.endsOn },
     periodReferences,
-    floatingLessonReferenceLabels: await Promise.all(
-      floatingLabels.map(async (label) => ({
-        floatingLessonReferenceLabelId: label.floatingLessonReferenceLabelId,
-        referenceLabel: label.referenceLabel,
-        lessonName: (
-          await store.findStandardTimetableEntryForFloatingReferenceLabelId(
-            affiliation.classId,
-            affiliation.trackId,
-            label.floatingLessonReferenceLabelId,
-          )
-        )?.lessonName ?? null,
-      })),
-    ),
+    floatingLessonReferenceLabels,
+    registeredLessonNames: allRegisteredLessonNames
+      .filter((lessonName) => prioritizedIds.has(lessonName.registeredLessonNameId))
+      .map(toOption),
+    allRegisteredLessonNames: allRegisteredLessonNames.map(toOption),
   }
 }
 
@@ -168,7 +181,7 @@ export async function applyDirectTimetableChanges({
     const changeKind = candidate.changeKind ?? 'add'
     const replacement = changeKind === 'remove'
       ? null
-      : parseReplacement(candidate.replacement)
+      : await parseReplacement(candidate.replacement, store)
 
     if (
       typeof candidate.sourceId !== 'string' ||
@@ -301,11 +314,31 @@ function conflictingKeysFor(
     }))
 }
 
-function parseReplacement(value: unknown): TimetableChangeReplacement | null {
+async function parseReplacement(
+  value: unknown,
+  store: DirectTimetableChangeStore,
+): Promise<TimetableChangeReplacement | null> {
   if (!value || typeof value !== 'object') return null
   const replacement = value as Record<string, unknown>
 
   if (replacement.type === 'cancelled') return { type: 'cancelled' }
+  if (
+    replacement.type === 'lesson_name' &&
+    typeof replacement.registeredLessonNameId === 'string' &&
+    replacement.registeredLessonNameId.length > 0 &&
+    replacement.registeredLessonNameId.length <= 200
+  ) {
+    const registered = await store.findRegisteredLessonName(
+      replacement.registeredLessonNameId,
+    )
+    return registered
+      ? {
+          type: 'lesson_name',
+          registeredLessonNameId: registered.registeredLessonNameId,
+          lessonName: registered.shortLessonName,
+        }
+      : null
+  }
   if (
     replacement.type === 'lesson_name' &&
     typeof replacement.lessonName === 'string' &&

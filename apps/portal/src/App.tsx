@@ -11,6 +11,7 @@ import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
+import { createLessonNameComboboxClient } from "./lessonNameCombobox";
 import {
   PeriodWheelInteraction,
   findPeriodClosestToCenter,
@@ -26,6 +27,7 @@ import {
   type TimetableReplacement,
 } from "./timetableEditorClient";
 import { createDirectTimetableChangeTransport } from "./timetableSubmissionTransport";
+import type { RegisteredLessonNameOption } from "../shared/lessonNames";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -73,6 +75,8 @@ type TimetableEditorOptions = {
     referenceLabel: string;
     lessonName: string | null;
   }>;
+  registeredLessonNames: RegisteredLessonNameOption[];
+  allRegisteredLessonNames: RegisteredLessonNameOption[];
 };
 
 type TimetableEditorForm = TimetableLayerKey & {
@@ -207,6 +211,10 @@ function App() {
     useState<TimetableEditorOptions | null>(null);
   const [timetableEditorForm, setTimetableEditorForm] =
     useState<TimetableEditorForm | null>(null);
+  const [lessonNameOptionsExpanded, setLessonNameOptionsExpanded] =
+    useState(false);
+  const [lessonNameListOpen, setLessonNameListOpen] = useState(false);
+  const [activeLessonNameOption, setActiveLessonNameOption] = useState(-1);
   const [timetableLayerDialog, setTimetableLayerDialog] =
     useState<TimetableLayerDialog | null>(null);
   const [timetableHistoryDialog, setTimetableHistoryDialog] =
@@ -235,6 +243,13 @@ function App() {
 
     return () => window.clearTimeout(timeoutId);
   }, [timetableEditorMessage]);
+
+  useEffect(() => {
+    if (!lessonNameListOpen || activeLessonNameOption < 0) return;
+    document
+      .getElementById(`lesson-name-option-${activeLessonNameOption}`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeLessonNameOption, lessonNameListOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -853,6 +868,9 @@ function App() {
     const serverLayer = timetableLayerDialog.state.layers.find(
       (layer) => layer.targetScopeType === targetScopeType,
     );
+    setLessonNameOptionsExpanded(false);
+    setLessonNameListOpen(false);
+    setActiveLessonNameOption(-1);
     setTimetableEditorForm(
       existing
         ? {
@@ -1003,7 +1021,30 @@ function App() {
     if (!timetableEditorForm || timetableEditor.submitting) return;
     let replacement = timetableEditorForm.replacement;
     if (replacement.type === "lesson_name") {
-      replacement = normalizeDirectLessonReplacement(replacement.lessonName);
+      const normalizedReplacement = normalizeDirectLessonReplacement(
+        replacement.lessonName,
+      );
+      if (
+        normalizedReplacement.type === "lesson_name" &&
+        !replacement.registeredLessonNameId &&
+        !timetableEditorOptions
+      ) {
+        setTimetableEditorMessage(
+          "Lesson Nameの候補を読み込んでから保存してください。",
+        );
+        return;
+      }
+      replacement = normalizedReplacement.type === "lesson_name" &&
+          replacement.registeredLessonNameId
+        ? replacement
+        : normalizedReplacement.type === "lesson_name"
+          ? createLessonNameComboboxClient({
+              prioritizedOptions:
+                timetableEditorOptions?.registeredLessonNames ?? [],
+              allOptions:
+                timetableEditorOptions?.allRegisteredLessonNames ?? [],
+            }).resolveInput(normalizedReplacement.lessonName).replacement
+          : normalizedReplacement;
       if (replacement.type === "lesson_name" && !replacement.lessonName) {
         setTimetableEditorMessage("Lesson Nameを入力してください。");
         return;
@@ -1216,6 +1257,18 @@ function App() {
             resolveReplacementLessonName(replacement, timetableEditorOptions),
         )
       : null;
+    const lessonNameQuery =
+      timetableEditorForm?.replacement.type === "lesson_name"
+        ? timetableEditorForm.replacement.lessonName
+        : "";
+    const lessonNameCombobox = createLessonNameComboboxClient({
+      prioritizedOptions: timetableEditorOptions?.registeredLessonNames ?? [],
+      allOptions: timetableEditorOptions?.allRegisteredLessonNames ?? [],
+      initialQuery: lessonNameQuery,
+      initialExpandedToAll: lessonNameOptionsExpanded,
+      initialActiveIndex: activeLessonNameOption,
+    });
+    const lessonNameComboboxSnapshot = lessonNameCombobox.getSnapshot();
 
     return (
       <main className="app-page daily-plan-page">
@@ -2000,26 +2053,142 @@ function App() {
                       休講
                     </button>
 
-                    <input
-                      className="direct-lesson-input"
-                      aria-label="Lesson Name"
-                      maxLength={80}
-                      placeholder="または、この時間の名前を直接入力"
-                      value={
-                        timetableEditorForm.replacement.type === "lesson_name"
-                          ? timetableEditorForm.replacement.lessonName
-                          : ""
-                      }
-                      onChange={(event) =>
-                        setTimetableEditorForm({
-                          ...timetableEditorForm,
-                          replacement: {
-                            type: "lesson_name",
-                            lessonName: event.target.value,
-                          },
-                        })
-                      }
-                    />
+                    <div className="lesson-name-combobox">
+                      <input
+                        className="direct-lesson-input"
+                        aria-label="Lesson Name"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={
+                          lessonNameListOpen &&
+                          timetableEditorForm.replacement.type === "lesson_name"
+                        }
+                        aria-controls="lesson-name-options"
+                        aria-activedescendant={
+                          lessonNameListOpen &&
+                          lessonNameComboboxSnapshot.activeIndex >= 0
+                            ? `lesson-name-option-${lessonNameComboboxSnapshot.activeIndex}`
+                            : undefined
+                        }
+                        maxLength={80}
+                        placeholder="または、この時間の名前を直接入力"
+                        value={
+                          timetableEditorForm.replacement.type === "lesson_name"
+                            ? timetableEditorForm.replacement.lessonName
+                            : ""
+                        }
+                        onFocus={() => setLessonNameListOpen(true)}
+                        onChange={(event) => {
+                          setTimetableEditorForm({
+                            ...timetableEditorForm,
+                            replacement: {
+                              type: "lesson_name",
+                              lessonName: event.target.value,
+                            },
+                          });
+                          setLessonNameListOpen(true);
+                          setActiveLessonNameOption(-1);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setLessonNameListOpen(true);
+                            lessonNameCombobox.moveActive(
+                              event.key === "ArrowDown" ? 1 : -1,
+                            );
+                            setActiveLessonNameOption(
+                              lessonNameCombobox.getSnapshot().activeIndex,
+                            );
+                          } else if (
+                            event.key === "Enter" &&
+                            lessonNameListOpen &&
+                            lessonNameComboboxSnapshot.activeIndex >= 0
+                          ) {
+                            event.preventDefault();
+                            const replacement = lessonNameCombobox.chooseActive();
+                            if (!replacement) return;
+                            setTimetableEditorForm({
+                              ...timetableEditorForm,
+                              replacement,
+                            });
+                            setLessonNameListOpen(false);
+                            setActiveLessonNameOption(-1);
+                          } else if (
+                            event.key === "Escape" &&
+                            lessonNameListOpen
+                          ) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setLessonNameListOpen(false);
+                            setActiveLessonNameOption(-1);
+                          }
+                        }}
+                      />
+                      {lessonNameListOpen &&
+                      timetableEditorForm.replacement.type === "lesson_name" ? (
+                        <div className="lesson-name-options-popover">
+                          <div id="lesson-name-options" role="listbox">
+                            {lessonNameComboboxSnapshot.options.map((option, index) => (
+                              <button
+                                id={`lesson-name-option-${index}`}
+                                role="option"
+                                tabIndex={-1}
+                                aria-selected={index === activeLessonNameOption}
+                                className={
+                                  index === activeLessonNameOption
+                                    ? "active"
+                                    : ""
+                                }
+                                type="button"
+                                key={option.registeredLessonNameId}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  lessonNameCombobox.setActiveIndex(index);
+                                  const replacement =
+                                    lessonNameCombobox.chooseActive();
+                                  if (!replacement) return;
+                                  setTimetableEditorForm({
+                                    ...timetableEditorForm,
+                                    replacement,
+                                  });
+                                  setLessonNameListOpen(false);
+                                  setActiveLessonNameOption(-1);
+                                }}
+                              >
+                                {option.displayLabel}
+                              </button>
+                            ))}
+                          </div>
+                          {!lessonNameOptionsExpanded ? (
+                            <button
+                              className="lesson-name-more"
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                lessonNameCombobox.expandToAll();
+                                const snapshot = lessonNameCombobox.getSnapshot();
+                                setLessonNameOptionsExpanded(
+                                  snapshot.expandedToAll,
+                                );
+                                setActiveLessonNameOption(snapshot.activeIndex);
+                              }}
+                            >
+                              More
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {timetableEditorForm.replacement.type === "lesson_name" &&
+                      timetableEditorOptions &&
+                      !timetableEditorForm.replacement.registeredLessonNameId &&
+                      timetableEditorForm.replacement.lessonName.trim() &&
+                      lessonNameCombobox.resolveInput().custom ? (
+                        <p className="custom-lesson-name-warning" role="status">
+                          Custom Lesson Nameとして保存されます。
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
 
                   <footer className="editor-dialog-actions">
@@ -2063,7 +2232,13 @@ function App() {
                     <button
                       className="button-primary"
                       type="submit"
-                      disabled={timetableEditor.submitting}
+                      disabled={
+                        timetableEditor.submitting ||
+                        (timetableEditorForm.replacement.type === "lesson_name" &&
+                          !timetableEditorForm.replacement
+                            .registeredLessonNameId &&
+                          !timetableEditorOptions)
+                      }
                     >
                       下書きに保存
                     </button>

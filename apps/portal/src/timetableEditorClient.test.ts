@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createNewTaskDraftForm,
   createTimetableEditorClient as createEditorClient,
   normalizeDirectLessonReplacement,
   type DirectTimetableSubmissionTransportResult,
@@ -58,6 +59,121 @@ function layerState(
 }
 
 describe('Timetable editor client', () => {
+  it('coexists Task and Timetable Change drafts in one submitted batch', async () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000101',
+      '33000000-0000-4000-8000-000000000102',
+    ]
+    const submitted: unknown[] = []
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+      submitDirectTimetableChanges: async (payload) => {
+        submitted.push(payload)
+        return { status: 'applied' }
+      },
+    })
+
+    expect(createNewTaskDraftForm('2026-07-10')).toEqual({
+      title: '',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: null,
+    })
+    expect(editor.saveTaskDraft({
+      title: '地理ワークを提出',
+      dueDate: '2026-07-10',
+      relatedLessonName: {
+        registeredLessonNameId: 'geography',
+        lessonName: '地理',
+      },
+      targetScopeType: null,
+    })).toEqual({ status: 'invalid-task' })
+    expect(editor.saveTaskDraft({
+      title: '地理ワークを提出',
+      dueDate: '2026-07-10',
+      relatedLessonName: {
+        registeredLessonNameId: 'geography',
+        lessonName: '地理',
+      },
+      targetScopeType: 'track',
+    })).toMatchObject({ status: 'saved' })
+    expect(editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 3,
+      replacement: { type: 'lesson_name', lessonName: '総合' },
+    })).toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 2,
+      taskDrafts: [
+        {
+          title: '地理ワークを提出',
+          dueDate: '2026-07-10',
+          targetScopeType: 'track',
+        },
+      ],
+    })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })).resolves.toEqual({ status: 'applied', freshness: 'refreshed' })
+    expect(submitted).toMatchObject([
+      {
+        changes: [
+          {
+            sourceId: '33000000-0000-4000-8000-000000000102',
+            targetScopeType: 'track',
+            changeDate: '2026-07-10',
+            periodNumber: 3,
+          },
+          {
+            kind: 'task',
+            sourceId: '33000000-0000-4000-8000-000000000101',
+            targetScopeType: 'track',
+            title: '地理ワークを提出',
+            dueDate: '2026-07-10',
+            relatedLessonName: { registeredLessonNameId: 'geography' },
+          },
+        ],
+      },
+    ])
+  })
+
+  it('retains and marks a Task draft after an idempotency conflict', async () => {
+    const sourceId = '33000000-0000-4000-8000-000000000201'
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => sourceId,
+      submitDirectTimetableChanges: async () => ({
+        status: 'idempotency-conflict',
+        conflictingKeys: [],
+        conflictingSourceIds: [sourceId],
+      }),
+    })
+    editor.saveTaskDraft({
+      title: '期限なしTask',
+      dueDate: null,
+      relatedLessonName: null,
+      targetScopeType: 'student',
+    })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })).resolves.toEqual({
+      status: 'idempotency-conflict',
+      freshness: 'refreshed',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      editing: true,
+      draftCount: 1,
+      conflictCount: 1,
+      taskDrafts: [{ sourceId, conflicted: true }],
+    })
+  })
+
   it('converts only an exact Japanese Period Reference entered as a Lesson Name', () => {
     expect(normalizeDirectLessonReplacement(' 月 1 ')).toEqual({
       type: 'period_reference',

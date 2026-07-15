@@ -230,16 +230,21 @@ create table task_snapshots (
   task_snapshot_id text primary key,
   title text not null,
   due_date text,
-  related_lesson_school_date text,
-  related_lesson_period_number integer,
+  registered_related_lesson_name_id text
+    references registered_lesson_names(registered_lesson_name_id),
   related_lesson_name text,
+  normalized_custom_lesson_name text,
   created_at text not null,
 
+  check (length(title) between 1 and 120),
   check (
-    (related_lesson_school_date is null and related_lesson_period_number is null)
-    or (related_lesson_school_date is not null and related_lesson_period_number is not null)
-  ),
-  check (related_lesson_period_number is null or related_lesson_period_number > 0)
+    (registered_related_lesson_name_id is null and related_lesson_name is null
+      and normalized_custom_lesson_name is null)
+    or (registered_related_lesson_name_id is not null and related_lesson_name is null
+      and normalized_custom_lesson_name is null)
+    or (registered_related_lesson_name_id is null and related_lesson_name is not null
+      and normalized_custom_lesson_name is not null)
+  )
 );
 
 create table timetable_change_snapshots (
@@ -288,7 +293,7 @@ create table note_snapshots (
 
 Tasks store due timing at school-date level only. If a student needs to record a finer instruction such as "before third period" or "by the start of class", that detail belongs in a note related to the task rather than in formal task due fields.
 
-`related_lesson_school_date` and `related_lesson_period_number` identify a specific daily lesson in the displayed timetable for one school date. `related_lesson_name` may be stored with or without a specific related daily lesson; the two are not exclusive. For example, a task created from a daily plan can store both the specific daily lesson and its lesson name, while a task created from a table-like view may be related only to a lesson name.
+A Task may store one optional Related Lesson Name as either a Registered Lesson Name identity or custom text with its normalized search key. It stores no related School Date or period, and therefore creates no Daily Lesson marker.
 
 `timetable_change_snapshots` represents one date and one period. A UI may create several timetable changes in one operation, but the database stores them as separate shared information items.
 For `floating_lesson_reference`, `floating_lesson_reference_label_id` is authoritative. The current migration also fills `reference_label` with a non-null compatibility token to preserve the original table check; it is not used to resolve the Lesson Name.

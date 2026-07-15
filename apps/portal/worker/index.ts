@@ -25,6 +25,7 @@ import {
   readDirectTimetableChangeDetail,
   readTimetableChangeHistory,
 } from "./timetableChangeHistory";
+import { readReferenceTasks } from "./referenceTasks";
 
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
@@ -506,6 +507,36 @@ export default {
       }
       if (result.status === "not-found") {
         return new Response(null, { status: 404 });
+      }
+      return Response.json(result);
+    }
+
+    if (url.pathname === "/api/tasks/reference" && request.method === "GET") {
+      const persistence = await getPersistenceAdapters(env);
+      const result = await readReferenceTasks({
+        sessionToken: readCookie(request, sessionCookieName),
+        schoolDate: url.searchParams.get("date"),
+        scopeType: url.searchParams.get("scope"),
+        scopeValue: url.searchParams.get("value"),
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        store: persistence.dailyPlan,
+      });
+
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (
+        result.status === "invalid-date" ||
+        result.status === "invalid-reference-scope"
+      ) {
+        return Response.json(result, { status: 400 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "daily-plan-unavailable") {
+        return Response.json(result, { status: 503 });
       }
       return Response.json(result);
     }

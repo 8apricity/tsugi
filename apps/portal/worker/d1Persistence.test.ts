@@ -9,6 +9,7 @@ import {
   backfillLegacyCustomLessonNameNormalization,
   createD1PersistenceAdapters,
   createInMemoryPersistenceAdapters,
+  type DirectChangeOperation,
   type DirectTimetableChangeOperation,
   type PersistenceAdapters,
   type StudentAffiliation,
@@ -258,6 +259,174 @@ describe('D1 Direct Timetable Change persistence', () => {
       'registered_lesson_name_id',
       'normalized_custom_lesson_name',
     ]))
+  })
+
+  it('atomically stores mixed Timetable Change and Task adds with idempotent retries', async () => {
+    const database = createTestDatabase()
+    const adapters = createD1PersistenceAdapters(
+      new SqliteD1Database(database) as unknown as D1Database,
+    )
+    const affiliation: StudentAffiliation = {
+      studentAffiliationId: 'task-affiliation-1',
+      studentAccountId: 'task-student-1',
+      schoolYear: 2026,
+      grade: 2,
+      classId: 'task-class-1',
+      trackId: 'task-track-1',
+      selectedAt: 1,
+      endedAt: null,
+    }
+    await adapters.seed.saveStudentAccount({
+      studentAccountId: 'task-student-1',
+      schoolEmail: 'task-student@example.invalid',
+      displayName: 'Task Student',
+    })
+    await adapters.seed.saveSchoolYearClass({
+      classId: 'task-class-1',
+      schoolYear: 2026,
+      grade: 2,
+      classNumber: 1,
+    })
+    await adapters.seed.saveTrack({
+      trackId: 'task-track-1',
+      classId: 'task-class-1',
+      trackName: 'Task Track',
+    })
+    await adapters.seed.saveStudentAffiliation(affiliation)
+
+    const timetable = {
+      ...operation({
+        sourceId: '33111111-1111-4111-8111-111111111111',
+        changeKind: 'add',
+        targetScope: {
+          type: 'track',
+          schoolYear: 2026,
+          trackId: 'task-track-1',
+        },
+        replacement: { type: 'cancelled' },
+      }),
+      changedByStudentAccountId: 'task-student-1',
+      kind: 'timetable_change',
+    } satisfies DirectChangeOperation
+    const task = {
+      kind: 'task',
+      changeKind: 'add',
+      sourceId: '33222222-2222-4222-8222-222222222222',
+      sharedInformationItemId: '33222222-2222-4222-8222-222222222222',
+      latestChangeId: '33222222-2222-4222-8222-222222222222:change',
+      targetScope: {
+        type: 'track',
+        schoolYear: 2026,
+        trackId: 'task-track-1',
+      },
+      title: '地理ワークを提出',
+      dueDate: '2026-07-10',
+      relatedLessonName: {
+        registeredLessonNameId: 'geography',
+        lessonName: '地理',
+      },
+      changedByStudentAccountId: 'task-student-1',
+      changedAt: Date.parse('2026-07-09T03:00:00.000Z'),
+      createdAt: Date.parse('2026-07-09T03:00:00.000Z'),
+    } satisfies DirectChangeOperation
+
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([timetable, task]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([timetable, task]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-10'),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        title: '地理ワークを提出',
+        dueDate: '2026-07-10',
+        relatedLessonName: {
+          registeredLessonNameId: 'geography',
+          lessonName: '地理',
+        },
+      }),
+    ])
+    await expect(
+      adapters.dailyPlan.listActiveTasksForTargetScope(
+        {
+          type: 'track',
+          schoolYear: 2026,
+          trackId: 'task-track-1',
+        },
+        '2026-07-10',
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({ title: '地理ワークを提出' }),
+    ])
+    expect(database.prepare(
+      'select count(*) as count from task_snapshots',
+    ).get()).toEqual({ count: 1 })
+
+    const updateTimetable = {
+      ...timetable,
+      sourceId: '33222222-2222-4222-8222-222222222223',
+      latestChangeId: '33222222-2222-4222-8222-222222222223:change',
+      changeKind: 'update',
+      sharedInformationItemId: timetable.sharedInformationItemId,
+      expectedLatestChangeId: timetable.latestChangeId,
+      replacement: { type: 'lesson_name', lessonName: '更新後' },
+    } satisfies DirectChangeOperation
+    const taskBesideUpdate = {
+      ...task,
+      sourceId: '33222222-2222-4222-8222-222222222224',
+      sharedInformationItemId: '33222222-2222-4222-8222-222222222224',
+      latestChangeId: '33222222-2222-4222-8222-222222222224:change',
+      title: '更新と同時のTask',
+    } satisfies DirectChangeOperation
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([
+        updateTimetable,
+        taskBesideUpdate,
+      ]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.dailyPlan.listActiveTimetableChangesForStudent(
+        affiliation,
+        '2026-07-10',
+        '2026-07-10',
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({ replacement: { type: 'lesson_name', lessonName: '更新後' } }),
+    ])
+
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([
+        timetable,
+        { ...task, title: 'changed payload' },
+      ]),
+    ).resolves.toEqual({
+      status: 'idempotency-conflict',
+      conflictingSourceIds: [task.sourceId],
+    })
+
+    const rolledBackTask = {
+      ...task,
+      sourceId: '33333333-3333-4333-8333-333333333333',
+      sharedInformationItemId: '33333333-3333-4333-8333-333333333333',
+      latestChangeId: '33333333-3333-4333-8333-333333333333:change',
+    } satisfies DirectChangeOperation
+    const occupiedTimetable = {
+      ...timetable,
+      sourceId: '33444444-4444-4444-8444-444444444444',
+      sharedInformationItemId: '33444444-4444-4444-8444-444444444444',
+      latestChangeId: '33444444-4444-4444-8444-444444444444:change',
+    } satisfies DirectChangeOperation
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([
+        occupiedTimetable,
+        rolledBackTask,
+      ]),
+    ).resolves.toMatchObject({ status: 'conflict' })
+    expect(database.prepare(
+      'select count(*) as count from task_snapshots where task_snapshot_id = ?',
+    ).get(`${rolledBackTask.sourceId}:snapshot`)).toEqual({ count: 0 })
   })
 
   it('backfills applied predecessors for existing Shared Information Changes', () => {

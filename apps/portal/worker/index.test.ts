@@ -402,6 +402,23 @@ function addDirectTimetableChanges(
   )
 }
 
+function readReferenceTasks(
+  env: Env,
+  cookie = '',
+  date?: string,
+  scope?: string,
+  value?: string,
+) {
+  const url = new URL('https://tsugi.test/api/tasks/reference')
+  if (date !== undefined) url.searchParams.set('date', date)
+  if (scope !== undefined) url.searchParams.set('scope', scope)
+  if (value !== undefined) url.searchParams.set('value', value)
+
+  return worker.fetch(new Request(url, {
+    headers: cookie ? { cookie } : {},
+  }), env)
+}
+
 function readDirectTimetableChangeOptions(env: Env, cookie = '') {
   return worker.fetch(
     new Request('https://tsugi.test/api/timetable-changes/direct/options', {
@@ -1832,6 +1849,195 @@ describe('Timetable Layer read API', () => {
   })
 })
 
+describe('Unified Direct Change API', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('atomically adds a Timetable Change and Task to the selected-date Daily Plan', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const response = await addDirectTimetableChanges(env, cookie, [
+      {
+        kind: 'timetable_change',
+        sourceId: '33000000-0000-4000-8000-000000000001',
+        changeKind: 'add',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 3,
+        replacement: { type: 'lesson_name', lessonName: '総合' },
+      },
+      {
+        kind: 'task',
+        sourceId: '33000000-0000-4000-8000-000000000002',
+        changeKind: 'add',
+        targetScopeType: 'track',
+        title: '地理ワークを提出',
+        dueDate: '2026-07-10',
+        relatedLessonName: { registeredLessonNameId: 'geography' },
+      },
+    ])
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'applied',
+      changes: [
+        { sourceId: '33000000-0000-4000-8000-000000000001' },
+        { sourceId: '33000000-0000-4000-8000-000000000002' },
+      ],
+    })
+
+    const plan = await readDailyPlan(env, cookie, '2026-07-10')
+    expect(plan.status).toBe(200)
+    const body = await plan.json() as {
+      periods: Array<Record<string, unknown>>
+      tasks: Array<Record<string, unknown>>
+    }
+    expect(body.periods[2]).toMatchObject({
+      periodNumber: 3,
+      lessonName: '総合',
+      hasTasks: false,
+    })
+    expect(body.periods.every((period) => period.hasTasks === false)).toBe(true)
+    expect(body.tasks).toMatchObject([
+        {
+          taskId: '33000000-0000-4000-8000-000000000002',
+          title: '地理ワークを提出',
+          dueDate: '2026-07-10',
+          relatedLessonName: '地理',
+          targetScopeType: 'track',
+        },
+      ])
+  })
+
+  it('validates Task fields and retries the same Task add idempotently', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const validTask = {
+      kind: 'task',
+      sourceId: '33555555-5555-4555-8555-555555555555',
+      changeKind: 'add',
+      targetScopeType: 'student',
+      title: '  英語の準備  ',
+      dueDate: null,
+      relatedLessonName: { lessonName: '特別活動' },
+    }
+
+    expect((await addDirectTimetableChanges(env, cookie, [validTask])).status)
+      .toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [validTask])).status)
+      .toBe(201)
+    const changedRetry = await addDirectTimetableChanges(env, cookie, [
+      { ...validTask, title: '別の内容' },
+    ])
+    expect(changedRetry.status).toBe(409)
+    await expect(changedRetry.json()).resolves.toMatchObject({
+      status: 'idempotency-conflict',
+    })
+
+    const invalidTasks = [
+      { ...validTask, sourceId: '33600000-0000-4000-8000-000000000001', title: '' },
+      { ...validTask, sourceId: '33600000-0000-4000-8000-000000000002', title: 'x'.repeat(121) },
+      { ...validTask, sourceId: '33600000-0000-4000-8000-000000000003', dueDate: '2027-04-01' },
+      { ...validTask, sourceId: '33600000-0000-4000-8000-000000000004', targetScopeType: undefined },
+      {
+        ...validTask,
+        sourceId: '33600000-0000-4000-8000-000000000005',
+        relatedLesson: {
+          schoolDate: '2026-07-10',
+          periodNumber: 1,
+        },
+      },
+    ]
+    for (const invalidTask of invalidTasks) {
+      const response = await addDirectTimetableChanges(env, cookie, [invalidTask])
+      expect(response.status).toBe(400)
+    }
+  })
+
+  it('shows selected-date Tasks before undated Tasks and hides other dates', async () => {
+    vi.useFakeTimers()
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const addTask = async (
+      sourceId: string,
+      title: string,
+      dueDate: string | null,
+      targetScopeType: 'grade' | 'class' | 'track' | 'student',
+      now: string,
+    ) => {
+      vi.setSystemTime(new Date(now))
+      const response = await addDirectTimetableChanges(env, cookie, [{
+        kind: 'task',
+        sourceId,
+        changeKind: 'add',
+        targetScopeType,
+        title,
+        dueDate,
+      }])
+      expect(response.status).toBe(201)
+    }
+
+    await addTask(
+      '33700000-0000-4000-8000-000000000001',
+      '古い当日',
+      '2026-07-10',
+      'grade',
+      '2026-07-08T00:00:00.000Z',
+    )
+    await addTask(
+      '33700000-0000-4000-8000-000000000002',
+      '期限なし',
+      null,
+      'student',
+      '2026-07-09T00:00:00.000Z',
+    )
+    await addTask(
+      '33700000-0000-4000-8000-000000000003',
+      '新しい当日',
+      '2026-07-10',
+      'class',
+      '2026-07-10T00:00:00.000Z',
+    )
+    await addTask(
+      '33700000-0000-4000-8000-000000000004',
+      '別の日',
+      '2026-07-11',
+      'track',
+      '2026-07-10T01:00:00.000Z',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-10')
+    const body = await response.json() as {
+      tasks: Array<Record<string, unknown>>
+    }
+    expect(body.tasks.map((task) => task.title)).toEqual([
+      '新しい当日',
+      '古い当日',
+      '期限なし',
+    ])
+    expect(body.tasks.map((task) => task.targetScopeType)).toEqual([
+      'class',
+      'grade',
+      'student',
+    ])
+    expect(body.tasks.every((task) =>
+      !('changedByStudentAccountId' in task) &&
+      !('primaryActorDisplayName' in task),
+    )).toBe(true)
+  })
+})
+
 describe('Daily Plan read API', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -1952,7 +2158,7 @@ describe('Daily Plan read API', () => {
     })
   })
 
-  it('keeps 2026 Grade 2 Class 4 Lesson Slots blank while placeholder Tasks and Notes remain visible', async () => {
+  it('keeps 2026 Grade 2 Class 4 Lesson Slots blank while Notes remain visible', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(
       env,
@@ -1992,7 +2198,7 @@ describe('Daily Plan read API', () => {
             : [],
       })),
     )
-    expect(body.tasks.length).toBeGreaterThan(0)
+    expect(body.tasks).toEqual([])
     expect(body.notes.length).toBeGreaterThan(0)
   })
 
@@ -2103,7 +2309,7 @@ describe('Daily Plan read API', () => {
     })
   })
 
-  it('returns placeholder Tasks and derives Lesson task markers from related Lesson and Lesson Name', async () => {
+  it('returns no placeholder Tasks or Daily Lesson task markers', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(
       env,
@@ -2117,33 +2323,12 @@ describe('Daily Plan read API', () => {
     }
 
     expect(response.status).toBe(200)
-    expect(body.tasks).toMatchObject([
-      {
-        title: 'Placeholder: Bring geography worksheet',
-        dueDate: '2026-07-10',
-        relatedLesson: {
-          schoolDate: '2026-07-10',
-          periodNumber: 1,
-          lessonName: '地理',
-        },
-        completed: false,
-      },
-      {
-        title: 'Placeholder: Modern Japanese reading',
-        dueLabel: '今日',
-        relatedLessonName: '現代文',
-        completed: false,
-      },
-    ])
-    expect(body.tasks[0]).not.toHaveProperty('dueReference')
-    expect(body.tasks[0]).not.toHaveProperty('duePeriodNumber')
-    expect(body.tasks[1]).not.toHaveProperty('dueReference')
-    expect(body.tasks[1]).not.toHaveProperty('duePeriodNumber')
+    expect(body.tasks).toEqual([])
     expect(body.periods).toMatchObject([
-      { periodNumber: 1, lessonName: '地理', hasTasks: true },
+      { periodNumber: 1, lessonName: '地理', hasTasks: false },
       { periodNumber: 2, lessonName: '', hasTasks: false },
       { periodNumber: 3, lessonName: '', hasTasks: false },
-      { periodNumber: 4, lessonName: '現代文', hasTasks: true },
+      { periodNumber: 4, lessonName: '現代文', hasTasks: false },
       { periodNumber: 5, lessonName: '', hasTasks: false },
       { periodNumber: 6, lessonName: '', hasTasks: false },
       { periodNumber: 7, lessonName: '', hasTasks: false },
@@ -2223,6 +2408,75 @@ describe('Daily Plan read API', () => {
       schoolDate: '2026-07-10',
       weekday: 5,
     })
+  })
+})
+
+describe('Reference Scope Task read API', () => {
+  it('exposes applicable Active Tasks outside the Student scopes without identity', async () => {
+    const env = createDailyPlanTestEnv()
+    const classFourCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+    const viewerCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    expect((await addDirectTimetableChanges(env, classFourCookie, [{
+      kind: 'task',
+      sourceId: '33800000-0000-4000-8000-000000000001',
+      changeKind: 'add',
+      targetScopeType: 'class',
+      title: '4組の提出物',
+      dueDate: '2026-07-10',
+    }])).status).toBe(201)
+
+    const response = await readReferenceTasks(
+      env,
+      viewerCookie,
+      '2026-07-10',
+      'class',
+      '2026-grade-2-class-4',
+    )
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      tasks: Array<Record<string, unknown>>
+    }
+    expect(body.tasks).toEqual([expect.objectContaining({
+      taskId: '33800000-0000-4000-8000-000000000001',
+      title: '4組の提出物',
+      dueDate: '2026-07-10',
+      targetScopeType: 'class',
+    })])
+    expect(body.tasks.every((task) =>
+      !('changedByStudentAccountId' in task) &&
+      !('primaryActorDisplayName' in task) &&
+      !('studentAccountId' in task),
+    )).toBe(true)
+  })
+
+  it('rejects invalid and individual Reference Scopes', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    expect((await readReferenceTasks(
+      env,
+      cookie,
+      '2026-07-10',
+      'student',
+      'test-student-2026-2-4-humanities-1',
+    )).status).toBe(400)
+    expect((await readReferenceTasks(
+      env,
+      cookie,
+      '2026-07-10',
+      'class',
+      'missing-class',
+    )).status).toBe(400)
   })
 })
 

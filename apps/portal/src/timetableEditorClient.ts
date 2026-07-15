@@ -54,6 +54,23 @@ export type TimetableChangeDraft = TimetableChangeDraftBase & (
     }
 )
 
+export type TaskRelatedLessonName = {
+  lessonName: string
+  registeredLessonNameId?: string
+}
+
+export type NewTaskDraftForm = {
+  title: string
+  dueDate: string | null
+  relatedLessonName: TaskRelatedLessonName | null
+  targetScopeType: TargetScopeType | null
+}
+
+export type TaskDraft = Omit<NewTaskDraftForm, 'targetScopeType'> & {
+  sourceId: string
+  targetScopeType: TargetScopeType
+}
+
 export type TimetableLayerState = {
   status: 'ready'
   schoolDate: string
@@ -103,8 +120,25 @@ export type TimetableSubmissionChange = TimetableSubmissionChangeBase & (
     }
 )
 
+export type TaskSubmissionChange = {
+  kind: 'task'
+  sourceId: string
+  changeKind: 'add'
+  targetScopeType: TargetScopeType
+  title: string
+  dueDate: string | null
+  relatedLessonName?: {
+    registeredLessonNameId?: string
+    lessonName?: string
+  }
+}
+
+export type DirectSubmissionChange =
+  | TimetableSubmissionChange
+  | TaskSubmissionChange
+
 export type TimetableSubmissionPreview = Readonly<{
-  changes: readonly Readonly<TimetableSubmissionChange>[]
+  changes: readonly Readonly<DirectSubmissionChange>[]
 }>
 
 type TimetableSubmissionFreshnessInput =
@@ -119,12 +153,13 @@ export type DirectTimetableSubmissionTransportResult =
   | {
       status: 'remote-conflict' | 'idempotency-conflict'
       conflictingKeys: readonly TimetableLayerKey[]
+      conflictingSourceIds?: readonly string[]
     }
   | { status: 'affiliation-renewal-needed'; schoolYear: number }
   | { status: 'rejected' }
 
 export type SubmitDirectTimetableChanges = (
-  payload: Readonly<{ changes: readonly TimetableSubmissionChange[] }>,
+  payload: Readonly<{ changes: readonly DirectSubmissionChange[] }>,
 ) => Promise<DirectTimetableSubmissionTransportResult>
 
 type SubmitCurrentBatchOptions = {
@@ -138,6 +173,15 @@ type SubmitCurrentBatchOptions = {
 
 const storageKey = 'tsugi:timetable-direct-add-drafts:v1'
 const maximumDraftKeys = 50
+
+export function createNewTaskDraftForm(schoolDate: string): NewTaskDraftForm {
+  return {
+    title: '',
+    dueDate: schoolDate,
+    relatedLessonName: null,
+    targetScopeType: null,
+  }
+}
 
 export function normalizeDirectLessonReplacement(
   lessonName: string,
@@ -170,6 +214,7 @@ export function createTimetableEditorClient({
   let editing = restored.editing
   let lastTargetScopeType = restored.lastTargetScopeType
   let drafts = restored.drafts
+  let taskDrafts = restored.taskDrafts
   let lastCommitFailed = false
   let submitting = false
   let lifecycleGeneration = 0
@@ -179,6 +224,7 @@ export function createTimetableEditorClient({
     TimetableLayerState['layers'][number]
   >()
   const conflictKeys = new Set<string>()
+  const taskConflictSourceIds = new Set<string>()
   const stickyConflictKeys = new Set<string>()
   const reconciledKeys = new Set<string>()
   let snapshot = buildSnapshot()
@@ -192,9 +238,13 @@ export function createTimetableEditorClient({
         ...draft,
         conflicted: conflictKeys.has(draftKey(draft)),
       })),
-      draftCount: drafts.length,
-      atLimit: drafts.length >= maximumDraftKeys,
-      conflictCount: conflictKeys.size,
+      taskDrafts: taskDrafts.map((draft) => ({
+        ...draft,
+        conflicted: taskConflictSourceIds.has(draft.sourceId),
+      })),
+      draftCount: drafts.length + taskDrafts.length,
+      atLimit: drafts.length + taskDrafts.length >= maximumDraftKeys,
+      conflictCount: conflictKeys.size + taskConflictSourceIds.size,
       unreconciledDrafts: drafts
         .filter((draft) => !reconciledKeys.has(draftKey(draft)))
         .map(({ targetScopeType, changeDate, periodNumber }) => ({
@@ -204,7 +254,10 @@ export function createTimetableEditorClient({
         })),
       lastCommitFailed,
       submitting,
-      draftDates: [...new Set(drafts.map((draft) => draft.changeDate))].sort(),
+      draftDates: [...new Set([
+        ...drafts.map((draft) => draft.changeDate),
+        ...taskDrafts.flatMap((draft) => draft.dueDate ? [draft.dueDate] : []),
+      ])].sort(),
     }
   }
 
@@ -212,7 +265,7 @@ export function createTimetableEditorClient({
     snapshot = buildSnapshot()
     storage.setItem(
       storageKey,
-      JSON.stringify({ editing, lastTargetScopeType, drafts }),
+      JSON.stringify({ editing, lastTargetScopeType, drafts, taskDrafts }),
     )
     listeners.forEach((listener) => listener())
   }
@@ -224,17 +277,25 @@ export function createTimetableEditorClient({
     return removed
   }
 
-  function commitPayload(batch: readonly TimetableChangeDraft[] = drafts) {
+  function commitPayload(
+    batch: readonly TimetableChangeDraft[] = drafts,
+    taskBatch: readonly TaskDraft[] = taskDrafts,
+  ) {
     return {
-      changes: batch.map(toTimetableSubmissionChange),
+      changes: [
+        ...batch.map(toTimetableSubmissionChange),
+        ...taskBatch.map(toTaskSubmissionChange),
+      ],
     }
   }
 
   function clearEditorState() {
     editing = false
     drafts = []
+    taskDrafts = []
     lastCommitFailed = false
     conflictKeys.clear()
+    taskConflictSourceIds.clear()
     stickyConflictKeys.clear()
     reconciledKeys.clear()
     lastTargetScopeType = 'track'
@@ -245,6 +306,7 @@ export function createTimetableEditorClient({
 
   function recordCommitFailure(
     conflictingKeys: readonly TimetableLayerKey[] = [],
+    conflictingSourceIds: readonly string[] = [],
     sticky = false,
     refreshPending = false,
   ) {
@@ -255,6 +317,11 @@ export function createTimetableEditorClient({
       conflictKeys.add(serializedKey)
       if (sticky) stickyConflictKeys.add(serializedKey)
       reconciledKeys.delete(serializedKey)
+    })
+    conflictingSourceIds.forEach((sourceId) => {
+      if (taskDrafts.some((draft) => draft.sourceId === sourceId)) {
+        taskConflictSourceIds.add(sourceId)
+      }
     })
     publish()
   }
@@ -291,7 +358,7 @@ export function createTimetableEditorClient({
       return { status: 'editing' as const }
     },
     shouldConfirmExit() {
-      return drafts.length > 0
+      return drafts.length + taskDrafts.length > 0
     },
     discard() {
       if (submitting) return { status: 'submission-in-progress' as const }
@@ -332,7 +399,7 @@ export function createTimetableEditorClient({
         }
         return { status: 'removed-noop' as const }
       }
-      if (!existing && drafts.length >= maximumDraftKeys) {
+      if (!existing && drafts.length + taskDrafts.length >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
 
@@ -363,6 +430,56 @@ export function createTimetableEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
+    saveTaskDraft(input: NewTaskDraftForm) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const title = input.title.trim()
+      const relatedLessonName = input.relatedLessonName
+        ? {
+            ...input.relatedLessonName,
+            lessonName: input.relatedLessonName.lessonName.trim(),
+          }
+        : null
+      if (
+        !input.targetScopeType ||
+        title.length < 1 ||
+        title.length > 120 ||
+        /[\r\n]/.test(input.title) ||
+        (input.dueDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) ||
+        (relatedLessonName !== null &&
+          (relatedLessonName.lessonName.length < 1 ||
+            relatedLessonName.lessonName.length > 80 ||
+            /[\r\n]/.test(relatedLessonName.lessonName)))
+      ) {
+        return { status: 'invalid-task' as const }
+      }
+      if (drafts.length + taskDrafts.length >= maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+      const sourceId = createId()
+      taskDrafts.push({
+        sourceId,
+        title,
+        dueDate: input.dueDate,
+        relatedLessonName,
+        targetScopeType: input.targetScopeType,
+      })
+      lastTargetScopeType = input.targetScopeType
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
+    removeTaskDraft(sourceId: string) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const next = taskDrafts.filter((draft) => draft.sourceId !== sourceId)
+      if (next.length === taskDrafts.length) {
+        return { status: 'unchanged' as const }
+      }
+      taskDrafts = next
+      taskConflictSourceIds.delete(sourceId)
+      publish()
+      return { status: 'removed' as const }
+    },
     removeDesiredState(keyInput: TimetableLayerKey) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const { targetScopeType } = keyInput
@@ -372,7 +489,7 @@ export function createTimetableEditorClient({
       if (serverLayer?.state !== 'active') {
         return { status: 'not-active' as const }
       }
-      if (!existing && drafts.length >= maximumDraftKeys) {
+      if (!existing && drafts.length + taskDrafts.length >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
       const sourceId = existing?.sourceId ?? createId()
@@ -518,12 +635,17 @@ export function createTimetableEditorClient({
       applyFreshness,
     }: SubmitCurrentBatchOptions) {
       if (submitting) return { status: 'already-submitting' as const }
-      if (conflictKeys.size > 0) return { status: 'local-conflict' as const }
-      if (drafts.length === 0) return { status: 'empty' as const }
+      if (conflictKeys.size + taskConflictSourceIds.size > 0) {
+        return { status: 'local-conflict' as const }
+      }
+      if (drafts.length + taskDrafts.length === 0) {
+        return { status: 'empty' as const }
+      }
 
       const generation = lifecycleGeneration
       const batch = drafts.map((draft) => ({ ...draft }))
-      const payload = commitPayload(batch)
+      const taskBatch = taskDrafts.map((draft) => ({ ...draft }))
+      const payload = commitPayload(batch, taskBatch)
       const preview = Object.freeze({
         changes: Object.freeze(
           payload.changes.map((change) => Object.freeze(change)),
@@ -572,10 +694,15 @@ export function createTimetableEditorClient({
           transportResult.status === 'remote-conflict' ||
           transportResult.status === 'idempotency-conflict'
         ) {
-          const { conflictingKeys } = transportResult
+          const { conflictingKeys, conflictingSourceIds = [] } = transportResult
           const idempotencyConflict =
             transportResult.status === 'idempotency-conflict'
-          recordCommitFailure(conflictingKeys, idempotencyConflict, true)
+          recordCommitFailure(
+            conflictingKeys,
+            conflictingSourceIds,
+            idempotencyConflict,
+            true,
+          )
           if (generation !== lifecycleGeneration) {
             return { status: 'cancelled' as const }
           }
@@ -608,8 +735,10 @@ export function createTimetableEditorClient({
 
       editing = false
       drafts = []
+      taskDrafts = []
       lastCommitFailed = false
       conflictKeys.clear()
+      taskConflictSourceIds.clear()
       stickyConflictKeys.clear()
       reconciledKeys.clear()
       storage.removeItem(storageKey)
@@ -622,11 +751,15 @@ export function createTimetableEditorClient({
         applyFreshness,
         {
           type: 'applied',
-          affectedKeys: payload.changes.map((change) => ({
-            targetScopeType: change.targetScopeType,
-            changeDate: change.changeDate,
-            periodNumber: change.periodNumber,
-          })),
+          affectedKeys: payload.changes.flatMap((change) =>
+            'changeDate' in change
+              ? [{
+                  targetScopeType: change.targetScopeType,
+                  changeDate: change.changeDate,
+                  periodNumber: change.periodNumber,
+                }]
+              : [],
+          ),
         },
       )
       if (generation !== lifecycleGeneration) {
@@ -699,10 +832,32 @@ function toTimetableSubmissionChange(
   return { ...base, changeKind: draft.changeKind, replacement }
 }
 
+function toTaskSubmissionChange(draft: TaskDraft): TaskSubmissionChange {
+  return {
+    kind: 'task',
+    sourceId: draft.sourceId,
+    changeKind: 'add',
+    targetScopeType: draft.targetScopeType,
+    title: draft.title,
+    dueDate: draft.dueDate,
+    ...(draft.relatedLessonName
+      ? {
+          relatedLessonName: draft.relatedLessonName.registeredLessonNameId
+            ? {
+                registeredLessonNameId:
+                  draft.relatedLessonName.registeredLessonNameId,
+              }
+            : { lessonName: draft.relatedLessonName.lessonName },
+        }
+      : {}),
+  }
+}
+
 function restore(storage: StorageLike): {
   editing: boolean
   lastTargetScopeType: TargetScopeType
   drafts: TimetableChangeDraft[]
+  taskDrafts: TaskDraft[]
 } {
   try {
     const value = storage.getItem(storageKey)
@@ -714,17 +869,59 @@ function restore(storage: StorageLike): {
           .filter((draft): draft is TimetableChangeDraft => draft !== null)
           .slice(0, maximumDraftKeys)
       : []
+    const taskDrafts = Array.isArray(parsed.taskDrafts)
+      ? parsed.taskDrafts
+          .map(restoreTaskDraft)
+          .filter((draft): draft is TaskDraft => draft !== null)
+          .slice(0, maximumDraftKeys - drafts.length)
+      : []
 
     return {
-      editing: parsed.editing === true || drafts.length > 0,
+      editing: parsed.editing === true || drafts.length + taskDrafts.length > 0,
       lastTargetScopeType: isTargetScopeType(parsed.lastTargetScopeType)
         ? parsed.lastTargetScopeType
         : 'track',
       drafts,
+      taskDrafts,
     }
   } catch {
-    return { editing: false, lastTargetScopeType: 'track', drafts: [] }
+    return {
+      editing: false,
+      lastTargetScopeType: 'track',
+      drafts: [],
+      taskDrafts: [],
+    }
   }
+}
+
+function restoreTaskDraft(value: unknown): TaskDraft | null {
+  if (!value || typeof value !== 'object') return null
+  const draft = value as Record<string, unknown>
+  if (
+    typeof draft.sourceId !== 'string' ||
+    !isTargetScopeType(draft.targetScopeType) ||
+    typeof draft.title !== 'string' ||
+    draft.title.length < 1 ||
+    draft.title.length > 120 ||
+    (draft.dueDate !== null && typeof draft.dueDate !== 'string') ||
+    (draft.relatedLessonName !== null &&
+      !isTaskRelatedLessonName(draft.relatedLessonName))
+  ) return null
+  return {
+    sourceId: draft.sourceId,
+    targetScopeType: draft.targetScopeType,
+    title: draft.title,
+    dueDate: draft.dueDate as string | null,
+    relatedLessonName: draft.relatedLessonName as TaskRelatedLessonName | null,
+  }
+}
+
+function isTaskRelatedLessonName(value: unknown): value is TaskRelatedLessonName {
+  if (!value || typeof value !== 'object') return false
+  const lessonName = value as Record<string, unknown>
+  return typeof lessonName.lessonName === 'string' &&
+    (lessonName.registeredLessonNameId === undefined ||
+      typeof lessonName.registeredLessonNameId === 'string')
 }
 
 function restoreTimetableChangeDraft(value: unknown): TimetableChangeDraft | null {

@@ -31,15 +31,10 @@ export type DailyPlanForCache = {
 export type DailyPlanTaskForCache = {
   taskId: string;
   title: string;
-  dueDate?: string;
-  dueLabel?: string;
-  relatedLesson?: {
-    schoolDate: string;
-    periodNumber: number;
-    lessonName: string;
-  };
+  dueDate: string | null;
   relatedLessonName?: string;
-  completed: false;
+  targetScopeType: "grade" | "class" | "track" | "student";
+  createdAt: number;
 };
 
 export type DailyPlanNoteForCache = {

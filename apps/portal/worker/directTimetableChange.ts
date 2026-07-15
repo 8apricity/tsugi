@@ -1,6 +1,6 @@
 import type {
   DirectChangeOperation,
-  DirectTaskAddOperation,
+  DirectTaskOperation,
   DirectTimetableChangeOperation,
   DirectTimetableChangeStore,
   SchoolYearRecord,
@@ -194,7 +194,7 @@ export async function applyDirectTimetableChanges({
     const kind = candidate.kind ?? 'timetable_change'
     const changeKind = candidate.changeKind ?? 'add'
     if (kind === 'task') {
-      const task = await parseTaskAdd({
+      const task = await parseTaskOperation({
         candidate,
         changeKind,
         schoolYear,
@@ -302,9 +302,20 @@ export async function applyDirectTimetableChanges({
       candidate.periodNumber === change.periodNumber
     )
   )
+  const taskItemChanges = changes.filter(
+    (change): change is Extract<DirectChangeOperation, { kind: 'task' }> =>
+      change.kind === 'task' && change.changeKind !== 'add',
+  )
+  const hasDuplicateTaskItem = taskItemChanges.some((change, index) =>
+    taskItemChanges.slice(0, index).some(
+      (candidate) =>
+        candidate.sharedInformationItemId === change.sharedInformationItemId,
+    )
+  )
   if (
     new Set(changes.map((change) => change.sourceId)).size !== changes.length ||
-    hasDuplicateSlot
+    hasDuplicateSlot ||
+    hasDuplicateTaskItem
   ) {
     return { status: 'invalid-change' }
   }
@@ -373,7 +384,7 @@ function taskConflictSourceIds(
   return conflictingSourceIds.filter((sourceId) => taskSources.has(sourceId))
 }
 
-async function parseTaskAdd({
+async function parseTaskOperation({
   candidate,
   changeKind,
   schoolYear,
@@ -389,25 +400,64 @@ async function parseTaskAdd({
   changedByStudentAccountId: string
   now: number
   store: DirectTimetableChangeStore
-}): Promise<DirectTaskAddOperation | null> {
+}): Promise<DirectTaskOperation | null> {
   if (
     !Object.keys(candidate).every((key) => taskDraftKeys.has(key)) ||
-    changeKind !== 'add' ||
+    (changeKind !== 'add' && changeKind !== 'update' && changeKind !== 'remove') ||
     typeof candidate.sourceId !== 'string' ||
     !uuidPattern.test(candidate.sourceId) ||
     !isTargetScopeType(candidate.targetScopeType) ||
-    typeof candidate.title !== 'string' ||
-    candidate.title.trim().length < 1 ||
-    candidate.title.trim().length > 120 ||
-    /[\r\n]/.test(candidate.title) ||
     candidate.changeDate !== undefined ||
     candidate.periodNumber !== undefined ||
-    candidate.replacement !== undefined ||
-    candidate.sharedInformationItemId !== undefined ||
-    candidate.expectedLatestChangeId !== undefined
+    candidate.replacement !== undefined
   ) {
     return null
   }
+
+  if (
+    changeKind === 'add'
+      ? candidate.sharedInformationItemId !== undefined ||
+        candidate.expectedLatestChangeId !== undefined
+      : typeof candidate.sharedInformationItemId !== 'string' ||
+        !uuidPattern.test(candidate.sharedInformationItemId) ||
+        typeof candidate.expectedLatestChangeId !== 'string' ||
+        candidate.expectedLatestChangeId.length < 1 ||
+        candidate.expectedLatestChangeId.length > 200
+  ) return null
+
+  const common = {
+    sourceId: candidate.sourceId,
+    sharedInformationItemId: changeKind === 'add'
+      ? candidate.sourceId
+      : candidate.sharedInformationItemId as string,
+    latestChangeId: `${candidate.sourceId}:change`,
+    targetScope: targetScopeForStudentAffiliation(
+      affiliation,
+      candidate.targetScopeType,
+    ),
+    changedByStudentAccountId,
+    changedAt: now,
+  }
+
+  if (changeKind === 'remove') {
+    if (
+      candidate.title !== undefined ||
+      candidate.dueDate !== undefined ||
+      candidate.relatedLessonName !== undefined
+    ) return null
+    return {
+      ...common,
+      changeKind,
+      expectedLatestChangeId: candidate.expectedLatestChangeId as string,
+    }
+  }
+
+  if (
+    typeof candidate.title !== 'string' ||
+    candidate.title.trim().length < 1 ||
+    candidate.title.trim().length > 120 ||
+    /[\r\n]/.test(candidate.title)
+  ) return null
 
   const dueDate = candidate.dueDate === undefined || candidate.dueDate === null
     ? null
@@ -425,28 +475,27 @@ async function parseTaskAdd({
   )
   if (relatedLessonName === undefined) return null
 
-  return {
-    sourceId: candidate.sourceId,
-    sharedInformationItemId: candidate.sourceId,
-    latestChangeId: `${candidate.sourceId}:change`,
-    changeKind: 'add',
-    targetScope: targetScopeForStudentAffiliation(
-      affiliation,
-      candidate.targetScopeType,
-    ),
+  const snapshot = {
     title: candidate.title.trim(),
     dueDate,
     relatedLessonName,
-    changedByStudentAccountId,
-    changedAt: now,
-    createdAt: now,
   }
+  return changeKind === 'add'
+    ? { ...common, ...snapshot, changeKind, createdAt: now }
+    : {
+        ...common,
+        ...snapshot,
+        changeKind,
+        expectedLatestChangeId: candidate.expectedLatestChangeId as string,
+      }
 }
 
 const taskDraftKeys = new Set([
   'kind',
   'changeKind',
   'sourceId',
+  'sharedInformationItemId',
+  'expectedLatestChangeId',
   'targetScopeType',
   'title',
   'dueDate',

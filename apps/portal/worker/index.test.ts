@@ -1942,6 +1942,20 @@ describe('Unified Direct Change API', () => {
       status: 'idempotency-conflict',
     })
 
+    const crossKindReuse = await addDirectTimetableChanges(env, cookie, [{
+      kind: 'timetable_change',
+      sourceId: validTask.sourceId,
+      changeKind: 'add',
+      targetScopeType: 'student',
+      changeDate: '2026-07-12',
+      periodNumber: 7,
+      replacement: { type: 'cancelled' },
+    }])
+    expect(crossKindReuse.status).toBe(409)
+    await expect(crossKindReuse.json()).resolves.toMatchObject({
+      status: 'idempotency-conflict',
+    })
+
     const invalidTasks = [
       { ...validTask, sourceId: '33600000-0000-4000-8000-000000000001', title: '' },
       { ...validTask, sourceId: '33600000-0000-4000-8000-000000000002', title: 'x'.repeat(121) },
@@ -2035,6 +2049,160 @@ describe('Unified Direct Change API', () => {
       !('changedByStudentAccountId' in task) &&
       !('primaryActorDisplayName' in task),
     )).toBe(true)
+  })
+
+  it('updates and removes a Task with stale protection and safe retries', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const taskId = '33900000-0000-4000-8000-000000000001'
+    const updateId = '33900000-0000-4000-8000-000000000002'
+    const removeId = '33900000-0000-4000-8000-000000000003'
+    const update = {
+      kind: 'task',
+      sourceId: updateId,
+      changeKind: 'update',
+      sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${taskId}:change`,
+      targetScopeType: 'track',
+      title: '更新後のTask',
+      dueDate: '2026-07-11',
+      relatedLessonName: { registeredLessonNameId: 'geography' },
+    }
+
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      kind: 'task',
+      sourceId: taskId,
+      changeKind: 'add',
+      targetScopeType: 'track',
+      title: '更新前のTask',
+      dueDate: '2026-07-10',
+    }])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [update])).status)
+      .toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [update])).status)
+      .toBe(201)
+
+    const oldDate = await readDailyPlan(env, cookie, '2026-07-10')
+    const newDate = await readDailyPlan(env, cookie, '2026-07-11')
+    expect((await oldDate.json() as { tasks: unknown[] }).tasks).toEqual([])
+    expect((await newDate.json() as { tasks: Array<Record<string, unknown>> }).tasks)
+      .toEqual([expect.objectContaining({
+        taskId,
+        latestChangeId: `${updateId}:change`,
+        title: '更新後のTask',
+        dueDate: '2026-07-11',
+        relatedLessonName: '地理',
+        targetScopeType: 'track',
+      })])
+
+    const changedRetry = await addDirectTimetableChanges(env, cookie, [{
+      ...update,
+      title: 'operation IDを再利用',
+    }])
+    expect(changedRetry.status).toBe(409)
+    await expect(changedRetry.json()).resolves.toMatchObject({
+      status: 'idempotency-conflict',
+      conflictingSourceIds: [updateId],
+    })
+
+    const immutableScope = await addDirectTimetableChanges(env, cookie, [{
+      ...update,
+      sourceId: '33900000-0000-4000-8000-000000000004',
+      expectedLatestChangeId: `${updateId}:change`,
+      targetScopeType: 'class',
+    }])
+    expect(immutableScope.status).toBe(409)
+
+    const remove = {
+      kind: 'task',
+      sourceId: removeId,
+      changeKind: 'remove',
+      sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${updateId}:change`,
+      targetScopeType: 'track',
+    }
+    expect((await addDirectTimetableChanges(env, cookie, [remove])).status)
+      .toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [remove])).status)
+      .toBe(201)
+    expect(((await (await readDailyPlan(env, cookie, '2026-07-11')).json()) as {
+      tasks: unknown[]
+    }).tasks).toEqual([])
+  })
+
+  it('rolls back every mixed draft when a Task is stale and re-adds as a new item', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const taskId = '33910000-0000-4000-8000-000000000001'
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      kind: 'task',
+      sourceId: taskId,
+      changeKind: 'add',
+      targetScopeType: 'student',
+      title: '同じ内容',
+      dueDate: null,
+    }])).status).toBe(201)
+
+    const conflict = await addDirectTimetableChanges(env, cookie, [
+      {
+        kind: 'timetable_change',
+        sourceId: '33910000-0000-4000-8000-000000000002',
+        changeKind: 'add',
+        targetScopeType: 'student',
+        changeDate: '2026-07-10',
+        periodNumber: 7,
+        replacement: { type: 'cancelled' },
+      },
+      {
+        kind: 'task',
+        sourceId: '33910000-0000-4000-8000-000000000003',
+        changeKind: 'remove',
+        sharedInformationItemId: taskId,
+        expectedLatestChangeId: 'stale-change',
+        targetScopeType: 'student',
+      },
+    ])
+    expect(conflict.status).toBe(409)
+    await expect(conflict.json()).resolves.toMatchObject({
+      status: 'timetable-change-conflict',
+      conflictingSourceIds: ['33910000-0000-4000-8000-000000000003'],
+    })
+    const afterConflict = await readDailyPlan(env, cookie, '2026-07-10')
+    const conflictPlan = await afterConflict.json() as {
+      periods: Array<{ periodNumber: number; lessonName: string }>
+      tasks: Array<{ taskId: string }>
+    }
+    expect(conflictPlan.periods[6].lessonName).toBe('')
+    expect(conflictPlan.tasks).toEqual([
+      expect.objectContaining({ taskId }),
+    ])
+
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      kind: 'task',
+      sourceId: '33910000-0000-4000-8000-000000000004',
+      changeKind: 'remove',
+      sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${taskId}:change`,
+      targetScopeType: 'student',
+    }])).status).toBe(201)
+    const readdId = '33910000-0000-4000-8000-000000000005'
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      kind: 'task',
+      sourceId: readdId,
+      changeKind: 'add',
+      targetScopeType: 'student',
+      title: '同じ内容',
+      dueDate: null,
+    }])).status).toBe(201)
+    const afterReadd = await readDailyPlan(env, cookie, '2026-07-10')
+    expect(((await afterReadd.json()) as { tasks: Array<{ taskId: string }> }).tasks)
+      .toEqual([expect.objectContaining({ taskId: readdId })])
   })
 })
 

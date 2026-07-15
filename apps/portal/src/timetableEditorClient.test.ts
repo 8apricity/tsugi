@@ -143,8 +143,9 @@ describe('Timetable editor client', () => {
 
   it('retains and marks a Task draft after an idempotency conflict', async () => {
     const sourceId = '33000000-0000-4000-8000-000000000201'
+    const storage = memoryStorage()
     const editor = createTimetableEditorClient({
-      storage: memoryStorage(),
+      storage,
       createId: () => sourceId,
       submitDirectTimetableChanges: async () => ({
         status: 'idempotency-conflict',
@@ -171,6 +172,141 @@ describe('Timetable editor client', () => {
       draftCount: 1,
       conflictCount: 1,
       taskDrafts: [{ sourceId, conflicted: true }],
+    })
+
+    const restored = createTimetableEditorClient({ storage })
+    expect(restored.getSnapshot()).toMatchObject({
+      editing: true,
+      draftCount: 1,
+      conflictCount: 1,
+      taskDrafts: [{ sourceId, conflicted: true }],
+    })
+  })
+
+  it('drafts Task updates and removals against immutable server identity', async () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000301',
+      '33000000-0000-4000-8000-000000000302',
+    ]
+    const submitted: unknown[] = []
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+      submitDirectTimetableChanges: async (payload) => {
+        submitted.push(payload)
+        return { status: 'applied' }
+      },
+    })
+    const activeTask = {
+      taskId: '33000000-0000-4000-8000-000000000300',
+      latestChangeId: '33000000-0000-4000-8000-000000000300:change',
+      title: '更新前',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+    }
+
+    expect(editor.saveTaskUpdateDraft(activeTask, {
+      title: '更新後',
+      dueDate: null,
+      relatedLessonName: { lessonName: '特別活動' },
+    })).toMatchObject({ status: 'saved' })
+    expect(editor.saveTaskRemoveDraft({
+      ...activeTask,
+      taskId: '33000000-0000-4000-8000-000000000399',
+      latestChangeId: '33000000-0000-4000-8000-000000000399:change',
+    })).toMatchObject({ status: 'saved' })
+
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 2,
+      taskDrafts: [
+        {
+          changeKind: 'update',
+          sharedInformationItemId: activeTask.taskId,
+          expectedLatestChangeId: activeTask.latestChangeId,
+          targetScopeType: 'track',
+          title: '更新後',
+        },
+        {
+          changeKind: 'remove',
+          targetScopeType: 'track',
+        },
+      ],
+    })
+
+    await editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })
+    expect(submitted).toMatchObject([{
+      changes: [
+        {
+          kind: 'task',
+          sourceId: '33000000-0000-4000-8000-000000000301',
+          changeKind: 'update',
+          sharedInformationItemId: activeTask.taskId,
+          expectedLatestChangeId: activeTask.latestChangeId,
+          targetScopeType: 'track',
+          title: '更新後',
+          dueDate: null,
+          relatedLessonName: { lessonName: '特別活動' },
+        },
+        {
+          kind: 'task',
+          sourceId: '33000000-0000-4000-8000-000000000302',
+          changeKind: 'remove',
+          sharedInformationItemId: '33000000-0000-4000-8000-000000000399',
+          expectedLatestChangeId: '33000000-0000-4000-8000-000000000399:change',
+          targetScopeType: 'track',
+        },
+      ],
+    }])
+  })
+
+  it('retains every mixed draft and marks a stale Task without rebasing it', async () => {
+    const taskSourceId = '33000000-0000-4000-8000-000000000401'
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => taskSourceId,
+      submitDirectTimetableChanges: async () => ({
+        status: 'remote-conflict',
+        conflictingKeys: [],
+        conflictingSourceIds: [taskSourceId],
+      }),
+    })
+    const activeTask = {
+      taskId: '33000000-0000-4000-8000-000000000400',
+      latestChangeId: '33000000-0000-4000-8000-000000000400:change',
+      title: '更新前',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'class' as const,
+    }
+    editor.saveTaskUpdateDraft(activeTask, {
+      title: 'ローカル更新',
+      dueDate: '2026-07-11',
+      relatedLessonName: null,
+    })
+    editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 3,
+      replacement: { type: 'cancelled' },
+    })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })).resolves.toEqual({ status: 'remote-conflict', freshness: 'refreshed' })
+    expect(editor.getSnapshot()).toMatchObject({
+      editing: true,
+      draftCount: 2,
+      taskDrafts: [{
+        sourceId: taskSourceId,
+        expectedLatestChangeId: activeTask.latestChangeId,
+        title: 'ローカル更新',
+        conflicted: true,
+      }],
     })
   })
 

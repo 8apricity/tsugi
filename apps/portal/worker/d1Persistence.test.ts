@@ -364,6 +364,117 @@ describe('D1 Direct Timetable Change persistence', () => {
       'select count(*) as count from task_snapshots',
     ).get()).toEqual({ count: 1 })
 
+    const taskUpdate = {
+      kind: 'task',
+      changeKind: 'update',
+      sourceId: '33222222-2222-4222-8222-222222222225',
+      sharedInformationItemId: task.sharedInformationItemId,
+      latestChangeId: '33222222-2222-4222-8222-222222222225:change',
+      expectedLatestChangeId: task.latestChangeId,
+      targetScope: task.targetScope,
+      title: '更新されたTask',
+      dueDate: null,
+      relatedLessonName: { lessonName: '特別活動' },
+      changedByStudentAccountId: task.changedByStudentAccountId,
+      changedAt: Date.parse('2026-07-09T04:00:00.000Z'),
+    } satisfies DirectChangeOperation
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([taskUpdate]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([taskUpdate]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-11'),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        sharedInformationItemId: task.sharedInformationItemId,
+        latestChangeId: taskUpdate.latestChangeId,
+        title: '更新されたTask',
+        dueDate: null,
+      }),
+    ])
+    expect(database.prepare(
+      'select count(*) as count from task_snapshots',
+    ).get()).toEqual({ count: 2 })
+    expect(database.prepare(
+      `select preceding_change_id from shared_information_changes
+       where shared_information_change_id = ?`,
+    ).get(taskUpdate.latestChangeId)).toEqual({
+      preceding_change_id: task.latestChangeId,
+    })
+
+    const taskRemove = {
+      kind: 'task',
+      changeKind: 'remove',
+      sourceId: '33222222-2222-4222-8222-222222222226',
+      sharedInformationItemId: task.sharedInformationItemId,
+      latestChangeId: '33222222-2222-4222-8222-222222222226:change',
+      expectedLatestChangeId: taskUpdate.latestChangeId,
+      targetScope: task.targetScope,
+      changedByStudentAccountId: task.changedByStudentAccountId,
+      changedAt: Date.parse('2026-07-09T05:00:00.000Z'),
+    } satisfies DirectChangeOperation
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([taskRemove]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([taskRemove]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-11'),
+    ).resolves.toEqual([])
+    expect(database.prepare(
+      `select latest_change_id, current_task_snapshot_id,
+              removed_at is not null as removed
+       from shared_information_items
+       where shared_information_item_id = ?`,
+    ).get(task.sharedInformationItemId)).toEqual({
+      latest_change_id: taskRemove.latestChangeId,
+      current_task_snapshot_id: `${taskUpdate.sourceId}:snapshot`,
+      removed: 1,
+    })
+    expect(database.prepare(
+      `select change_kind, preceding_change_id, task_snapshot_id
+       from shared_information_changes
+       where shared_information_change_id = ?`,
+    ).get(taskRemove.latestChangeId)).toEqual({
+      change_kind: 'remove',
+      preceding_change_id: taskUpdate.latestChangeId,
+      task_snapshot_id: null,
+    })
+
+    const mixedRollbackTimetable = {
+      ...operation({
+        sourceId: '33222222-2222-4222-8222-222222222227',
+        changeKind: 'add',
+        targetScope: task.targetScope,
+        replacement: { type: 'cancelled' },
+      }),
+      periodNumber: 7,
+      changedByStudentAccountId: task.changedByStudentAccountId,
+      kind: 'timetable_change',
+    } satisfies DirectChangeOperation
+    const staleTaskRemove = {
+      ...taskRemove,
+      sourceId: '33222222-2222-4222-8222-222222222228',
+      latestChangeId: '33222222-2222-4222-8222-222222222228:change',
+      expectedLatestChangeId: taskUpdate.latestChangeId,
+    } satisfies DirectChangeOperation
+    await expect(
+      adapters.directTimetableChange.commitDirectChanges([
+        mixedRollbackTimetable,
+        staleTaskRemove,
+      ]),
+    ).resolves.toEqual({
+      status: 'conflict',
+      conflictingSourceIds: [staleTaskRemove.sourceId],
+    })
+    expect(database.prepare(
+      `select count(*) as count from shared_information_items
+       where shared_information_item_id = ?`,
+    ).get(mixedRollbackTimetable.sharedInformationItemId)).toEqual({ count: 0 })
+
     const updateTimetable = {
       ...timetable,
       sourceId: '33222222-2222-4222-8222-222222222223',

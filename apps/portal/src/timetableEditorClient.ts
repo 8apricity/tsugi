@@ -66,10 +66,31 @@ export type NewTaskDraftForm = {
   targetScopeType: TargetScopeType | null
 }
 
-export type TaskDraft = Omit<NewTaskDraftForm, 'targetScopeType'> & {
+type TaskSnapshotDraft = Omit<NewTaskDraftForm, 'targetScopeType'>
+
+export type ActiveTaskForEditing = TaskSnapshotDraft & {
+  taskId: string
+  latestChangeId: string
+  targetScopeType: TargetScopeType
+}
+
+type TaskDraftBase = TaskSnapshotDraft & {
   sourceId: string
   targetScopeType: TargetScopeType
 }
+
+export type TaskDraft = TaskDraftBase & (
+  | {
+      changeKind: 'add'
+      sharedInformationItemId?: never
+      expectedLatestChangeId?: never
+    }
+  | {
+      changeKind: 'update' | 'remove'
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+    }
+)
 
 export type TimetableLayerState = {
   status: 'ready'
@@ -120,18 +141,30 @@ export type TimetableSubmissionChange = TimetableSubmissionChangeBase & (
     }
 )
 
-export type TaskSubmissionChange = {
+type TaskSubmissionChangeBase = {
   kind: 'task'
   sourceId: string
-  changeKind: 'add'
   targetScopeType: TargetScopeType
-  title: string
-  dueDate: string | null
-  relatedLessonName?: {
-    registeredLessonNameId?: string
-    lessonName?: string
-  }
 }
+
+export type TaskSubmissionChange = TaskSubmissionChangeBase & (
+  | {
+      changeKind: 'remove'
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+    }
+  | {
+      changeKind: 'add' | 'update'
+      title: string
+      dueDate: string | null
+      relatedLessonName?: {
+        registeredLessonNameId?: string
+        lessonName?: string
+      }
+      sharedInformationItemId?: string
+      expectedLatestChangeId?: string
+    }
+)
 
 export type DirectSubmissionChange =
   | TimetableSubmissionChange
@@ -224,7 +257,7 @@ export function createTimetableEditorClient({
     TimetableLayerState['layers'][number]
   >()
   const conflictKeys = new Set<string>()
-  const taskConflictSourceIds = new Set<string>()
+  const taskConflictSourceIds = new Set(restored.taskConflictSourceIds)
   const stickyConflictKeys = new Set<string>()
   const reconciledKeys = new Set<string>()
   let snapshot = buildSnapshot()
@@ -265,7 +298,13 @@ export function createTimetableEditorClient({
     snapshot = buildSnapshot()
     storage.setItem(
       storageKey,
-      JSON.stringify({ editing, lastTargetScopeType, drafts, taskDrafts }),
+      JSON.stringify({
+        editing,
+        lastTargetScopeType,
+        drafts,
+        taskDrafts,
+        taskConflictSourceIds: [...taskConflictSourceIds],
+      }),
     )
     listeners.forEach((listener) => listener())
   }
@@ -432,24 +471,8 @@ export function createTimetableEditorClient({
     },
     saveTaskDraft(input: NewTaskDraftForm) {
       if (submitting) return { status: 'submission-in-progress' as const }
-      const title = input.title.trim()
-      const relatedLessonName = input.relatedLessonName
-        ? {
-            ...input.relatedLessonName,
-            lessonName: input.relatedLessonName.lessonName.trim(),
-          }
-        : null
-      if (
-        !input.targetScopeType ||
-        title.length < 1 ||
-        title.length > 120 ||
-        /[\r\n]/.test(input.title) ||
-        (input.dueDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) ||
-        (relatedLessonName !== null &&
-          (relatedLessonName.lessonName.length < 1 ||
-            relatedLessonName.lessonName.length > 80 ||
-            /[\r\n]/.test(relatedLessonName.lessonName)))
-      ) {
+      const snapshot = normalizeTaskSnapshot(input)
+      if (!input.targetScopeType || !snapshot) {
         return { status: 'invalid-task' as const }
       }
       if (drafts.length + taskDrafts.length >= maximumDraftKeys) {
@@ -458,12 +481,70 @@ export function createTimetableEditorClient({
       const sourceId = createId()
       taskDrafts.push({
         sourceId,
-        title,
-        dueDate: input.dueDate,
-        relatedLessonName,
+        changeKind: 'add',
+        ...snapshot,
         targetScopeType: input.targetScopeType,
       })
       lastTargetScopeType = input.targetScopeType
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
+    saveTaskUpdateDraft(
+      activeTask: ActiveTaskForEditing,
+      input: TaskSnapshotDraft,
+    ) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const snapshot = normalizeTaskSnapshot(input)
+      if (!snapshot) return { status: 'invalid-task' as const }
+      const existing = taskDrafts.find(
+        (draft) =>
+          draft.changeKind !== 'add' &&
+          draft.sharedInformationItemId === activeTask.taskId,
+      )
+      if (!existing && drafts.length + taskDrafts.length >= maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+      const sourceId = existing?.sourceId ?? createId()
+      taskDrafts = taskDrafts.filter((draft) => draft.sourceId !== sourceId)
+      taskDrafts.push({
+        sourceId,
+        changeKind: 'update',
+        sharedInformationItemId: activeTask.taskId,
+        expectedLatestChangeId: activeTask.latestChangeId,
+        targetScopeType: activeTask.targetScopeType,
+        ...snapshot,
+      })
+      taskConflictSourceIds.delete(sourceId)
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
+    saveTaskRemoveDraft(activeTask: ActiveTaskForEditing) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const existing = taskDrafts.find(
+        (draft) =>
+          draft.changeKind !== 'add' &&
+          draft.sharedInformationItemId === activeTask.taskId,
+      )
+      if (!existing && drafts.length + taskDrafts.length >= maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+      const sourceId = existing?.sourceId ?? createId()
+      taskDrafts = taskDrafts.filter((draft) => draft.sourceId !== sourceId)
+      taskDrafts.push({
+        sourceId,
+        changeKind: 'remove',
+        sharedInformationItemId: activeTask.taskId,
+        expectedLatestChangeId: activeTask.latestChangeId,
+        targetScopeType: activeTask.targetScopeType,
+        title: activeTask.title,
+        dueDate: activeTask.dueDate,
+        relatedLessonName: activeTask.relatedLessonName,
+      })
+      taskConflictSourceIds.delete(sourceId)
       editing = true
       lastCommitFailed = false
       publish()
@@ -833,11 +914,22 @@ function toTimetableSubmissionChange(
 }
 
 function toTaskSubmissionChange(draft: TaskDraft): TaskSubmissionChange {
-  return {
+  const base = {
     kind: 'task',
     sourceId: draft.sourceId,
-    changeKind: 'add',
     targetScopeType: draft.targetScopeType,
+  } as const
+  if (draft.changeKind === 'remove') {
+    return {
+      ...base,
+      changeKind: draft.changeKind,
+      sharedInformationItemId: draft.sharedInformationItemId,
+      expectedLatestChangeId: draft.expectedLatestChangeId,
+    }
+  }
+  return {
+    ...base,
+    changeKind: draft.changeKind,
     title: draft.title,
     dueDate: draft.dueDate,
     ...(draft.relatedLessonName
@@ -850,6 +942,12 @@ function toTaskSubmissionChange(draft: TaskDraft): TaskSubmissionChange {
             : { lessonName: draft.relatedLessonName.lessonName },
         }
       : {}),
+    ...(draft.changeKind === 'update'
+      ? {
+          sharedInformationItemId: draft.sharedInformationItemId,
+          expectedLatestChangeId: draft.expectedLatestChangeId,
+        }
+      : {}),
   }
 }
 
@@ -858,6 +956,7 @@ function restore(storage: StorageLike): {
   lastTargetScopeType: TargetScopeType
   drafts: TimetableChangeDraft[]
   taskDrafts: TaskDraft[]
+  taskConflictSourceIds: string[]
 } {
   try {
     const value = storage.getItem(storageKey)
@@ -875,6 +974,16 @@ function restore(storage: StorageLike): {
           .filter((draft): draft is TaskDraft => draft !== null)
           .slice(0, maximumDraftKeys - drafts.length)
       : []
+    const taskDraftSourceIds = new Set(
+      taskDrafts.map((draft) => draft.sourceId),
+    )
+    const taskConflictSourceIds = Array.isArray(parsed.taskConflictSourceIds)
+      ? parsed.taskConflictSourceIds.filter(
+          (sourceId): sourceId is string =>
+            typeof sourceId === 'string' &&
+            taskDraftSourceIds.has(sourceId),
+        )
+      : []
 
     return {
       editing: parsed.editing === true || drafts.length + taskDrafts.length > 0,
@@ -883,6 +992,7 @@ function restore(storage: StorageLike): {
         : 'track',
       drafts,
       taskDrafts,
+      taskConflictSourceIds,
     }
   } catch {
     return {
@@ -890,6 +1000,7 @@ function restore(storage: StorageLike): {
       lastTargetScopeType: 'track',
       drafts: [],
       taskDrafts: [],
+      taskConflictSourceIds: [],
     }
   }
 }
@@ -899,6 +1010,10 @@ function restoreTaskDraft(value: unknown): TaskDraft | null {
   const draft = value as Record<string, unknown>
   if (
     typeof draft.sourceId !== 'string' ||
+    (draft.changeKind !== undefined &&
+      draft.changeKind !== 'add' &&
+      draft.changeKind !== 'update' &&
+      draft.changeKind !== 'remove') ||
     !isTargetScopeType(draft.targetScopeType) ||
     typeof draft.title !== 'string' ||
     draft.title.length < 1 ||
@@ -907,13 +1022,51 @@ function restoreTaskDraft(value: unknown): TaskDraft | null {
     (draft.relatedLessonName !== null &&
       !isTaskRelatedLessonName(draft.relatedLessonName))
   ) return null
-  return {
+  const base = {
     sourceId: draft.sourceId,
     targetScopeType: draft.targetScopeType,
     title: draft.title,
     dueDate: draft.dueDate as string | null,
     relatedLessonName: draft.relatedLessonName as TaskRelatedLessonName | null,
   }
+  if (draft.changeKind === 'update' || draft.changeKind === 'remove') {
+    return typeof draft.sharedInformationItemId === 'string' &&
+      typeof draft.expectedLatestChangeId === 'string'
+      ? {
+          ...base,
+          changeKind: draft.changeKind,
+          sharedInformationItemId: draft.sharedInformationItemId,
+          expectedLatestChangeId: draft.expectedLatestChangeId,
+        }
+      : null
+  }
+  return draft.sharedInformationItemId === undefined &&
+      draft.expectedLatestChangeId === undefined
+    ? { ...base, changeKind: 'add' }
+    : null
+}
+
+function normalizeTaskSnapshot(
+  input: TaskSnapshotDraft,
+): TaskSnapshotDraft | null {
+  const title = input.title.trim()
+  const relatedLessonName = input.relatedLessonName
+    ? {
+        ...input.relatedLessonName,
+        lessonName: input.relatedLessonName.lessonName.trim(),
+      }
+    : null
+  if (
+    title.length < 1 ||
+    title.length > 120 ||
+    /[\r\n]/.test(input.title) ||
+    (input.dueDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) ||
+    (relatedLessonName !== null &&
+      (relatedLessonName.lessonName.length < 1 ||
+        relatedLessonName.lessonName.length > 80 ||
+        /[\r\n]/.test(relatedLessonName.lessonName)))
+  ) return null
+  return { title, dueDate: input.dueDate, relatedLessonName }
 }
 
 function isTaskRelatedLessonName(value: unknown): value is TaskRelatedLessonName {

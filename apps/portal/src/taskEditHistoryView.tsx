@@ -31,7 +31,7 @@ export function TaskEditHistoryDialog({
         aria-modal="true"
         aria-labelledby="task-history-title"
         onKeyDown={(event) => {
-          if (event.key === 'Escape') onClose()
+          if (event.key === 'Escape') onBack()
         }}
       >
         <header className="editor-dialog-header">

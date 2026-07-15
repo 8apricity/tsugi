@@ -6,7 +6,11 @@ import {
 export type { TargetScopeType } from './targetScope'
 
 export type TimetableReplacement =
-  | { type: 'lesson_name'; lessonName: string }
+  | {
+      type: 'lesson_name'
+      lessonName: string
+      registeredLessonNameId?: string
+    }
   | { type: 'period_reference'; weekday: number; periodNumber: number }
   | { type: 'floating_lesson_reference'; floatingLessonReferenceLabelId: string }
   | { type: 'cancelled' }
@@ -15,6 +19,27 @@ export type TimetableReference = Extract<
   TimetableReplacement,
   { type: 'period_reference' | 'floating_lesson_reference' }
 >
+
+export function timetableReplacementsEqual(
+  left: TimetableReplacement,
+  right: TimetableReplacement,
+) {
+  if (left.type !== right.type) return false
+  if (left.type === 'cancelled') return true
+  if (left.type === 'lesson_name' && right.type === 'lesson_name') {
+    return left.registeredLessonNameId || right.registeredLessonNameId
+      ? left.registeredLessonNameId === right.registeredLessonNameId
+      : left.lessonName === right.lessonName
+  }
+  if (left.type === 'period_reference' && right.type === 'period_reference') {
+    return left.weekday === right.weekday &&
+      left.periodNumber === right.periodNumber
+  }
+  return left.type === 'floating_lesson_reference' &&
+    right.type === 'floating_lesson_reference' &&
+    left.floatingLessonReferenceLabelId ===
+      right.floatingLessonReferenceLabelId
+}
 
 export type ProjectedDailyLesson = {
   lessonName: string

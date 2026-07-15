@@ -11,6 +11,7 @@ import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
+import { createLessonNameComboboxClient } from "./lessonNameCombobox";
 import {
   PeriodWheelInteraction,
   findPeriodClosestToCenter,
@@ -18,7 +19,9 @@ import {
 import { TimetableLayerMemoryCache } from "./timetableLayerCache";
 import {
   createTimetableEditorClient,
+  createNewTaskDraftForm,
   normalizeDirectLessonReplacement,
+  type NewTaskDraftForm,
   type TargetScopeType,
   type TimetableLayerState,
   type TimetableLayerKey,
@@ -26,6 +29,8 @@ import {
   type TimetableReplacement,
 } from "./timetableEditorClient";
 import { createDirectTimetableChangeTransport } from "./timetableSubmissionTransport";
+import type { RegisteredLessonNameOption } from "../shared/lessonNames";
+import type { DailyPlanTaskForCache } from "./dailyPlanCache";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -73,11 +78,17 @@ type TimetableEditorOptions = {
     referenceLabel: string;
     lessonName: string | null;
   }>;
+  registeredLessonNames: RegisteredLessonNameOption[];
+  allRegisteredLessonNames: RegisteredLessonNameOption[];
 };
 
 type TimetableEditorForm = TimetableLayerKey & {
   replacement: TimetableReplacement;
   sourceId?: string;
+};
+
+type TaskEditorForm = Omit<NewTaskDraftForm, "relatedLessonName"> & {
+  relatedLessonInput: string;
 };
 
 type TimetableLayerDialog = {
@@ -187,8 +198,6 @@ function App() {
   const centeredDateStripBoundsRef = useRef<[string, string] | null>(null);
   const suppressDatePickerScrollRef = useRef(false);
   const swipeStartXRef = useRef<number | null>(null);
-  const [completedPlaceholderTaskIds, setCompletedPlaceholderTaskIds] =
-    useState<Set<string>>(() => new Set());
   const [timetableEditorClient] = useState(() =>
     createTimetableEditorClient({
       storage: window.localStorage,
@@ -207,6 +216,20 @@ function App() {
     useState<TimetableEditorOptions | null>(null);
   const [timetableEditorForm, setTimetableEditorForm] =
     useState<TimetableEditorForm | null>(null);
+  const [taskEditorForm, setTaskEditorForm] =
+    useState<TaskEditorForm | null>(null);
+  const [taskDetail, setTaskDetail] =
+    useState<DailyPlanTaskForCache | null>(null);
+  const [taskLessonNamesExpanded, setTaskLessonNamesExpanded] =
+    useState(false);
+  const [taskLessonNameListOpen, setTaskLessonNameListOpen] =
+    useState(false);
+  const [activeTaskLessonNameOption, setActiveTaskLessonNameOption] =
+    useState(-1);
+  const [lessonNameOptionsExpanded, setLessonNameOptionsExpanded] =
+    useState(false);
+  const [lessonNameListOpen, setLessonNameListOpen] = useState(false);
+  const [activeLessonNameOption, setActiveLessonNameOption] = useState(-1);
   const [timetableLayerDialog, setTimetableLayerDialog] =
     useState<TimetableLayerDialog | null>(null);
   const [timetableHistoryDialog, setTimetableHistoryDialog] =
@@ -217,7 +240,8 @@ function App() {
     string | null
   >(null);
   const timetableDialogOpen = Boolean(
-    timetableLayerDialog || timetableHistoryDialog || timetableEditorForm,
+    timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
+      taskEditorForm || taskDetail,
   );
 
   useEffect(() => {
@@ -235,6 +259,20 @@ function App() {
 
     return () => window.clearTimeout(timeoutId);
   }, [timetableEditorMessage]);
+
+  useEffect(() => {
+    if (!lessonNameListOpen || activeLessonNameOption < 0) return;
+    document
+      .getElementById(`lesson-name-option-${activeLessonNameOption}`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeLessonNameOption, lessonNameListOpen]);
+
+  useEffect(() => {
+    if (!taskLessonNameListOpen || activeTaskLessonNameOption < 0) return;
+    document
+      .getElementById(`task-lesson-name-option-${activeTaskLessonNameOption}`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeTaskLessonNameOption, taskLessonNameListOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -782,26 +820,13 @@ function App() {
     timetableEditorClient.reset();
     timetableLayerCacheRef.current.clear();
     setTimetableEditorForm(null);
+    setTaskEditorForm(null);
+    setTaskDetail(null);
     setTimetableLayerDialog(null);
     setTimetableEditorOptions(null);
     setMenuOpen(false);
-    setCompletedPlaceholderTaskIds(new Set());
     setStatus("idle");
     setMessage("ログアウトしました。");
-  }
-
-  function togglePlaceholderTask(taskId: string) {
-    setCompletedPlaceholderTaskIds((current) => {
-      const next = new Set(current);
-
-      if (next.has(taskId)) {
-        next.delete(taskId);
-      } else {
-        next.add(taskId);
-      }
-
-      return next;
-    });
   }
 
   function enterTimetableEditing() {
@@ -820,6 +845,62 @@ function App() {
     }
     timetableEditorClient.discard();
     setTimetableEditorForm(null);
+    setTaskEditorForm(null);
+    setTimetableEditorMessage(null);
+  }
+
+  function openTaskEditor() {
+    const initial = createNewTaskDraftForm(selectedSchoolDate);
+    setTaskLessonNamesExpanded(false);
+    setTaskLessonNameListOpen(false);
+    setActiveTaskLessonNameOption(-1);
+    setTaskEditorForm({
+      title: initial.title,
+      dueDate: initial.dueDate,
+      targetScopeType: initial.targetScopeType,
+      relatedLessonInput: "",
+    });
+  }
+
+  function saveTaskDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!taskEditorForm || timetableEditor.submitting) return;
+    const lessonInput = taskEditorForm.relatedLessonInput.trim();
+    const resolvedLesson = lessonInput
+      ? createLessonNameComboboxClient({
+          prioritizedOptions:
+            timetableEditorOptions?.registeredLessonNames ?? [],
+          allOptions:
+            timetableEditorOptions?.allRegisteredLessonNames ?? [],
+        }).resolveInput(lessonInput).replacement
+      : null;
+    const result = timetableEditorClient.saveTaskDraft({
+      title: taskEditorForm.title,
+      dueDate: taskEditorForm.dueDate,
+      targetScopeType: taskEditorForm.targetScopeType,
+      relatedLessonName: resolvedLesson
+        ? {
+            lessonName: resolvedLesson.lessonName,
+            ...(resolvedLesson.registeredLessonNameId
+              ? {
+                  registeredLessonNameId:
+                    resolvedLesson.registeredLessonNameId,
+                }
+              : {}),
+          }
+        : null,
+    });
+    if (result.status === "invalid-task") {
+      setTimetableEditorMessage(
+        "Title、Due Date、Related Lesson Name、Target Scopeを確認してください。",
+      );
+      return;
+    }
+    if (result.status === "limit-reached") {
+      setTimetableEditorMessage("下書きは合計50件までです。");
+      return;
+    }
+    setTaskEditorForm(null);
     setTimetableEditorMessage(null);
   }
 
@@ -853,6 +934,9 @@ function App() {
     const serverLayer = timetableLayerDialog.state.layers.find(
       (layer) => layer.targetScopeType === targetScopeType,
     );
+    setLessonNameOptionsExpanded(false);
+    setLessonNameListOpen(false);
+    setActiveLessonNameOption(-1);
     setTimetableEditorForm(
       existing
         ? {
@@ -1003,7 +1087,30 @@ function App() {
     if (!timetableEditorForm || timetableEditor.submitting) return;
     let replacement = timetableEditorForm.replacement;
     if (replacement.type === "lesson_name") {
-      replacement = normalizeDirectLessonReplacement(replacement.lessonName);
+      const normalizedReplacement = normalizeDirectLessonReplacement(
+        replacement.lessonName,
+      );
+      if (
+        normalizedReplacement.type === "lesson_name" &&
+        !replacement.registeredLessonNameId &&
+        !timetableEditorOptions
+      ) {
+        setTimetableEditorMessage(
+          "Lesson Nameの候補を読み込んでから保存してください。",
+        );
+        return;
+      }
+      replacement = normalizedReplacement.type === "lesson_name" &&
+          replacement.registeredLessonNameId
+        ? replacement
+        : normalizedReplacement.type === "lesson_name"
+          ? createLessonNameComboboxClient({
+              prioritizedOptions:
+                timetableEditorOptions?.registeredLessonNames ?? [],
+              allOptions:
+                timetableEditorOptions?.allRegisteredLessonNames ?? [],
+            }).resolveInput(normalizedReplacement.lessonName).replacement
+          : normalizedReplacement;
       if (replacement.type === "lesson_name" && !replacement.lessonName) {
         setTimetableEditorMessage("Lesson Nameを入力してください。");
         return;
@@ -1081,9 +1188,10 @@ function App() {
     const result = await timetableEditorClient.submitCurrentBatch({
       confirmSubmission: ({ changes }) => {
         const summary = changes
-          .map(
-            (draft) =>
-              `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement)}`,
+          .map((draft) =>
+            "changeDate" in draft
+              ? `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement)}`
+              : `Task / ${scopeLabel(draft.targetScopeType)} / ${draft.title} / ${draft.dueDate ?? "期限なし"}`,
           )
           .join("\n");
         const confirmed = window.confirm(
@@ -1094,13 +1202,12 @@ function App() {
       },
       applyFreshness: async (effect) => {
         timetableLayerCacheRef.current.clear();
-        await refreshSubmittedTimetableLayers(
-          effect.type === "applied"
-            ? effect.affectedKeys
-            : effect.conflictingKeys,
-          effect.signal,
-        );
-        if (effect.type === "remote-conflict") return "refreshed" as const;
+        const timetableKeys = effect.type === "applied"
+          ? effect.affectedKeys
+          : effect.conflictingKeys;
+        if (timetableKeys.length > 0) {
+          await refreshSubmittedTimetableLayers(timetableKeys, effect.signal);
+        }
         const dailyPlanState = await dailyPlanClient.reload();
         if (effect.signal.aborted) return "stale" as const;
         return dailyPlanState.status === "error"
@@ -1215,6 +1322,29 @@ function App() {
           (replacement) =>
             resolveReplacementLessonName(replacement, timetableEditorOptions),
         )
+      : null;
+    const lessonNameQuery =
+      timetableEditorForm?.replacement.type === "lesson_name"
+        ? timetableEditorForm.replacement.lessonName
+        : "";
+    const lessonNameCombobox = createLessonNameComboboxClient({
+      prioritizedOptions: timetableEditorOptions?.registeredLessonNames ?? [],
+      allOptions: timetableEditorOptions?.allRegisteredLessonNames ?? [],
+      initialQuery: lessonNameQuery,
+      initialExpandedToAll: lessonNameOptionsExpanded,
+      initialActiveIndex: activeLessonNameOption,
+    });
+    const lessonNameComboboxSnapshot = lessonNameCombobox.getSnapshot();
+    const taskLessonNameCombobox = createLessonNameComboboxClient({
+      prioritizedOptions: timetableEditorOptions?.registeredLessonNames ?? [],
+      allOptions: timetableEditorOptions?.allRegisteredLessonNames ?? [],
+      initialQuery: taskEditorForm?.relatedLessonInput ?? "",
+      initialExpandedToAll: taskLessonNamesExpanded,
+      initialActiveIndex: activeTaskLessonNameOption,
+    });
+    const taskLessonNameSnapshot = taskLessonNameCombobox.getSnapshot();
+    const taskLessonResolution = taskEditorForm?.relatedLessonInput.trim()
+      ? taskLessonNameCombobox.resolveInput()
       : null;
 
     return (
@@ -1392,35 +1522,78 @@ function App() {
                   className="panel daily-section"
                   aria-labelledby="tasks-title"
                 >
-                  <h2 id="tasks-title">タスク</h2>
+                  <div className="daily-section-heading">
+                    <h2 id="tasks-title">タスク</h2>
+                    {timetableEditor.editing ? (
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        disabled={timetableEditor.atLimit || timetableEditor.submitting}
+                        onClick={openTaskEditor}
+                      >
+                        Taskを追加
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="task-list">
-                    {dailyPlanState.dailyPlan.tasks.map((task) => {
-                      const completed = completedPlaceholderTaskIds.has(
-                        task.taskId,
-                      );
-
-                      return (
-                        <label className="task-item" key={task.taskId}>
-                          <input
-                            type="checkbox"
-                            checked={completed}
-                            onChange={() => togglePlaceholderTask(task.taskId)}
-                          />
-                          <span>
-                            <strong>{task.title}</strong>
-                            <small>
-                              {task.dueDate ? `${task.dueDate}` : task.dueLabel}
-                              {task.relatedLesson
-                                ? ` · ${task.relatedLesson.periodNumber}限 ${task.relatedLesson.lessonName}`
-                                : ""}
-                              {!task.relatedLesson && task.relatedLessonName
-                                ? ` · ${task.relatedLessonName}`
-                                : ""}
-                            </small>
+                    {timetableEditor.taskDrafts.map((task) => (
+                      <article
+                        className="task-item task-draft"
+                        key={task.sourceId}
+                      >
+                        <span>
+                          <strong>{task.title}</strong>
+                          <small>
+                            {task.dueDate ?? "期限なし"}
+                            {task.relatedLessonName
+                              ? ` · ${task.relatedLessonName.lessonName}`
+                              : ""}
+                          </small>
+                          <span className="task-scope-badge">
+                            {scopeLabel(task.targetScopeType)}
                           </span>
-                        </label>
-                      );
-                    })}
+                          <small>
+                            {task.conflicted ? "競合あり" : "下書き"}
+                          </small>
+                        </span>
+                        <button
+                          className="button-link"
+                          type="button"
+                          aria-label={`${task.title}の下書きを削除`}
+                          onClick={() =>
+                            timetableEditorClient.removeTaskDraft(task.sourceId)
+                          }
+                        >
+                          削除
+                        </button>
+                      </article>
+                    ))}
+                    {dailyPlanState.dailyPlan.tasks.map((task) => (
+                      <button
+                        className="task-item"
+                        type="button"
+                        key={task.taskId}
+                        onClick={() => setTaskDetail(task)}
+                      >
+                        <span>
+                          <strong>{task.title}</strong>
+                          <small>
+                            {task.dueDate ?? "期限なし"}
+                            {task.relatedLessonName
+                              ? ` · ${task.relatedLessonName}`
+                              : ""}
+                          </small>
+                          <span className="task-scope-badge">
+                            {scopeLabel(task.targetScopeType)}
+                          </span>
+                        </span>
+                        <span aria-hidden="true">›</span>
+                      </button>
+                    ))}
+                    {timetableEditor.taskDrafts.length === 0 &&
+                    dailyPlanState.dailyPlan.tasks.length === 0 ? (
+                      <p className="empty-state">Taskはありません。</p>
+                    ) : null}
                   </div>
                 </section>
 
@@ -1489,12 +1662,12 @@ function App() {
                     type="button"
                     disabled={
                       timetableEditor.submitting ||
-                      timetableEditor.drafts.length === 0 ||
+                      timetableEditor.draftCount === 0 ||
                       timetableEditor.conflictCount > 0
                     }
                     onClick={() => void commitTimetableDrafts()}
                   >
-                    変更を確定 ({timetableEditor.drafts.length})
+                    変更を確定 ({timetableEditor.draftCount})
                   </button>
                 ) : null}
                 <button
@@ -1504,7 +1677,7 @@ function App() {
                   aria-label={
                     timetableEditor.editing
                       ? "編集モードを終了"
-                      : "時間割を編集"
+                      : "Daily Planを編集"
                   }
                   onClick={() =>
                     timetableEditor.editing
@@ -1516,6 +1689,267 @@ function App() {
                 </button>
               </div>
             </footer>
+          ) : null}
+
+          {taskEditorForm ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <section
+                className="timetable-editor-dialog task-editor-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="task-editor-title"
+              >
+                <header className="editor-dialog-header">
+                  <h2 id="task-editor-title">Taskを追加</h2>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="閉じる"
+                    onClick={() => setTaskEditorForm(null)}
+                  >
+                    ×
+                  </button>
+                </header>
+                <form onSubmit={saveTaskDraft}>
+                  <label>
+                    <span>Title</span>
+                    <input
+                      autoFocus
+                      required
+                      maxLength={120}
+                      value={taskEditorForm.title}
+                      onChange={(event) =>
+                        setTaskEditorForm((current) =>
+                          current
+                            ? { ...current, title: event.target.value }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Due Date</span>
+                    <input
+                      type="date"
+                      min={schoolYearRange?.startsOn}
+                      max={schoolYearRange?.endsOn}
+                      value={taskEditorForm.dueDate ?? ""}
+                      onChange={(event) =>
+                        setTaskEditorForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                dueDate: event.target.value || null,
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
+                  <button
+                    className="button-link"
+                    type="button"
+                    onClick={() =>
+                      setTaskEditorForm((current) =>
+                        current ? { ...current, dueDate: null } : current,
+                      )
+                    }
+                  >
+                    Due Dateをクリア
+                  </button>
+                  <label>
+                    <span>Related Lesson Name（任意）</span>
+                    <input
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={
+                        taskLessonNameListOpen &&
+                        taskLessonNameSnapshot.options.length > 0
+                      }
+                      aria-controls="task-lesson-name-options"
+                      aria-activedescendant={
+                        taskLessonNameListOpen &&
+                        taskLessonNameSnapshot.activeIndex >= 0
+                          ? `task-lesson-name-option-${taskLessonNameSnapshot.activeIndex}`
+                          : undefined
+                      }
+                      value={taskEditorForm.relatedLessonInput}
+                      onFocus={() => setTaskLessonNameListOpen(true)}
+                      onChange={(event) => {
+                        setTaskLessonNameListOpen(true);
+                        setActiveTaskLessonNameOption(-1);
+                        setTaskEditorForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                relatedLessonInput: event.target.value,
+                              }
+                            : current,
+                        );
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setTaskLessonNameListOpen(true);
+                          taskLessonNameCombobox.moveActive(
+                            event.key === "ArrowDown" ? 1 : -1,
+                          );
+                          setActiveTaskLessonNameOption(
+                            taskLessonNameCombobox.getSnapshot().activeIndex,
+                          );
+                        } else if (
+                          event.key === "Enter" &&
+                          taskLessonNameListOpen &&
+                          taskLessonNameSnapshot.activeIndex >= 0
+                        ) {
+                          event.preventDefault();
+                          const option = taskLessonNameSnapshot.options[
+                            taskLessonNameSnapshot.activeIndex
+                          ];
+                          if (!option) return;
+                          setTaskEditorForm((current) =>
+                            current
+                              ? { ...current, relatedLessonInput: option.fullLessonName }
+                              : current,
+                          );
+                          setTaskLessonNameListOpen(false);
+                          setActiveTaskLessonNameOption(-1);
+                        } else if (
+                          event.key === "Escape" &&
+                          taskLessonNameListOpen
+                        ) {
+                          event.preventDefault();
+                          setTaskLessonNameListOpen(false);
+                          setActiveTaskLessonNameOption(-1);
+                        }
+                      }}
+                    />
+                  </label>
+                  {taskLessonNameListOpen &&
+                  taskLessonNameSnapshot.options.length > 0 ? (
+                    <div
+                      id="task-lesson-name-options"
+                      className="lesson-name-options"
+                      role="listbox"
+                      aria-label="Registered Lesson Names"
+                    >
+                      {taskLessonNameSnapshot.options.map((option, index) => (
+                        <button
+                          id={`task-lesson-name-option-${index}`}
+                          type="button"
+                          role="option"
+                          tabIndex={-1}
+                          aria-selected={index === activeTaskLessonNameOption}
+                          className={
+                            index === activeTaskLessonNameOption ? "active" : ""
+                          }
+                          key={option.registeredLessonNameId}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setTaskLessonNameListOpen(false);
+                            setActiveTaskLessonNameOption(-1);
+                            setTaskEditorForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    relatedLessonInput: option.fullLessonName,
+                                  }
+                                : current,
+                            );
+                          }}
+                        >
+                          {option.displayLabel}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {!taskLessonNamesExpanded ? (
+                    <button
+                      className="button-link"
+                      type="button"
+                      onClick={() => {
+                        setTaskLessonNamesExpanded(true);
+                        setTaskLessonNameListOpen(true);
+                        setActiveTaskLessonNameOption(-1);
+                      }}
+                    >
+                      More
+                    </button>
+                  ) : null}
+                  {taskLessonResolution?.custom ? (
+                    <p className="field-warning" role="status">
+                      custom Lesson Nameとして保存されます。
+                    </p>
+                  ) : null}
+                  <label>
+                    <span>Target Scope</span>
+                    <select
+                      required
+                      value={taskEditorForm.targetScopeType ?? ""}
+                      onChange={(event) =>
+                        setTaskEditorForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                targetScopeType:
+                                  (event.target.value || null) as
+                                    TargetScopeType | null,
+                              }
+                            : current,
+                        )
+                      }
+                    >
+                      <option value="">選択してください</option>
+                      <option value="grade">Grade</option>
+                      <option value="class">Class</option>
+                      <option value="track">Track</option>
+                      <option value="student">Student</option>
+                    </select>
+                  </label>
+                  <div className="editor-dialog-actions">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => setTaskEditorForm(null)}
+                    >
+                      キャンセル
+                    </button>
+                    <button className="button-primary" type="submit">
+                      下書きに保存
+                    </button>
+                  </div>
+                </form>
+              </section>
+            </div>
+          ) : null}
+
+          {taskDetail ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <section
+                className="timetable-editor-dialog task-detail-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="task-detail-title"
+              >
+                <header className="editor-dialog-header">
+                  <h2 id="task-detail-title">Task Detail</h2>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="閉じる"
+                    onClick={() => setTaskDetail(null)}
+                  >
+                    ×
+                  </button>
+                </header>
+                <dl className="detail-list">
+                  <div><dt>Title</dt><dd>{taskDetail.title}</dd></div>
+                  <div><dt>Due Date</dt><dd>{taskDetail.dueDate ?? "期限なし"}</dd></div>
+                  <div><dt>Related Lesson Name</dt><dd>{taskDetail.relatedLessonName ?? "なし"}</dd></div>
+                  <div><dt>Target Scope</dt><dd>{scopeLabel(taskDetail.targetScopeType)}</dd></div>
+                </dl>
+              </section>
+            </div>
           ) : null}
 
           {timetableHistoryDialog ? (
@@ -2000,26 +2434,142 @@ function App() {
                       休講
                     </button>
 
-                    <input
-                      className="direct-lesson-input"
-                      aria-label="Lesson Name"
-                      maxLength={80}
-                      placeholder="または、この時間の名前を直接入力"
-                      value={
-                        timetableEditorForm.replacement.type === "lesson_name"
-                          ? timetableEditorForm.replacement.lessonName
-                          : ""
-                      }
-                      onChange={(event) =>
-                        setTimetableEditorForm({
-                          ...timetableEditorForm,
-                          replacement: {
-                            type: "lesson_name",
-                            lessonName: event.target.value,
-                          },
-                        })
-                      }
-                    />
+                    <div className="lesson-name-combobox">
+                      <input
+                        className="direct-lesson-input"
+                        aria-label="Lesson Name"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={
+                          lessonNameListOpen &&
+                          timetableEditorForm.replacement.type === "lesson_name"
+                        }
+                        aria-controls="lesson-name-options"
+                        aria-activedescendant={
+                          lessonNameListOpen &&
+                          lessonNameComboboxSnapshot.activeIndex >= 0
+                            ? `lesson-name-option-${lessonNameComboboxSnapshot.activeIndex}`
+                            : undefined
+                        }
+                        maxLength={80}
+                        placeholder="または、この時間の名前を直接入力"
+                        value={
+                          timetableEditorForm.replacement.type === "lesson_name"
+                            ? timetableEditorForm.replacement.lessonName
+                            : ""
+                        }
+                        onFocus={() => setLessonNameListOpen(true)}
+                        onChange={(event) => {
+                          setTimetableEditorForm({
+                            ...timetableEditorForm,
+                            replacement: {
+                              type: "lesson_name",
+                              lessonName: event.target.value,
+                            },
+                          });
+                          setLessonNameListOpen(true);
+                          setActiveLessonNameOption(-1);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setLessonNameListOpen(true);
+                            lessonNameCombobox.moveActive(
+                              event.key === "ArrowDown" ? 1 : -1,
+                            );
+                            setActiveLessonNameOption(
+                              lessonNameCombobox.getSnapshot().activeIndex,
+                            );
+                          } else if (
+                            event.key === "Enter" &&
+                            lessonNameListOpen &&
+                            lessonNameComboboxSnapshot.activeIndex >= 0
+                          ) {
+                            event.preventDefault();
+                            const replacement = lessonNameCombobox.chooseActive();
+                            if (!replacement) return;
+                            setTimetableEditorForm({
+                              ...timetableEditorForm,
+                              replacement,
+                            });
+                            setLessonNameListOpen(false);
+                            setActiveLessonNameOption(-1);
+                          } else if (
+                            event.key === "Escape" &&
+                            lessonNameListOpen
+                          ) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setLessonNameListOpen(false);
+                            setActiveLessonNameOption(-1);
+                          }
+                        }}
+                      />
+                      {lessonNameListOpen &&
+                      timetableEditorForm.replacement.type === "lesson_name" ? (
+                        <div className="lesson-name-options-popover">
+                          <div id="lesson-name-options" role="listbox">
+                            {lessonNameComboboxSnapshot.options.map((option, index) => (
+                              <button
+                                id={`lesson-name-option-${index}`}
+                                role="option"
+                                tabIndex={-1}
+                                aria-selected={index === activeLessonNameOption}
+                                className={
+                                  index === activeLessonNameOption
+                                    ? "active"
+                                    : ""
+                                }
+                                type="button"
+                                key={option.registeredLessonNameId}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  lessonNameCombobox.setActiveIndex(index);
+                                  const replacement =
+                                    lessonNameCombobox.chooseActive();
+                                  if (!replacement) return;
+                                  setTimetableEditorForm({
+                                    ...timetableEditorForm,
+                                    replacement,
+                                  });
+                                  setLessonNameListOpen(false);
+                                  setActiveLessonNameOption(-1);
+                                }}
+                              >
+                                {option.displayLabel}
+                              </button>
+                            ))}
+                          </div>
+                          {!lessonNameOptionsExpanded ? (
+                            <button
+                              className="lesson-name-more"
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                lessonNameCombobox.expandToAll();
+                                const snapshot = lessonNameCombobox.getSnapshot();
+                                setLessonNameOptionsExpanded(
+                                  snapshot.expandedToAll,
+                                );
+                                setActiveLessonNameOption(snapshot.activeIndex);
+                              }}
+                            >
+                              More
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {timetableEditorForm.replacement.type === "lesson_name" &&
+                      timetableEditorOptions &&
+                      !timetableEditorForm.replacement.registeredLessonNameId &&
+                      timetableEditorForm.replacement.lessonName.trim() &&
+                      lessonNameCombobox.resolveInput().custom ? (
+                        <p className="custom-lesson-name-warning" role="status">
+                          Custom Lesson Nameとして保存されます。
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
 
                   <footer className="editor-dialog-actions">
@@ -2063,7 +2613,13 @@ function App() {
                     <button
                       className="button-primary"
                       type="submit"
-                      disabled={timetableEditor.submitting}
+                      disabled={
+                        timetableEditor.submitting ||
+                        (timetableEditorForm.replacement.type === "lesson_name" &&
+                          !timetableEditorForm.replacement
+                            .registeredLessonNameId &&
+                          !timetableEditorOptions)
+                      }
                     >
                       下書きに保存
                     </button>

@@ -24,15 +24,10 @@ import {
 type DailyPlanTask = {
   taskId: string
   title: string
-  dueDate?: string
-  dueLabel?: string
-  relatedLesson?: {
-    schoolDate: string
-    periodNumber: number
-    lessonName: string
-  }
+  dueDate: string | null
   relatedLessonName?: string
-  completed: false
+  targetScopeType: 'grade' | 'class' | 'track' | 'student'
+  createdAt: number
 }
 
 type DailyPlanNote = {
@@ -223,9 +218,14 @@ export async function readDailyPlansRange({
   > = {}
 
   for (const date of schoolDates) {
+    const tasks = await dailyPlanStore.listActiveTasksForStudent(
+      sharedContext.studentAffiliation,
+      date,
+    )
     dailyPlans[date] = buildReadyDailyPlan({
       schoolDate: date,
       sharedContext,
+      tasks,
       projectedLessons: await projectDailyPlanLessons(
         entriesByWeekday.get(weekdayForSchoolDate(date)) ?? [],
         activeTimetableChanges.filter((change) => change.changeDate === date),
@@ -276,10 +276,15 @@ async function readDailyPlanForAuthenticatedStudent({
     schoolDate,
     schoolDate,
   )
+  const tasks = await store.listActiveTasksForStudent(
+    sharedContext.studentAffiliation,
+    schoolDate,
+  )
 
   return buildReadyDailyPlan({
     schoolDate,
     sharedContext,
+    tasks,
     projectedLessons: await projectDailyPlanLessons(
       standardTimetableEntries,
       activeTimetableChanges,
@@ -338,6 +343,7 @@ function buildReadyDailyPlan({
   schoolDate,
   sharedContext,
   projectedLessons,
+  tasks,
 }: {
   schoolDate: string
   sharedContext: Extract<
@@ -345,9 +351,9 @@ function buildReadyDailyPlan({
     { status: 'ready' }
   >
   projectedLessons: Map<number, ProjectedDailyLesson>
+  tasks: Awaited<ReturnType<DailyPlanStore['listActiveTasksForStudent']>>
 }): Extract<DailyPlanResult, { status: 'ready' }> {
   const weekday = weekdayForSchoolDate(schoolDate)
-  const placeholderTasks = listPlaceholderDailyPlanTasks(schoolDate)
   const placeholderNotes = listPlaceholderDailyPlanNotes(schoolDate)
   const placeholderDailyLessonNotes = placeholderNotes.filter(
     (note) => note.relatedContext?.type === 'daily-lesson',
@@ -383,13 +389,7 @@ function buildReadyDailyPlan({
         ...(projectedLesson && projectedLesson.timetableChangeState !== 'unchanged'
           ? { timetableChangeState: projectedLesson.timetableChangeState }
           : {}),
-        hasTasks: placeholderTasks.some((task) =>
-          isPlaceholderTaskRelatedToLesson(task, {
-            schoolDate,
-            periodNumber,
-            lessonName,
-          }),
-        ),
+        hasTasks: false,
         notes: placeholderDailyLessonNotes.filter(
           (note) =>
             note.relatedContext?.type === 'daily-lesson' &&
@@ -397,7 +397,16 @@ function buildReadyDailyPlan({
         ),
       }
     }),
-    tasks: placeholderTasks,
+    tasks: tasks.map((task) => ({
+      taskId: task.sharedInformationItemId,
+      title: task.title,
+      dueDate: task.dueDate,
+      ...(task.relatedLessonName
+        ? { relatedLessonName: task.relatedLessonName.lessonName }
+        : {}),
+      targetScopeType: task.targetScope.type,
+      createdAt: task.createdAt,
+    })),
     notes: placeholderBottomNotes,
   }
 }
@@ -438,27 +447,6 @@ async function projectDailyPlanLessons(
   return result
 }
 
-const placeholderDailyPlanTasks: DailyPlanTask[] = [
-  {
-    taskId: 'placeholder-task-geography-worksheet',
-    title: 'Placeholder: Bring geography worksheet',
-    dueDate: '2026-07-10',
-    relatedLesson: {
-      schoolDate: '2026-07-10',
-      periodNumber: 1,
-      lessonName: '地理',
-    },
-    completed: false,
-  },
-  {
-    taskId: 'placeholder-task-modern-japanese-reading',
-    title: 'Placeholder: Modern Japanese reading',
-    dueLabel: '今日',
-    relatedLessonName: '現代文',
-    completed: false,
-  },
-]
-
 const placeholderDailyPlanNotes: DailyPlanNote[] = [
   {
     noteId: 'placeholder-daily-lesson-note-2026-07-10-period-2',
@@ -492,16 +480,6 @@ const placeholderDailyPlanNotes: DailyPlanNote[] = [
   },
 ]
 
-function listPlaceholderDailyPlanTasks(schoolDate: string) {
-  return placeholderDailyPlanTasks.filter((task) => {
-    if (task.relatedLesson?.schoolDate) {
-      return task.relatedLesson.schoolDate === schoolDate
-    }
-
-    return true
-  })
-}
-
 function listPlaceholderDailyPlanNotes(schoolDate: string) {
   return placeholderDailyPlanNotes.filter((note) => {
     if (!note.relatedContext) {
@@ -510,29 +488,6 @@ function listPlaceholderDailyPlanNotes(schoolDate: string) {
 
     return note.relatedContext.schoolDate === schoolDate
   })
-}
-
-function isPlaceholderTaskRelatedToLesson(
-  task: DailyPlanTask,
-  lesson: {
-    schoolDate: string
-    periodNumber: number
-    lessonName: string
-  },
-) {
-  if (
-    task.relatedLesson?.schoolDate === lesson.schoolDate &&
-    task.relatedLesson.periodNumber === lesson.periodNumber &&
-    task.relatedLesson.lessonName === lesson.lessonName
-  ) {
-    return true
-  }
-
-  return (
-    !task.relatedLesson &&
-    task.relatedLessonName !== undefined &&
-    task.relatedLessonName === lesson.lessonName
-  )
 }
 
 function formatJstSchoolDate(now: number) {

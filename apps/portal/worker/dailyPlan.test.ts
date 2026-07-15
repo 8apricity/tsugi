@@ -127,10 +127,7 @@ describe('Daily Plan module', () => {
         classNumber: 3,
         trackName: '文科',
       },
-      tasks: [
-        { taskId: 'placeholder-task-geography-worksheet' },
-        { taskId: 'placeholder-task-modern-japanese-reading' },
-      ],
+      tasks: [],
       notes: [
         { noteId: 'placeholder-school-date-note-2026-07-10' },
         { noteId: 'placeholder-no-context-note' },
@@ -147,10 +144,10 @@ describe('Daily Plan module', () => {
         hasTasks,
       })),
     ).toEqual([
-      { periodNumber: 1, lessonName: '地理', hasTasks: true },
+      { periodNumber: 1, lessonName: '地理', hasTasks: false },
       { periodNumber: 2, lessonName: '', hasTasks: false },
       { periodNumber: 3, lessonName: '', hasTasks: false },
-      { periodNumber: 4, lessonName: '現代文', hasTasks: true },
+      { periodNumber: 4, lessonName: '現代文', hasTasks: false },
       { periodNumber: 5, lessonName: '', hasTasks: false },
       { periodNumber: 6, lessonName: '', hasTasks: false },
       { periodNumber: 7, lessonName: '', hasTasks: false },

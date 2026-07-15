@@ -16,7 +16,12 @@ export function createDirectTimetableChangeTransport({
     if (response.ok) return { status: 'applied' }
 
     const body = await response.json().catch(() => null) as
-      | { status?: unknown; conflictingKeys?: unknown; schoolYear?: unknown }
+      | {
+          status?: unknown
+          conflictingKeys?: unknown
+          conflictingSourceIds?: unknown
+          schoolYear?: unknown
+        }
       | null
     if (
       body?.status === 'timetable-change-conflict' ||
@@ -27,6 +32,7 @@ export function createDirectTimetableChangeTransport({
           ? 'idempotency-conflict'
           : 'remote-conflict',
         conflictingKeys: readTimetableLayerKeys(body.conflictingKeys),
+        conflictingSourceIds: readStringArray(body.conflictingSourceIds),
       }
     }
     if (
@@ -41,6 +47,12 @@ export function createDirectTimetableChangeTransport({
     }
     return { status: 'rejected' }
   }
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
 }
 
 function readTimetableLayerKeys(value: unknown): TimetableLayerKey[] {

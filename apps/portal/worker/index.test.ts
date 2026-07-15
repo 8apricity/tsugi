@@ -493,6 +493,16 @@ function readDirectTimetableChangeDetail(
   )
 }
 
+function readTaskEditHistory(env: Env, cookie: string, taskId: string) {
+  return worker.fetch(
+    new Request(
+      `https://tsugi.test/api/tasks/${encodeURIComponent(taskId)}/history`,
+      { headers: cookie ? { cookie } : {} },
+    ),
+    env,
+  )
+}
+
 describe('Timetable Direct Add API', () => {
   it('updates an Active Timetable Change when its expected latest change matches', async () => {
     const env = createDailyPlanTestEnv()
@@ -1439,6 +1449,180 @@ describe('Timetable Change Edit History API', () => {
         after: { type: 'lesson_name', lessonName: '前' },
       }),
     ])
+  })
+})
+
+describe('Task Edit History API', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reconstructs tied add, update, and remove transitions with current Short Lesson Names and Named Attribution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-10T00:00:00.000Z'))
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const taskId = '28a11111-1111-4111-8111-111111111111'
+    const updateId = '28a22222-2222-4222-8222-222222222222'
+    const removeId = '28a33333-3333-4333-8333-333333333333'
+
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      kind: 'task',
+      sourceId: taskId,
+      changeKind: 'add',
+      targetScopeType: 'track',
+      title: '地理の準備',
+      dueDate: '2026-07-10',
+      relatedLessonName: { lessonName: '地理総合' },
+    }])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      kind: 'task',
+      sourceId: updateId,
+      changeKind: 'update',
+      sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${taskId}:change`,
+      targetScopeType: 'track',
+      title: '地理ワークを提出',
+      dueDate: '2026-07-11',
+      relatedLessonName: { registeredLessonNameId: 'geography' },
+    }])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [{
+      kind: 'task',
+      sourceId: removeId,
+      changeKind: 'remove',
+      sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${updateId}:change`,
+      targetScopeType: 'track',
+    }])).status).toBe(201)
+
+    const response = await readTaskEditHistory(env, cookie, taskId)
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      status: 'ready',
+      taskId,
+      targetScope: {
+        type: 'track',
+        value: '2026-grade-2-class-3-humanities',
+      },
+      entries: [
+        {
+          sharedInformationChangeId: `${removeId}:change`,
+          changeKind: 'remove',
+          sourceType: 'direct',
+          primaryActorDisplayName: 'Test Humanities 1',
+          changedAt: Date.parse('2026-07-10T00:00:00.000Z'),
+          before: {
+            title: '地理ワークを提出',
+            dueDate: '2026-07-11',
+            relatedLessonName: '地理',
+          },
+          after: null,
+        },
+        {
+          sharedInformationChangeId: `${updateId}:change`,
+          changeKind: 'update',
+          sourceType: 'direct',
+          primaryActorDisplayName: 'Test Humanities 1',
+          changedAt: Date.parse('2026-07-10T00:00:00.000Z'),
+          before: {
+            title: '地理の準備',
+            dueDate: '2026-07-10',
+            relatedLessonName: '地理総合',
+          },
+          after: {
+            title: '地理ワークを提出',
+            dueDate: '2026-07-11',
+            relatedLessonName: '地理',
+          },
+        },
+        {
+          sharedInformationChangeId: `${taskId}:change`,
+          changeKind: 'add',
+          sourceType: 'direct',
+          primaryActorDisplayName: 'Test Humanities 1',
+          changedAt: Date.parse('2026-07-10T00:00:00.000Z'),
+          before: null,
+          after: {
+            title: '地理の準備',
+            dueDate: '2026-07-10',
+            relatedLessonName: '地理総合',
+          },
+        },
+      ],
+    })
+  })
+
+  it('retains removed history while hiding identifiers and participant names from non-members', async () => {
+    const env = createDailyPlanTestEnv()
+    const creatorCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+    const referenceViewerCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const taskId = '28b11111-1111-4111-8111-111111111111'
+    const removeId = '28b22222-2222-4222-8222-222222222222'
+
+    expect((await addDirectTimetableChanges(env, creatorCookie, [{
+      kind: 'task',
+      sourceId: taskId,
+      changeKind: 'add',
+      targetScopeType: 'class',
+      title: '4組だけのTask',
+      dueDate: '2026-07-10',
+    }])).status).toBe(201)
+
+    const referenceTasks = await readReferenceTasks(
+      env,
+      referenceViewerCookie,
+      '2026-07-10',
+      'class',
+      '2026-grade-2-class-4',
+    )
+    expect(referenceTasks.status).toBe(200)
+    await expect(referenceTasks.json()).resolves.toMatchObject({
+      tasks: [expect.objectContaining({ taskId })],
+    })
+    expect((await readTaskEditHistory(
+      env,
+      referenceViewerCookie,
+      taskId,
+    )).status).toBe(404)
+
+    expect((await addDirectTimetableChanges(env, creatorCookie, [{
+      kind: 'task',
+      sourceId: removeId,
+      changeKind: 'remove',
+      sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${taskId}:change`,
+      targetScopeType: 'class',
+    }])).status).toBe(201)
+
+    const retained = await readTaskEditHistory(
+      env,
+      creatorCookie,
+      taskId,
+    )
+    expect(retained.status).toBe(200)
+    await expect(retained.json()).resolves.toMatchObject({
+      taskId,
+      entries: [
+        { changeKind: 'remove', primaryActorDisplayName: 'Test Class 4 Humanities 1' },
+        { changeKind: 'add', primaryActorDisplayName: 'Test Class 4 Humanities 1' },
+      ],
+    })
+
+    expect((await readTaskEditHistory(env, '', taskId)).status).toBe(401)
+    expect((await readTaskEditHistory(
+      env,
+      creatorCookie,
+      'unknown-task',
+    )).status).toBe(404)
   })
 })
 

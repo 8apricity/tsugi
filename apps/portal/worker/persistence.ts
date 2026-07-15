@@ -5,6 +5,7 @@ import type {
   TimetableReplacement as ProjectionTimetableReplacement,
 } from '../shared/timetableProjection'
 import { normalizeLessonName } from '../shared/lessonNames'
+import type { TaskHistorySnapshot } from '../shared/taskEditHistory'
 import { targetScopeValue } from './targetScopeBoundary'
 import {
   studentAffiliationIncludesTargetScope,
@@ -254,6 +255,23 @@ export type HistoricalTimetableChange = Omit<TimetableLayerKey, 'targetScopeType
   replacement: HistoricalTimetableChangeReplacement | null
 }
 
+export type HistoricalTaskSnapshot = TaskHistorySnapshot
+
+type HistoricalTaskChangeBase = {
+  sharedInformationChangeId: string
+  sharedInformationItemId: string
+  changeKind: 'add' | 'update' | 'remove'
+  targetScope: TargetScope
+  changedAt: number
+  precedingChangeId: string | null
+  snapshot: HistoricalTaskSnapshot | null
+}
+
+export type HistoricalTaskChange = HistoricalTaskChangeBase & (
+  | { sourceType: 'direct'; primaryActorDisplayName: string }
+  | { sourceType: 'proposal'; primaryActorDisplayName?: never }
+)
+
 export type CompleteInitialSetupTransactionInput = {
   setupSessionTokenHash: string
   schoolEmail: string
@@ -415,6 +433,12 @@ export type TimetableChangeHistoryStore = {
   ): Promise<HistoricalTimetableChange[]>
 }
 
+export type TaskEditHistoryStore = {
+  listTaskEditHistory(
+    sharedInformationItemId: string,
+  ): Promise<HistoricalTaskChange[]>
+}
+
 export type PersistenceSeedStore = {
   saveStudentAccount(record: StudentAccount): Promise<void>
   saveSchoolYear(record: SchoolYearRecord): Promise<void>
@@ -431,6 +455,7 @@ export type PersistenceAdapters = {
   dailyPlan: DailyPlanStore
   directTimetableChange: DirectTimetableChangeStore
   timetableChangeHistory: TimetableChangeHistoryStore
+  taskEditHistory: TaskEditHistoryStore
   seed: PersistenceSeedStore
 }
 
@@ -440,7 +465,8 @@ export class InMemoryPersistenceAdapters
     StudentAffiliationSetupStore,
     DailyPlanStore,
     DirectTimetableChangeStore,
-    TimetableChangeHistoryStore
+    TimetableChangeHistoryStore,
+    TaskEditHistoryStore
 {
   private records: VerificationCodeRequestRecord[] = []
   private studentAccounts: StudentAccount[] = []
@@ -1032,6 +1058,40 @@ export class InMemoryPersistenceAdapters
       .map((change) => this.mapHistoricalTimetableChange(change))
   }
 
+  async listTaskEditHistory(sharedInformationItemId: string) {
+    return [...this.directTaskOperations.values()]
+      .filter((change) =>
+        change.sharedInformationItemId === sharedInformationItemId)
+      .map((change): HistoricalTaskChange => ({
+        sharedInformationChangeId: change.latestChangeId,
+        sharedInformationItemId: change.sharedInformationItemId,
+        changeKind: change.changeKind,
+        sourceType: 'direct',
+        targetScope: change.targetScope,
+        primaryActorDisplayName: this.studentAccounts.find(
+          (student) =>
+            student.studentAccountId === change.changedByStudentAccountId,
+        )?.displayName ?? '',
+        changedAt: change.changedAt,
+        precedingChangeId: change.changeKind === 'add'
+          ? null
+          : change.expectedLatestChangeId,
+        snapshot: change.changeKind === 'remove'
+          ? null
+          : {
+              title: change.title,
+              dueDate: change.dueDate,
+              relatedLessonName: change.relatedLessonName
+                ? change.relatedLessonName.registeredLessonNameId
+                  ? this.requireRegisteredLessonName(
+                      change.relatedLessonName.registeredLessonNameId,
+                    ).shortLessonName
+                  : change.relatedLessonName.lessonName
+                : null,
+            },
+      }))
+  }
+
   private mapHistoricalTimetableChange(
     change: DirectTimetableChangeOperation,
   ): HistoricalTimetableChange {
@@ -1355,6 +1415,25 @@ type HistoricalTimetableChangeRow = {
   preceding_change_id: string | null
 }
 
+type HistoricalTaskChangeRow = {
+  shared_information_change_id: string
+  shared_information_item_id: string
+  change_kind: 'add' | 'update' | 'remove'
+  source_type: 'direct' | 'proposal'
+  school_year: number
+  scope_type: TargetScopeType
+  grade: number | null
+  class_id: string | null
+  track_id: string | null
+  student_account_id: string | null
+  display_name: string
+  changed_at: string
+  preceding_change_id: string | null
+  title: string | null
+  due_date: string | null
+  related_lesson_name: string | null
+}
+
 type LegacyCustomLessonNameRow = {
   timetable_change_snapshot_id: string
   replacement_lesson_name: string
@@ -1403,7 +1482,8 @@ export class D1PersistenceAdapters
     StudentAffiliationSetupStore,
     DailyPlanStore,
     DirectTimetableChangeStore,
-    TimetableChangeHistoryStore
+    TimetableChangeHistoryStore,
+    TaskEditHistoryStore
 {
   private readonly db: D1Database
 
@@ -2725,6 +2805,37 @@ export class D1PersistenceAdapters
     )
   }
 
+  async listTaskEditHistory(sharedInformationItemId: string) {
+    const { results } = await this.db
+      .prepare(
+        `select c.shared_information_change_id,
+                c.shared_information_item_id, c.change_kind, c.source_type,
+                s.school_year, p.scope_type, p.grade, p.class_id, p.track_id,
+                p.student_account_id, actor.display_name, c.changed_at,
+                c.preceding_change_id, task.title, task.due_date,
+                coalesce(registered_lesson.short_lesson_name,
+                         task.related_lesson_name) as related_lesson_name
+         from shared_information_changes c
+         join shared_information_items i
+           on i.shared_information_item_id = c.shared_information_item_id
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         join student_accounts actor
+           on actor.student_account_id = c.changed_by_student_account_id
+         left join task_snapshots task
+           on task.task_snapshot_id = c.task_snapshot_id
+         left join registered_lesson_names registered_lesson
+           on registered_lesson.registered_lesson_name_id =
+             task.registered_related_lesson_name_id
+         where i.kind = 'task' and i.shared_information_item_id = ?
+           and (select count(*) from target_scope_parts scope_part_count
+                where scope_part_count.target_scope_id = s.target_scope_id) = 1`,
+      )
+      .bind(sharedInformationItemId)
+      .all<HistoricalTaskChangeRow>()
+    return results.map(mapHistoricalTaskChangeRow)
+  }
+
   private async queryTimetableChangeHistory(
     predicate: string,
     values: unknown[],
@@ -3171,6 +3282,7 @@ export function createInMemoryPersistenceAdapters(): PersistenceAdapters {
     dailyPlan: implementation,
     directTimetableChange: implementation,
     timetableChangeHistory: implementation,
+    taskEditHistory: implementation,
     seed: implementation,
   }
 }
@@ -3184,6 +3296,7 @@ export function createD1PersistenceAdapters(db: D1Database): PersistenceAdapters
     dailyPlan: implementation,
     directTimetableChange: implementation,
     timetableChangeHistory: implementation,
+    taskEditHistory: implementation,
     seed: implementation,
   }
 }
@@ -3469,6 +3582,33 @@ function mapHistoricalTimetableChangeRow(
     precedingChangeId: row.preceding_change_id,
     replacement,
   }
+}
+
+function mapHistoricalTaskChangeRow(
+  row: HistoricalTaskChangeRow,
+): HistoricalTaskChange {
+  const change = {
+    sharedInformationChangeId: row.shared_information_change_id,
+    sharedInformationItemId: row.shared_information_item_id,
+    changeKind: row.change_kind,
+    targetScope: mapTargetScopeRow(row),
+    changedAt: Date.parse(row.changed_at),
+    precedingChangeId: row.preceding_change_id,
+    snapshot: row.change_kind === 'remove'
+      ? null
+      : {
+          title: row.title ?? '',
+          dueDate: row.due_date,
+          relatedLessonName: row.related_lesson_name,
+        },
+  }
+  return row.source_type === 'direct'
+    ? {
+        ...change,
+        sourceType: 'direct',
+        primaryActorDisplayName: row.display_name,
+      }
+    : { ...change, sourceType: 'proposal' }
 }
 
 function mapRegisteredLessonNameRow(row: {

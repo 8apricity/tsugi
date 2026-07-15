@@ -13,11 +13,13 @@ export type TaskEditHistoryState =
 export function TaskEditHistoryDialog({
   taskTitle,
   state,
+  onBack,
   onClose,
   onRetry,
 }: {
   taskTitle: string
   state: TaskEditHistoryState
+  onBack: () => void
   onClose: () => void
   onRetry: () => void
 }) {
@@ -33,6 +35,14 @@ export function TaskEditHistoryDialog({
         }}
       >
         <header className="editor-dialog-header">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Task Detailに戻る"
+            onClick={onBack}
+          >
+            ‹
+          </button>
           <div className="timetable-dialog-heading">
             <h2 id="task-history-title">Task Edit History</h2>
             <p className="layer-dialog-selection">{taskTitle}</p>

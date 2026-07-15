@@ -149,8 +149,7 @@ type TimetableHistoryDialog = {
 };
 
 type TaskHistoryDialog = {
-  taskId: string;
-  taskTitle: string;
+  task: DailyPlanTaskForCache;
   requestId: number;
   state: TaskEditHistoryState;
 };
@@ -524,7 +523,8 @@ function App() {
     if (!taskHistoryDialog || taskHistoryDialog.state.status !== "loading") {
       return;
     }
-    const { taskId, requestId } = taskHistoryDialog;
+    const { task, requestId } = taskHistoryDialog;
+    const { taskId } = task;
     const controller = new AbortController();
     fetch(`/api/tasks/${encodeURIComponent(taskId)}/history`, {
       signal: controller.signal,
@@ -537,7 +537,7 @@ function App() {
       })
       .then((history) => {
         setTaskHistoryDialog((current) =>
-          current?.taskId === taskId && current.requestId === requestId
+          current?.task.taskId === taskId && current.requestId === requestId
             ? { ...current, state: history }
             : current,
         );
@@ -545,7 +545,7 @@ function App() {
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setTaskHistoryDialog((current) =>
-          current?.taskId === taskId && current.requestId === requestId
+          current?.task.taskId === taskId && current.requestId === requestId
             ? { ...current, state: { status: "error" } }
             : current,
         );
@@ -1064,8 +1064,7 @@ function App() {
   function openTaskHistory(task: DailyPlanTaskForCache) {
     setTaskDetail(null);
     setTaskHistoryDialog({
-      taskId: task.taskId,
-      taskTitle: task.title,
+      task,
       requestId: 0,
       state: { status: "loading" },
     });
@@ -2109,8 +2108,12 @@ function App() {
 
           {taskHistoryDialog ? (
             <TaskEditHistoryDialog
-              taskTitle={taskHistoryDialog.taskTitle}
+              taskTitle={taskHistoryDialog.task.title}
               state={taskHistoryDialog.state}
+              onBack={() => {
+                setTaskDetail(taskHistoryDialog.task);
+                setTaskHistoryDialog(null);
+              }}
               onClose={() => setTaskHistoryDialog(null)}
               onRetry={() => setTaskHistoryDialog((current) =>
                 current ? {

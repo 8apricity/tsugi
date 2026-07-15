@@ -78,6 +78,7 @@ describe('Task Edit History dialog', () => {
       <TaskEditHistoryDialog
         taskTitle="地理ワークを提出"
         state={history}
+        onBack={() => undefined}
         onClose={() => undefined}
         onRetry={() => undefined}
       />,
@@ -86,6 +87,8 @@ describe('Task Edit History dialog', () => {
     expect(markup).toContain('role="dialog"')
     expect(markup).toContain('aria-modal="true"')
     expect(markup).toContain('aria-labelledby="task-history-title"')
+    expect(markup).toContain('aria-label="Task Detailに戻る"')
+    expect(markup).toContain('‹')
     expect(markup).toContain('aria-label="閉じる"')
     expect(markup.toLowerCase()).toContain('autofocus')
     expect(markup).toContain('aria-label="Task Edit History entries"')

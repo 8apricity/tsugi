@@ -281,6 +281,7 @@ create table note_snapshots (
   related_task_item_id text references shared_information_items(shared_information_item_id),
   created_at text not null,
 
+  check (length(trim(body)) between 1 and 1000),
   check (related_context_type is null or related_context_type in ('school_date', 'daily_lesson', 'task')),
   check (
     (related_context_type is null and related_school_date is null and related_period_number is null and related_task_item_id is null)
@@ -290,6 +291,11 @@ create table note_snapshots (
   )
 );
 ```
+
+Migration `0015_school_date_notes.sql` implements the first School Date Note
+slice: `related_context_type` is `school_date`, Body is trimmed to 1–1000
+characters while preserving internal line breaks, and the remaining related
+context shapes stay reserved for later migrations.
 
 Tasks store due timing at school-date level only. If a student needs to record a finer instruction such as "before third period" or "by the start of class", that detail belongs in a note related to the task rather than in formal task due fields.
 

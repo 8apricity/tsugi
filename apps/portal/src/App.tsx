@@ -22,19 +22,22 @@ import {
 } from "./periodWheelPicker";
 import { TimetableLayerMemoryCache } from "./timetableLayerCache";
 import {
-  createTimetableEditorClient,
+  createNewNoteDraftForm,
   createNewTaskDraftForm,
+  createSharedInformationEditorClient,
   normalizeDirectLessonReplacement,
   type NewTaskDraftForm,
+  type NewNoteDraftForm,
   type TargetScopeType,
   type TimetableLayerState,
   type TimetableLayerKey,
   type TimetableReference,
   type TimetableReplacement,
-} from "./timetableEditorClient";
-import { createDirectTimetableChangeTransport } from "./timetableSubmissionTransport";
+} from "./sharedInformationEditorClient";
+import { createSharedInformationDirectChangeTransport } from "./sharedInformationSubmissionTransport";
 import type { RegisteredLessonNameOption } from "../shared/lessonNames";
 import type { DailyPlanTaskForCache } from "./dailyPlanCache";
+import { NoteCard } from "./noteCard";
 import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
@@ -332,9 +335,10 @@ function App() {
   const suppressDatePickerScrollRef = useRef(false);
   const swipeStartXRef = useRef<number | null>(null);
   const [timetableEditorClient] = useState(() =>
-    createTimetableEditorClient({
+    createSharedInformationEditorClient({
       storage: window.localStorage,
-      submitDirectTimetableChanges: createDirectTimetableChangeTransport(),
+      submitDirectChanges:
+        createSharedInformationDirectChangeTransport(),
     }),
   );
   const timetableLayerCacheRef = useRef(
@@ -351,6 +355,8 @@ function App() {
     useState<TimetableEditorForm | null>(null);
   const [taskEditorForm, setTaskEditorForm] =
     useState<TaskEditorForm | null>(null);
+  const [noteEditorForm, setNoteEditorForm] =
+    useState<NewNoteDraftForm | null>(null);
   const [taskDetail, setTaskDetail] =
     useState<DailyPlanTaskForCache | null>(null);
   const [taskHistoryDialog, setTaskHistoryDialog] =
@@ -1002,6 +1008,7 @@ function App() {
     timetableLayerCacheRef.current.clear();
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
+    setNoteEditorForm(null);
     setTaskDetail(null);
     setTaskHistoryDialog(null);
     setTimetableLayerDialog(null);
@@ -1028,6 +1035,7 @@ function App() {
     timetableEditorClient.discard();
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
+    setNoteEditorForm(null);
     setTimetableEditorMessage(null);
   }
 
@@ -1043,6 +1051,28 @@ function App() {
       relatedLessonInput: "",
       editingTask: null,
     });
+  }
+
+  function openNoteEditor() {
+    setNoteEditorForm(createNewNoteDraftForm(selectedSchoolDate));
+  }
+
+  function saveNoteDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!noteEditorForm || timetableEditor.submitting) return;
+    const result = timetableEditorClient.saveNoteDraft(noteEditorForm);
+    if (result.status === "invalid-note") {
+      setTimetableEditorMessage(
+        "本文、日付、変更適用範囲を確認してください。",
+      );
+      return;
+    }
+    if (result.status === "limit-reached") {
+      setTimetableEditorMessage("下書きは合計50件までです。");
+      return;
+    }
+    setNoteEditorForm(null);
+    setTimetableEditorMessage(null);
   }
 
   function openTaskUpdateEditor(task: DailyPlanTaskForCache) {
@@ -1421,6 +1451,8 @@ function App() {
           .map((draft) =>
             "changeDate" in draft
               ? `${formatUiSchoolDate(draft.changeDate, { referenceSchoolDate: selectedSchoolDate })} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement)}`
+              : draft.kind === "note"
+                ? `ノート / ${formatUiSchoolDate(draft.schoolDate, { referenceSchoolDate: selectedSchoolDate })} / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / ${draft.body}`
               : draft.changeKind === "remove"
                 ? `タスク / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / 削除`
                 : `タスク / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / ${draft.title} / ${formatTaskDueLabel(draft.dueDate, selectedSchoolDate)}`,
@@ -1861,16 +1893,56 @@ function App() {
                   className="panel daily-section"
                   aria-labelledby="notes-title"
                 >
-                  <h2 id="notes-title">ノート</h2>
+                  <div className="daily-section-heading">
+                    <h2 id="notes-title">ノート</h2>
+                    {timetableEditor.editing ? (
+                      <button
+                        className="task-add-button"
+                        type="button"
+                        aria-label="ノートを追加"
+                        disabled={timetableEditor.atLimit || timetableEditor.submitting}
+                        onClick={openNoteEditor}
+                      >
+                        <span className="task-add-icon" aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="note-list">
+                    {[...timetableEditor.noteDrafts]
+                      .filter((note) => note.schoolDate === selectedSchoolDate)
+                      .reverse()
+                      .map((note) => (
+                        <NoteCard
+                          key={note.sourceId}
+                          noteId={note.sourceId}
+                          body={note.body}
+                          targetScopeLabel={scopeLabel(
+                            note.targetScopeType,
+                            targetScopeContext,
+                          )}
+                          draft
+                          conflicted={note.conflicted}
+                          onCancelDraft={() =>
+                            timetableEditorClient.removeNoteDraft(note.sourceId)
+                          }
+                        />
+                      ))}
                     {dailyPlanState.dailyPlan.notes.map((note) => (
-                      <article className="note-item" key={note.noteId}>
-                        <p>{note.body}</p>
-                        {note.relatedContext?.type === "school-date" ? (
-                          <small>{formatUiSchoolDate(note.relatedContext.schoolDate, { referenceSchoolDate: selectedSchoolDate })}</small>
-                        ) : null}
-                      </article>
+                      <NoteCard
+                        key={note.noteId}
+                        noteId={note.noteId}
+                        body={note.body}
+                        targetScopeLabel={scopeLabel(
+                          note.targetScopeType,
+                          targetScopeContext,
+                        )}
+                      />
                     ))}
+                    {timetableEditor.noteDrafts.every(
+                      (note) => note.schoolDate !== selectedSchoolDate,
+                    ) && dailyPlanState.dailyPlan.notes.length === 0 ? (
+                      <p className="empty-state">ノートはありません。</p>
+                    ) : null}
                   </div>
                 </section>
               </>
@@ -1950,6 +2022,107 @@ function App() {
                 </button>
               </div>
             </footer>
+          ) : null}
+
+          {noteEditorForm ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <section
+                className="timetable-editor-dialog note-editor-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="note-editor-title"
+              >
+                <header className="editor-dialog-header">
+                  <h2 id="note-editor-title">ノートを追加</h2>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="閉じる"
+                    onClick={() => setNoteEditorForm(null)}
+                  >
+                    ×
+                  </button>
+                </header>
+                <form onSubmit={saveNoteDraft}>
+                  <label>
+                    <span>本文</span>
+                    <textarea
+                      autoFocus
+                      required
+                      maxLength={1000}
+                      rows={8}
+                      value={noteEditorForm.body}
+                      onChange={(event) =>
+                        setNoteEditorForm((current) =>
+                          current
+                            ? { ...current, body: event.target.value }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>日付</span>
+                    <input
+                      type="date"
+                      required
+                      min={schoolYearRange?.startsOn}
+                      max={schoolYearRange?.endsOn}
+                      value={noteEditorForm.schoolDate}
+                      onChange={(event) =>
+                        setNoteEditorForm((current) =>
+                          current
+                            ? { ...current, schoolDate: event.target.value }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>変更適用範囲</span>
+                    <select
+                      required
+                      value={noteEditorForm.targetScopeType ?? ""}
+                      onChange={(event) =>
+                        setNoteEditorForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                targetScopeType:
+                                  (event.target.value || null) as
+                                    TargetScopeType | null,
+                              }
+                            : current,
+                        )
+                      }
+                    >
+                      <option value="" disabled hidden>
+                        選択してください
+                      </option>
+                      {(["grade", "class", "track", "student"] as const).map(
+                        (scope) => (
+                          <option key={scope} value={scope}>
+                            {scopeLabel(scope, targetScopeContext)}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <div className="editor-dialog-actions">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => setNoteEditorForm(null)}
+                    >
+                      キャンセル
+                    </button>
+                    <button className="button-primary" type="submit">
+                      下書きに保存
+                    </button>
+                  </div>
+                </form>
+              </section>
+            </div>
           ) : null}
 
           {taskEditorForm ? (

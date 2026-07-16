@@ -1,8 +1,9 @@
 import type {
   DirectChangeOperation,
+  DirectChangeStore,
+  DirectNoteOperation,
   DirectTaskOperation,
   DirectTimetableChangeOperation,
-  DirectTimetableChangeStore,
   SchoolYearRecord,
   StudentAffiliation,
   StudentAccountAccessStore,
@@ -30,9 +31,54 @@ type DirectChangeDraft = {
   title?: unknown
   dueDate?: unknown
   relatedLessonName?: unknown
+  schoolDate?: unknown
+  body?: unknown
 }
 
-export type ApplyDirectTimetableChangesResult =
+type DirectChangeKind = DirectChangeOperation['kind']
+
+type DirectChangeKindParseInput = {
+  candidate: DirectChangeDraft
+  changeKind: unknown
+  schoolYear: SchoolYearRecord
+  affiliation: StudentAffiliation
+  changedByStudentAccountId: string
+  now: number
+  store: DirectChangeStore
+}
+
+type DirectChangeKindRule = {
+  parse(
+    input: DirectChangeKindParseInput,
+  ): Promise<DirectChangeOperation | null>
+}
+
+const directChangeKindRules: Record<DirectChangeKind, DirectChangeKindRule> = {
+  timetable_change: {
+    async parse(input) {
+      const operation = await parseTimetableChangeOperation(input)
+      return operation ? { ...operation, kind: 'timetable_change' } : null
+    },
+  },
+  task: {
+    async parse(input) {
+      const operation = await parseTaskOperation(input)
+      return operation ? { ...operation, kind: 'task' } : null
+    },
+  },
+  note: {
+    async parse(input) {
+      const operation = parseNoteOperation(input)
+      return operation ? { ...operation, kind: 'note' } : null
+    },
+  },
+}
+
+function isDirectChangeKind(value: unknown): value is DirectChangeKind {
+  return typeof value === 'string' && value in directChangeKindRules
+}
+
+export type ApplyDirectChangesResult =
   | { status: 'applied'; changes: Array<{ sourceId: string; sharedInformationItemId: string }> }
   | { status: 'unauthenticated' }
   | { status: 'invalid-change' }
@@ -57,7 +103,7 @@ export async function readDirectTimetableChangeOptions({
   sessionToken: string | null
   now: number
   studentAccountStore: StudentAccountAccessStore
-  store: DirectTimetableChangeStore
+  store: DirectChangeStore
 }) {
   const context = await resolveStudentOperationalContext({
     sessionToken,
@@ -149,7 +195,7 @@ export async function readDirectTimetableChangeOptions({
   }
 }
 
-export async function applyDirectTimetableChanges({
+export async function applyDirectChanges({
   sessionToken,
   drafts,
   now,
@@ -160,8 +206,8 @@ export async function applyDirectTimetableChanges({
   drafts: unknown
   now: number
   studentAccountStore: StudentAccountAccessStore
-  store: DirectTimetableChangeStore
-}): Promise<ApplyDirectTimetableChangesResult> {
+  store: DirectChangeStore
+}): Promise<ApplyDirectChangesResult> {
   const context = await resolveStudentOperationalContext({
     sessionToken,
     now,
@@ -193,102 +239,18 @@ export async function applyDirectTimetableChanges({
   for (const candidate of drafts as DirectChangeDraft[]) {
     const kind = candidate.kind ?? 'timetable_change'
     const changeKind = candidate.changeKind ?? 'add'
-    if (kind === 'task') {
-      const task = await parseTaskOperation({
-        candidate,
-        changeKind,
-        schoolYear,
-        affiliation,
-        changedByStudentAccountId: studentAccount.studentAccountId,
-        now,
-        store,
-      })
-      if (!task) return { status: 'invalid-change' }
-      changes.push({ ...task, kind: 'task' })
-      continue
-    }
-    if (kind !== 'timetable_change') return { status: 'invalid-change' }
-    const replacement = changeKind === 'remove'
-      ? null
-      : await parseReplacement(candidate.replacement, store)
-
-    if (
-      typeof candidate.sourceId !== 'string' ||
-      !uuidPattern.test(candidate.sourceId) ||
-      (changeKind !== 'add' && changeKind !== 'update' && changeKind !== 'remove') ||
-      !isTargetScopeType(candidate.targetScopeType) ||
-      typeof candidate.changeDate !== 'string' ||
-      !isValidSchoolDate(candidate.changeDate) ||
-      candidate.changeDate < schoolYear.startsOn ||
-      candidate.changeDate > schoolYear.endsOn ||
-      !Number.isInteger(candidate.periodNumber) ||
-      Number(candidate.periodNumber) < 1 ||
-      Number(candidate.periodNumber) > 7 ||
-      (changeKind === 'remove'
-        ? candidate.replacement !== undefined
-        : !replacement)
-    ) {
-      return { status: 'invalid-change' }
-    }
-
-    if (
-      changeKind !== 'add' &&
-      (typeof candidate.sharedInformationItemId !== 'string' ||
-        !uuidPattern.test(candidate.sharedInformationItemId) ||
-        typeof candidate.expectedLatestChangeId !== 'string' ||
-        candidate.expectedLatestChangeId.length === 0 ||
-        candidate.expectedLatestChangeId.length > 200)
-    ) {
-      return { status: 'invalid-change' }
-    }
-
-    if (
-      replacement?.type === 'floating_lesson_reference' &&
-      !(await store.findFloatingLessonReferenceLabel(
-        replacement.floatingLessonReferenceLabelId,
-        schoolYear.schoolYear,
-        affiliation.grade,
-      ))
-    ) {
-      return { status: 'invalid-change' }
-    }
-
-    const targetScopeType = candidate.targetScopeType
-    const common = {
-      sourceId: candidate.sourceId,
-      latestChangeId: `${candidate.sourceId}:change`,
-      targetScope: targetScopeForStudentAffiliation(
-        affiliation,
-        targetScopeType,
-      ),
-      changeDate: candidate.changeDate,
-      periodNumber: Number(candidate.periodNumber),
+    if (!isDirectChangeKind(kind)) return { status: 'invalid-change' }
+    const change = await directChangeKindRules[kind].parse({
+      candidate,
+      changeKind,
+      schoolYear,
+      affiliation,
       changedByStudentAccountId: studentAccount.studentAccountId,
-      changedAt: now,
-    }
-    const timetableChange: DirectTimetableChangeOperation =
-      changeKind === 'update'
-        ? {
-            ...common,
-            changeKind,
-            replacement: replacement!,
-            sharedInformationItemId: candidate.sharedInformationItemId as string,
-            expectedLatestChangeId: candidate.expectedLatestChangeId as string,
-          }
-        : changeKind === 'remove'
-          ? {
-              ...common,
-              changeKind,
-              sharedInformationItemId: candidate.sharedInformationItemId as string,
-              expectedLatestChangeId: candidate.expectedLatestChangeId as string,
-            }
-        : {
-            ...common,
-            changeKind,
-            replacement: replacement!,
-            sharedInformationItemId: candidate.sourceId,
-        }
-    changes.push({ ...timetableChange, kind: 'timetable_change' })
+      now,
+      store,
+    })
+    if (!change) return { status: 'invalid-change' }
+    changes.push(change)
   }
 
   const timetableChanges = changes.filter(
@@ -323,28 +285,28 @@ export async function applyDirectTimetableChanges({
   const result = await store.commitDirectChanges(changes)
 
   if (result.status === 'conflict') {
-    const conflictingTaskSourceIds = taskConflictSourceIds(
+    const conflictingNonTimetableSourceIds = nonTimetableConflictSourceIds(
       changes,
       result.conflictingSourceIds,
     )
     return {
       status: 'timetable-change-conflict',
       conflictingKeys: conflictingKeysFor(timetableChanges, result.conflictingSourceIds),
-      ...(conflictingTaskSourceIds.length > 0
-        ? { conflictingSourceIds: conflictingTaskSourceIds }
+      ...(conflictingNonTimetableSourceIds.length > 0
+        ? { conflictingSourceIds: conflictingNonTimetableSourceIds }
         : {}),
     }
   }
   if (result.status === 'idempotency-conflict') {
-    const conflictingTaskSourceIds = taskConflictSourceIds(
+    const conflictingNonTimetableSourceIds = nonTimetableConflictSourceIds(
       changes,
       result.conflictingSourceIds,
     )
     return {
       status: 'idempotency-conflict',
       conflictingKeys: conflictingKeysFor(timetableChanges, result.conflictingSourceIds),
-      ...(conflictingTaskSourceIds.length > 0
-        ? { conflictingSourceIds: conflictingTaskSourceIds }
+      ...(conflictingNonTimetableSourceIds.length > 0
+        ? { conflictingSourceIds: conflictingNonTimetableSourceIds }
         : {}),
     }
   }
@@ -372,17 +334,158 @@ function conflictingKeysFor(
     }))
 }
 
-function taskConflictSourceIds(
+function nonTimetableConflictSourceIds(
   changes: DirectChangeOperation[],
   conflictingSourceIds: string[],
 ) {
-  const taskSources = new Set(
+  const nonTimetableSources = new Set(
     changes
-      .filter((change) => change.kind === 'task')
+      .filter((change) => change.kind !== 'timetable_change')
       .map((change) => change.sourceId),
   )
-  return conflictingSourceIds.filter((sourceId) => taskSources.has(sourceId))
+  return conflictingSourceIds.filter((sourceId) => nonTimetableSources.has(sourceId))
 }
+
+async function parseTimetableChangeOperation({
+  candidate,
+  changeKind,
+  schoolYear,
+  affiliation,
+  changedByStudentAccountId,
+  now,
+  store,
+}: DirectChangeKindParseInput): Promise<DirectTimetableChangeOperation | null> {
+  const replacement = changeKind === 'remove'
+    ? null
+    : await parseReplacement(candidate.replacement, store)
+
+  if (
+    typeof candidate.sourceId !== 'string' ||
+    !uuidPattern.test(candidate.sourceId) ||
+    (changeKind !== 'add' && changeKind !== 'update' && changeKind !== 'remove') ||
+    !isTargetScopeType(candidate.targetScopeType) ||
+    typeof candidate.changeDate !== 'string' ||
+    !isValidSchoolDate(candidate.changeDate) ||
+    candidate.changeDate < schoolYear.startsOn ||
+    candidate.changeDate > schoolYear.endsOn ||
+    !Number.isInteger(candidate.periodNumber) ||
+    Number(candidate.periodNumber) < 1 ||
+    Number(candidate.periodNumber) > 7 ||
+    (changeKind === 'remove'
+      ? candidate.replacement !== undefined
+      : !replacement)
+  ) return null
+
+  if (
+    changeKind !== 'add' &&
+    (typeof candidate.sharedInformationItemId !== 'string' ||
+      !uuidPattern.test(candidate.sharedInformationItemId) ||
+      typeof candidate.expectedLatestChangeId !== 'string' ||
+      candidate.expectedLatestChangeId.length === 0 ||
+      candidate.expectedLatestChangeId.length > 200)
+  ) return null
+
+  if (
+    replacement?.type === 'floating_lesson_reference' &&
+    !(await store.findFloatingLessonReferenceLabel(
+      replacement.floatingLessonReferenceLabelId,
+      schoolYear.schoolYear,
+      affiliation.grade,
+    ))
+  ) return null
+
+  const common = {
+    sourceId: candidate.sourceId,
+    latestChangeId: `${candidate.sourceId}:change`,
+    targetScope: targetScopeForStudentAffiliation(
+      affiliation,
+      candidate.targetScopeType,
+    ),
+    changeDate: candidate.changeDate,
+    periodNumber: Number(candidate.periodNumber),
+    changedByStudentAccountId,
+    changedAt: now,
+  }
+  return changeKind === 'update'
+    ? {
+        ...common,
+        changeKind,
+        replacement: replacement!,
+        sharedInformationItemId: candidate.sharedInformationItemId as string,
+        expectedLatestChangeId: candidate.expectedLatestChangeId as string,
+      }
+    : changeKind === 'remove'
+      ? {
+          ...common,
+          changeKind,
+          sharedInformationItemId: candidate.sharedInformationItemId as string,
+          expectedLatestChangeId: candidate.expectedLatestChangeId as string,
+        }
+      : {
+          ...common,
+          changeKind,
+          replacement: replacement!,
+          sharedInformationItemId: candidate.sourceId,
+        }
+}
+
+function parseNoteOperation({
+  candidate,
+  changeKind,
+  schoolYear,
+  affiliation,
+  changedByStudentAccountId,
+  now,
+}: {
+  candidate: DirectChangeDraft
+  changeKind: unknown
+  schoolYear: SchoolYearRecord
+  affiliation: StudentAffiliation
+  changedByStudentAccountId: string
+  now: number
+}): DirectNoteOperation | null {
+  if (
+    !Object.keys(candidate).every((key) => noteDraftKeys.has(key)) ||
+    changeKind !== 'add' ||
+    typeof candidate.sourceId !== 'string' ||
+    !uuidPattern.test(candidate.sourceId) ||
+    !isTargetScopeType(candidate.targetScopeType) ||
+    typeof candidate.schoolDate !== 'string' ||
+    !isValidSchoolDate(candidate.schoolDate) ||
+    candidate.schoolDate < schoolYear.startsOn ||
+    candidate.schoolDate > schoolYear.endsOn ||
+    typeof candidate.body !== 'string' ||
+    candidate.body.trim().length < 1 ||
+    candidate.body.trim().length > 1000 ||
+    candidate.sharedInformationItemId !== undefined ||
+    candidate.expectedLatestChangeId !== undefined
+  ) return null
+
+  return {
+    sourceId: candidate.sourceId,
+    sharedInformationItemId: candidate.sourceId,
+    latestChangeId: `${candidate.sourceId}:change`,
+    targetScope: targetScopeForStudentAffiliation(
+      affiliation,
+      candidate.targetScopeType,
+    ),
+    schoolDate: candidate.schoolDate,
+    body: candidate.body.trim(),
+    changedByStudentAccountId,
+    changedAt: now,
+    createdAt: now,
+    changeKind: 'add',
+  }
+}
+
+const noteDraftKeys = new Set([
+  'kind',
+  'changeKind',
+  'sourceId',
+  'targetScopeType',
+  'schoolDate',
+  'body',
+])
 
 async function parseTaskOperation({
   candidate,
@@ -399,7 +502,7 @@ async function parseTaskOperation({
   affiliation: StudentAffiliation
   changedByStudentAccountId: string
   now: number
-  store: DirectTimetableChangeStore
+  store: DirectChangeStore
 }): Promise<DirectTaskOperation | null> {
   if (
     !Object.keys(candidate).every((key) => taskDraftKeys.has(key)) ||
@@ -504,7 +607,7 @@ const taskDraftKeys = new Set([
 
 async function parseTaskRelatedLessonName(
   value: unknown,
-  store: DirectTimetableChangeStore,
+  store: DirectChangeStore,
 ) {
   if (value === undefined || value === null) return null
   if (!value || typeof value !== 'object') return undefined
@@ -539,7 +642,7 @@ async function parseTaskRelatedLessonName(
 
 async function parseReplacement(
   value: unknown,
-  store: DirectTimetableChangeStore,
+  store: DirectChangeStore,
 ): Promise<TimetableChangeReplacement | null> {
   if (!value || typeof value !== 'object') return null
   const replacement = value as Record<string, unknown>
@@ -602,3 +705,6 @@ async function parseReplacement(
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export const applyDirectTimetableChanges = applyDirectChanges
+export type ApplyDirectTimetableChangesResult = ApplyDirectChangesResult

@@ -92,6 +92,21 @@ export type TaskDraft = TaskDraftBase & (
     }
 )
 
+export type NewNoteDraftForm = {
+  body: string
+  schoolDate: string
+  targetScopeType: TargetScopeType | null
+}
+
+export type NoteDraft = {
+  kind: 'note'
+  changeKind: 'add'
+  sourceId: string
+  body: string
+  schoolDate: string
+  targetScopeType: TargetScopeType
+}
+
 export type TimetableLayerState = {
   status: 'ready'
   schoolDate: string
@@ -166,11 +181,21 @@ export type TaskSubmissionChange = TaskSubmissionChangeBase & (
     }
 )
 
+export type NoteSubmissionChange = {
+  kind: 'note'
+  changeKind: 'add'
+  sourceId: string
+  body: string
+  schoolDate: string
+  targetScopeType: TargetScopeType
+}
+
 export type DirectSubmissionChange =
   | TimetableSubmissionChange
   | TaskSubmissionChange
+  | NoteSubmissionChange
 
-export type TimetableSubmissionPreview = Readonly<{
+export type DirectChangeSubmissionPreview = Readonly<{
   changes: readonly Readonly<DirectSubmissionChange>[]
 }>
 
@@ -181,7 +206,7 @@ type TimetableSubmissionFreshnessInput =
 export type TimetableSubmissionFreshnessEffect =
   TimetableSubmissionFreshnessInput & { signal: AbortSignal }
 
-export type DirectTimetableSubmissionTransportResult =
+export type DirectChangeSubmissionTransportResult =
   | { status: 'applied' }
   | {
       status: 'remote-conflict' | 'idempotency-conflict'
@@ -191,13 +216,18 @@ export type DirectTimetableSubmissionTransportResult =
   | { status: 'affiliation-renewal-needed'; schoolYear: number }
   | { status: 'rejected' }
 
-export type SubmitDirectTimetableChanges = (
+export type SubmitDirectChanges = (
   payload: Readonly<{ changes: readonly DirectSubmissionChange[] }>,
-) => Promise<DirectTimetableSubmissionTransportResult>
+) => Promise<DirectChangeSubmissionTransportResult>
+
+export type TimetableSubmissionPreview = DirectChangeSubmissionPreview
+export type DirectTimetableSubmissionTransportResult =
+  DirectChangeSubmissionTransportResult
+export type SubmitDirectTimetableChanges = SubmitDirectChanges
 
 type SubmitCurrentBatchOptions = {
   confirmSubmission(
-    preview: TimetableSubmissionPreview,
+    preview: DirectChangeSubmissionPreview,
   ): boolean | Promise<boolean>
   applyFreshness(
     effect: TimetableSubmissionFreshnessEffect,
@@ -212,6 +242,14 @@ export function createNewTaskDraftForm(schoolDate: string): NewTaskDraftForm {
     title: '',
     dueDate: schoolDate,
     relatedLessonName: null,
+    targetScopeType: null,
+  }
+}
+
+export function createNewNoteDraftForm(schoolDate: string): NewNoteDraftForm {
+  return {
+    body: '',
+    schoolDate,
     targetScopeType: null,
   }
 }
@@ -234,20 +272,29 @@ export function normalizeDirectLessonReplacement(
   return { type: 'lesson_name', lessonName: trimmed }
 }
 
-export function createTimetableEditorClient({
+export function createSharedInformationEditorClient({
   storage,
   createId = () => crypto.randomUUID(),
+  submitDirectChanges,
   submitDirectTimetableChanges,
 }: {
   storage: StorageLike
   createId?: () => string
-  submitDirectTimetableChanges: SubmitDirectTimetableChanges
+  submitDirectChanges?: SubmitDirectChanges
+  /** @deprecated Use submitDirectChanges. */
+  submitDirectTimetableChanges?: SubmitDirectChanges
 }) {
+  const submitDirectChangesTransport =
+    submitDirectChanges ?? submitDirectTimetableChanges
+  if (!submitDirectChangesTransport) {
+    throw new Error('submitDirectChanges is required')
+  }
   const restored = restore(storage)
   let editing = restored.editing
   let lastTargetScopeType = restored.lastTargetScopeType
   let drafts = restored.drafts
   let taskDrafts = restored.taskDrafts
+  let noteDrafts = restored.noteDrafts
   let lastCommitFailed = false
   let submitting = false
   let lifecycleGeneration = 0
@@ -258,10 +305,15 @@ export function createTimetableEditorClient({
   >()
   const conflictKeys = new Set<string>()
   const taskConflictSourceIds = new Set(restored.taskConflictSourceIds)
+  const noteConflictSourceIds = new Set(restored.noteConflictSourceIds)
   const stickyConflictKeys = new Set<string>()
   const reconciledKeys = new Set<string>()
   let snapshot = buildSnapshot()
   const listeners = new Set<() => void>()
+
+  function totalDraftCount() {
+    return drafts.length + taskDrafts.length + noteDrafts.length
+  }
 
   function buildSnapshot() {
     return {
@@ -275,9 +327,14 @@ export function createTimetableEditorClient({
         ...draft,
         conflicted: taskConflictSourceIds.has(draft.sourceId),
       })),
-      draftCount: drafts.length + taskDrafts.length,
-      atLimit: drafts.length + taskDrafts.length >= maximumDraftKeys,
-      conflictCount: conflictKeys.size + taskConflictSourceIds.size,
+      noteDrafts: noteDrafts.map((draft) => ({
+        ...draft,
+        conflicted: noteConflictSourceIds.has(draft.sourceId),
+      })),
+      draftCount: totalDraftCount(),
+      atLimit: totalDraftCount() >= maximumDraftKeys,
+      conflictCount:
+        conflictKeys.size + taskConflictSourceIds.size + noteConflictSourceIds.size,
       unreconciledDrafts: drafts
         .filter((draft) => !reconciledKeys.has(draftKey(draft)))
         .map(({ targetScopeType, changeDate, periodNumber }) => ({
@@ -290,6 +347,7 @@ export function createTimetableEditorClient({
       draftDates: [...new Set([
         ...drafts.map((draft) => draft.changeDate),
         ...taskDrafts.flatMap((draft) => draft.dueDate ? [draft.dueDate] : []),
+        ...noteDrafts.map((draft) => draft.schoolDate),
       ])].sort(),
     }
   }
@@ -303,7 +361,9 @@ export function createTimetableEditorClient({
         lastTargetScopeType,
         drafts,
         taskDrafts,
+        noteDrafts,
         taskConflictSourceIds: [...taskConflictSourceIds],
+        noteConflictSourceIds: [...noteConflictSourceIds],
       }),
     )
     listeners.forEach((listener) => listener())
@@ -319,11 +379,13 @@ export function createTimetableEditorClient({
   function commitPayload(
     batch: readonly TimetableChangeDraft[] = drafts,
     taskBatch: readonly TaskDraft[] = taskDrafts,
+    noteBatch: readonly NoteDraft[] = noteDrafts,
   ) {
     return {
       changes: [
         ...batch.map(toTimetableSubmissionChange),
         ...taskBatch.map(toTaskSubmissionChange),
+        ...noteBatch.map(toNoteSubmissionChange),
       ],
     }
   }
@@ -332,9 +394,11 @@ export function createTimetableEditorClient({
     editing = false
     drafts = []
     taskDrafts = []
+    noteDrafts = []
     lastCommitFailed = false
     conflictKeys.clear()
     taskConflictSourceIds.clear()
+    noteConflictSourceIds.clear()
     stickyConflictKeys.clear()
     reconciledKeys.clear()
     lastTargetScopeType = 'track'
@@ -360,6 +424,9 @@ export function createTimetableEditorClient({
     conflictingSourceIds.forEach((sourceId) => {
       if (taskDrafts.some((draft) => draft.sourceId === sourceId)) {
         taskConflictSourceIds.add(sourceId)
+      }
+      if (noteDrafts.some((draft) => draft.sourceId === sourceId)) {
+        noteConflictSourceIds.add(sourceId)
       }
     })
     publish()
@@ -397,7 +464,7 @@ export function createTimetableEditorClient({
       return { status: 'editing' as const }
     },
     shouldConfirmExit() {
-      return drafts.length + taskDrafts.length > 0
+      return totalDraftCount() > 0
     },
     discard() {
       if (submitting) return { status: 'submission-in-progress' as const }
@@ -438,7 +505,7 @@ export function createTimetableEditorClient({
         }
         return { status: 'removed-noop' as const }
       }
-      if (!existing && drafts.length + taskDrafts.length >= maximumDraftKeys) {
+      if (!existing && totalDraftCount() >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
 
@@ -475,7 +542,7 @@ export function createTimetableEditorClient({
       if (!input.targetScopeType || !snapshot) {
         return { status: 'invalid-task' as const }
       }
-      if (drafts.length + taskDrafts.length >= maximumDraftKeys) {
+      if (totalDraftCount() >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
       const sourceId = createId()
@@ -483,6 +550,34 @@ export function createTimetableEditorClient({
         sourceId,
         changeKind: 'add',
         ...snapshot,
+        targetScopeType: input.targetScopeType,
+      })
+      lastTargetScopeType = input.targetScopeType
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
+    saveNoteDraft(input: NewNoteDraftForm) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const body = normalizeNoteBody(input.body)
+      if (
+        !input.targetScopeType ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(input.schoolDate) ||
+        body === null
+      ) {
+        return { status: 'invalid-note' as const }
+      }
+      if (totalDraftCount() >= maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+      const sourceId = createId()
+      noteDrafts.push({
+        kind: 'note',
+        changeKind: 'add',
+        sourceId,
+        body,
+        schoolDate: input.schoolDate,
         targetScopeType: input.targetScopeType,
       })
       lastTargetScopeType = input.targetScopeType
@@ -503,7 +598,7 @@ export function createTimetableEditorClient({
           draft.changeKind !== 'add' &&
           draft.sharedInformationItemId === activeTask.taskId,
       )
-      if (!existing && drafts.length + taskDrafts.length >= maximumDraftKeys) {
+      if (!existing && totalDraftCount() >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
       const sourceId = existing?.sourceId ?? createId()
@@ -529,7 +624,7 @@ export function createTimetableEditorClient({
           draft.changeKind !== 'add' &&
           draft.sharedInformationItemId === activeTask.taskId,
       )
-      if (!existing && drafts.length + taskDrafts.length >= maximumDraftKeys) {
+      if (!existing && totalDraftCount() >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
       const sourceId = existing?.sourceId ?? createId()
@@ -561,6 +656,17 @@ export function createTimetableEditorClient({
       publish()
       return { status: 'removed' as const }
     },
+    removeNoteDraft(sourceId: string) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const next = noteDrafts.filter((draft) => draft.sourceId !== sourceId)
+      if (next.length === noteDrafts.length) {
+        return { status: 'unchanged' as const }
+      }
+      noteDrafts = next
+      noteConflictSourceIds.delete(sourceId)
+      publish()
+      return { status: 'removed' as const }
+    },
     removeDesiredState(keyInput: TimetableLayerKey) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const { targetScopeType } = keyInput
@@ -570,7 +676,7 @@ export function createTimetableEditorClient({
       if (serverLayer?.state !== 'active') {
         return { status: 'not-active' as const }
       }
-      if (!existing && drafts.length + taskDrafts.length >= maximumDraftKeys) {
+      if (!existing && totalDraftCount() >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
       const sourceId = existing?.sourceId ?? createId()
@@ -716,17 +822,18 @@ export function createTimetableEditorClient({
       applyFreshness,
     }: SubmitCurrentBatchOptions) {
       if (submitting) return { status: 'already-submitting' as const }
-      if (conflictKeys.size + taskConflictSourceIds.size > 0) {
+      if (conflictKeys.size + taskConflictSourceIds.size + noteConflictSourceIds.size > 0) {
         return { status: 'local-conflict' as const }
       }
-      if (drafts.length + taskDrafts.length === 0) {
+      if (totalDraftCount() === 0) {
         return { status: 'empty' as const }
       }
 
       const generation = lifecycleGeneration
       const batch = drafts.map((draft) => ({ ...draft }))
       const taskBatch = taskDrafts.map((draft) => ({ ...draft }))
-      const payload = commitPayload(batch, taskBatch)
+      const noteBatch = noteDrafts.map((draft) => ({ ...draft }))
+      const payload = commitPayload(batch, taskBatch, noteBatch)
       const preview = Object.freeze({
         changes: Object.freeze(
           payload.changes.map((change) => Object.freeze(change)),
@@ -755,9 +862,9 @@ export function createTimetableEditorClient({
         return { status: 'cancelled' as const }
       }
 
-      let transportResult: DirectTimetableSubmissionTransportResult
+      let transportResult: DirectChangeSubmissionTransportResult
       try {
-        transportResult = await submitDirectTimetableChanges(payload)
+        transportResult = await submitDirectChangesTransport(payload)
       } catch {
         if (generation !== lifecycleGeneration) {
           return { status: 'cancelled' as const }
@@ -817,9 +924,11 @@ export function createTimetableEditorClient({
       editing = false
       drafts = []
       taskDrafts = []
+      noteDrafts = []
       lastCommitFailed = false
       conflictKeys.clear()
       taskConflictSourceIds.clear()
+      noteConflictSourceIds.clear()
       stickyConflictKeys.clear()
       reconciledKeys.clear()
       storage.removeItem(storageKey)
@@ -876,6 +985,8 @@ export function createTimetableEditorClient({
       }
     }
 }
+
+export const createTimetableEditorClient = createSharedInformationEditorClient
 
 function draftKey(
   draft: TimetableLayerKey,
@@ -951,12 +1062,25 @@ function toTaskSubmissionChange(draft: TaskDraft): TaskSubmissionChange {
   }
 }
 
+function toNoteSubmissionChange(draft: NoteDraft): NoteSubmissionChange {
+  return {
+    kind: 'note',
+    changeKind: 'add',
+    sourceId: draft.sourceId,
+    targetScopeType: draft.targetScopeType,
+    schoolDate: draft.schoolDate,
+    body: draft.body,
+  }
+}
+
 function restore(storage: StorageLike): {
   editing: boolean
   lastTargetScopeType: TargetScopeType
   drafts: TimetableChangeDraft[]
   taskDrafts: TaskDraft[]
+  noteDrafts: NoteDraft[]
   taskConflictSourceIds: string[]
+  noteConflictSourceIds: string[]
 } {
   try {
     const value = storage.getItem(storageKey)
@@ -974,6 +1098,12 @@ function restore(storage: StorageLike): {
           .filter((draft): draft is TaskDraft => draft !== null)
           .slice(0, maximumDraftKeys - drafts.length)
       : []
+    const noteDrafts = Array.isArray(parsed.noteDrafts)
+      ? parsed.noteDrafts
+          .map(restoreNoteDraft)
+          .filter((draft): draft is NoteDraft => draft !== null)
+          .slice(0, maximumDraftKeys - drafts.length - taskDrafts.length)
+      : []
     const taskDraftSourceIds = new Set(
       taskDrafts.map((draft) => draft.sourceId),
     )
@@ -984,15 +1114,26 @@ function restore(storage: StorageLike): {
             taskDraftSourceIds.has(sourceId),
         )
       : []
+    const noteDraftSourceIds = new Set(noteDrafts.map((draft) => draft.sourceId))
+    const noteConflictSourceIds = Array.isArray(parsed.noteConflictSourceIds)
+      ? parsed.noteConflictSourceIds.filter(
+          (sourceId): sourceId is string =>
+            typeof sourceId === 'string' && noteDraftSourceIds.has(sourceId),
+        )
+      : []
 
     return {
-      editing: parsed.editing === true || drafts.length + taskDrafts.length > 0,
+      editing:
+        parsed.editing === true ||
+        drafts.length + taskDrafts.length + noteDrafts.length > 0,
       lastTargetScopeType: isTargetScopeType(parsed.lastTargetScopeType)
         ? parsed.lastTargetScopeType
         : 'track',
       drafts,
       taskDrafts,
+      noteDrafts,
       taskConflictSourceIds,
+      noteConflictSourceIds,
     }
   } catch {
     return {
@@ -1000,7 +1141,9 @@ function restore(storage: StorageLike): {
       lastTargetScopeType: 'track',
       drafts: [],
       taskDrafts: [],
+      noteDrafts: [],
       taskConflictSourceIds: [],
+      noteConflictSourceIds: [],
     }
   }
 }
@@ -1067,6 +1210,11 @@ function normalizeTaskSnapshot(
         /[\r\n]/.test(relatedLessonName.lessonName)))
   ) return null
   return { title, dueDate: input.dueDate, relatedLessonName }
+}
+
+function normalizeNoteBody(body: string) {
+  const trimmed = body.trim()
+  return trimmed.length >= 1 && trimmed.length <= 1000 ? trimmed : null
 }
 
 function isTaskRelatedLessonName(value: unknown): value is TaskRelatedLessonName {
@@ -1149,4 +1297,28 @@ function isReplacement(value: unknown): value is TimetableReplacement {
     replacement.floatingLessonReferenceLabelId.length > 0 &&
     typeof replacement.referenceLabel === 'string' &&
     replacement.referenceLabel.length > 0
+}
+
+function restoreNoteDraft(value: unknown): NoteDraft | null {
+  if (!value || typeof value !== 'object') return null
+  const draft = value as Record<string, unknown>
+  const body = typeof draft.body === 'string'
+    ? normalizeNoteBody(draft.body)
+    : null
+  return draft.kind === 'note' &&
+      draft.changeKind === 'add' &&
+      typeof draft.sourceId === 'string' &&
+      body !== null &&
+      typeof draft.schoolDate === 'string' &&
+      /^\d{4}-\d{2}-\d{2}$/.test(draft.schoolDate) &&
+      isTargetScopeType(draft.targetScopeType)
+    ? {
+        kind: 'note',
+        changeKind: 'add',
+        sourceId: draft.sourceId,
+        body,
+        schoolDate: draft.schoolDate,
+        targetScopeType: draft.targetScopeType,
+      }
+    : null
 }

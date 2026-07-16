@@ -14,9 +14,9 @@ import {
 import { readDailyPlan, readDailyPlansRange } from "./dailyPlan";
 import { createStudentAccountAccess } from "./studentAccountAccess";
 import {
-  applyDirectTimetableChanges,
+  applyDirectChanges,
   readDirectTimetableChangeOptions,
-} from "./directTimetableChange";
+} from "./directChange";
 import {
   readTimetableChangeLayerRange,
   readTimetableChangeLayers,
@@ -409,7 +409,8 @@ export default {
     }
 
     if (
-      url.pathname === "/api/timetable-changes/direct" &&
+      (url.pathname === "/api/shared-information/direct-changes" ||
+        url.pathname === "/api/timetable-changes/direct") &&
       request.method === "POST"
     ) {
       const persistence = await getPersistenceAdapters(env);
@@ -421,12 +422,12 @@ export default {
         return Response.json({ status: "invalid-change" }, { status: 400 });
       }
 
-      const result = await applyDirectTimetableChanges({
+      const result = await applyDirectChanges({
         sessionToken: readCookie(request, sessionCookieName),
         drafts: body.changes,
         now: Date.now(),
         studentAccountStore: persistence.studentAccount,
-        store: persistence.directTimetableChange,
+        store: persistence.directChange,
       });
 
       if (result.status === "unauthenticated") {

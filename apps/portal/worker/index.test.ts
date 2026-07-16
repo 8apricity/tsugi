@@ -402,6 +402,21 @@ function addDirectTimetableChanges(
   )
 }
 
+function addDirectChanges(
+  env: Env,
+  cookie: string,
+  changes: Array<Record<string, unknown>>,
+) {
+  return worker.fetch(
+    new Request('https://tsugi.test/api/shared-information/direct-changes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ changes }),
+    }),
+    env,
+  )
+}
+
 function readReferenceTasks(
   env: Env,
   cookie = '',
@@ -2037,6 +2052,145 @@ describe('Unified Direct Change API', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
+  })
+
+  it('atomically adds every Shared Information Kind through the common endpoint', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const response = await addDirectChanges(env, cookie, [
+      {
+        kind: 'timetable_change',
+        sourceId: '32000000-0000-4000-8000-000000000001',
+        changeKind: 'add',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 3,
+        replacement: { type: 'lesson_name', lessonName: '総合' },
+      },
+      {
+        kind: 'task',
+        sourceId: '32000000-0000-4000-8000-000000000002',
+        changeKind: 'add',
+        targetScopeType: 'track',
+        title: '地理ワークを提出',
+        dueDate: '2026-07-10',
+      },
+      {
+        kind: 'note',
+        sourceId: '32000000-0000-4000-8000-000000000003',
+        changeKind: 'add',
+        targetScopeType: 'track',
+        schoolDate: '2026-07-10',
+        body: '  集合場所は視聴覚室です。\n上履きを持参してください。  ',
+      },
+    ])
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'applied',
+      changes: [
+        { sourceId: '32000000-0000-4000-8000-000000000001' },
+        { sourceId: '32000000-0000-4000-8000-000000000002' },
+        { sourceId: '32000000-0000-4000-8000-000000000003' },
+      ],
+    })
+
+    const plan = await readDailyPlan(env, cookie, '2026-07-10')
+    expect(plan.status).toBe(200)
+    await expect(plan.json()).resolves.toMatchObject({
+      notes: [{
+        noteId: '32000000-0000-4000-8000-000000000003',
+        body: '集合場所は視聴覚室です。\n上履きを持参してください。',
+        relatedContext: { type: 'school-date', schoolDate: '2026-07-10' },
+        targetScopeType: 'track',
+      }],
+    })
+    const otherDate = await readDailyPlan(env, cookie, '2026-07-11')
+    await expect(otherDate.json()).resolves.toMatchObject({ notes: [] })
+  })
+
+  it('validates School Date Notes and keeps the legacy endpoint as an alias', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const note = {
+      kind: 'note',
+      sourceId: '32111111-1111-4111-8111-111111111111',
+      changeKind: 'add',
+      targetScopeType: 'student',
+      schoolDate: '2026-07-10',
+      body: '本文',
+    }
+
+    expect((await addDirectChanges(env, cookie, [note])).status).toBe(201)
+    expect((await addDirectTimetableChanges(env, cookie, [note])).status)
+      .toBe(201)
+    const changedRetry = await addDirectChanges(env, cookie, [{
+      ...note,
+      body: '変更された本文',
+    }])
+    expect(changedRetry.status).toBe(409)
+    await expect(changedRetry.json()).resolves.toMatchObject({
+      status: 'idempotency-conflict',
+      conflictingSourceIds: [note.sourceId],
+    })
+
+    const invalidNotes = [
+      { ...note, sourceId: '32111111-1111-4111-8111-111111111112', body: '   ' },
+      { ...note, sourceId: '32111111-1111-4111-8111-111111111113', body: 'x'.repeat(1001) },
+      { ...note, sourceId: '32111111-1111-4111-8111-111111111114', schoolDate: '2027-04-01' },
+      { ...note, sourceId: '32111111-1111-4111-8111-111111111115', targetScopeType: undefined },
+      { ...note, sourceId: '32111111-1111-4111-8111-111111111116', changeKind: 'update' },
+      { ...note, sourceId: '32111111-1111-4111-8111-111111111117', periodNumber: 1 },
+    ]
+    for (const invalidNote of invalidNotes) {
+      expect((await addDirectChanges(env, cookie, [invalidNote])).status)
+        .toBe(400)
+    }
+  })
+
+  it('orders School Date Notes newest first without exposing attribution or time', async () => {
+    vi.useFakeTimers()
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const addNote = async (sourceId: string, body: string, now: string) => {
+      vi.setSystemTime(new Date(now))
+      expect((await addDirectChanges(env, cookie, [{
+        kind: 'note',
+        sourceId,
+        changeKind: 'add',
+        targetScopeType: 'track',
+        schoolDate: '2026-07-10',
+        body,
+      }])).status).toBe(201)
+    }
+    await addNote(
+      '32222222-2222-4222-8222-222222222221',
+      '先に追加したノート',
+      '2026-07-09T01:00:00.000Z',
+    )
+    await addNote(
+      '32222222-2222-4222-8222-222222222222',
+      '後に追加したノート',
+      '2026-07-09T02:00:00.000Z',
+    )
+
+    const response = await readDailyPlan(env, cookie, '2026-07-10')
+    const body = await response.json() as { notes: Array<Record<string, unknown>> }
+    expect(body.notes.map((note) => note.body)).toEqual([
+      '後に追加したノート',
+      '先に追加したノート',
+    ])
+    expect(body.notes[0]).not.toHaveProperty('changedByStudentAccountId')
+    expect(body.notes[0]).not.toHaveProperty('changedAt')
   })
 
   it('atomically adds a Timetable Change and Task to the selected-date Daily Plan', async () => {

@@ -35,6 +35,7 @@ type DailyPlanTask = {
 type DailyPlanNote = {
   noteId: string
   body: string
+  targetScopeType: 'grade' | 'class' | 'track' | 'student'
   relatedContext:
     | {
         type: 'daily-lesson'
@@ -220,14 +221,21 @@ export async function readDailyPlansRange({
   > = {}
 
   for (const date of schoolDates) {
-    const tasks = await dailyPlanStore.listActiveTasksForStudent(
-      sharedContext.studentAffiliation,
-      date,
-    )
+    const [tasks, notes] = await Promise.all([
+      dailyPlanStore.listActiveTasksForStudent(
+        sharedContext.studentAffiliation,
+        date,
+      ),
+      dailyPlanStore.listActiveNotesForStudent(
+        sharedContext.studentAffiliation,
+        date,
+      ),
+    ])
     dailyPlans[date] = buildReadyDailyPlan({
       schoolDate: date,
       sharedContext,
       tasks,
+      notes,
       projectedLessons: await projectDailyPlanLessons(
         entriesByWeekday.get(weekdayForSchoolDate(date)) ?? [],
         activeTimetableChanges.filter((change) => change.changeDate === date),
@@ -282,11 +290,16 @@ async function readDailyPlanForAuthenticatedStudent({
     sharedContext.studentAffiliation,
     schoolDate,
   )
+  const notes = await store.listActiveNotesForStudent(
+    sharedContext.studentAffiliation,
+    schoolDate,
+  )
 
   return buildReadyDailyPlan({
     schoolDate,
     sharedContext,
     tasks,
+    notes,
     projectedLessons: await projectDailyPlanLessons(
       standardTimetableEntries,
       activeTimetableChanges,
@@ -346,6 +359,7 @@ function buildReadyDailyPlan({
   sharedContext,
   projectedLessons,
   tasks,
+  notes,
 }: {
   schoolDate: string
   sharedContext: Extract<
@@ -354,6 +368,7 @@ function buildReadyDailyPlan({
   >
   projectedLessons: Map<number, ProjectedDailyLesson>
   tasks: Awaited<ReturnType<DailyPlanStore['listActiveTasksForStudent']>>
+  notes: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>
 }): Extract<DailyPlanResult, { status: 'ready' }> {
   const weekday = weekdayForSchoolDate(schoolDate)
   return {
@@ -406,7 +421,15 @@ function buildReadyDailyPlan({
       targetScopeType: task.targetScope.type,
       createdAt: task.createdAt,
     })),
-    notes: [],
+    notes: notes.map((note) => ({
+      noteId: note.sharedInformationItemId,
+      body: note.body,
+      relatedContext: {
+        type: 'school-date',
+        schoolDate: note.schoolDate,
+      },
+      targetScopeType: note.targetScope.type,
+    })),
   }
 }
 

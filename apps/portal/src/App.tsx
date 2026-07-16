@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type FocusEvent as ReactFocusEvent,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -178,6 +179,40 @@ function shouldShowLessonNameOptions({
   );
 }
 
+function dismissLessonNameOptionsWhenFocusLeaves(
+  event: ReactFocusEvent<HTMLDivElement>,
+  onDismiss: () => void,
+) {
+  const nextTarget = event.relatedTarget as Node | null;
+  if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+  onDismiss();
+}
+
+function useLessonNameOptionsDismissal(
+  listOpen: boolean,
+  setListOpen: (open: boolean) => void,
+  setActiveIndex: (index: number) => void,
+) {
+  const comboboxRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!listOpen) return;
+
+    const dismissOnOutsidePointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && comboboxRef.current?.contains(target)) return;
+      setListOpen(false);
+      setActiveIndex(-1);
+    };
+
+    document.addEventListener("pointerdown", dismissOnOutsidePointerDown);
+    return () =>
+      document.removeEventListener("pointerdown", dismissOnOutsidePointerDown);
+  }, [listOpen, setActiveIndex, setListOpen]);
+
+  return comboboxRef;
+}
+
 function LessonNameOptionsPopover({
   listboxId,
   optionIdPrefix,
@@ -211,7 +246,7 @@ function LessonNameOptionsPopover({
             aria-selected={index === activeIndex}
             className={index === activeIndex ? "active" : ""}
             key={option.registeredLessonNameId}
-            onMouseDown={(event) => event.preventDefault()}
+            onPointerDown={(event) => event.preventDefault()}
             onClick={() => onChoose(option)}
           >
             {option.displayLabel}
@@ -222,7 +257,7 @@ function LessonNameOptionsPopover({
         <button
           className="lesson-name-more"
           type="button"
-          onMouseDown={(event) => event.preventDefault()}
+          onPointerDown={(event) => event.preventDefault()}
           onClick={onExpand}
         >
           その他の候補を表示
@@ -317,10 +352,20 @@ function App() {
     useState(false);
   const [activeTaskLessonNameOption, setActiveTaskLessonNameOption] =
     useState(-1);
+  const taskLessonNameComboboxRef = useLessonNameOptionsDismissal(
+    taskLessonNameListOpen,
+    setTaskLessonNameListOpen,
+    setActiveTaskLessonNameOption,
+  );
   const [lessonNameOptionsExpanded, setLessonNameOptionsExpanded] =
     useState(false);
   const [lessonNameListOpen, setLessonNameListOpen] = useState(false);
   const [activeLessonNameOption, setActiveLessonNameOption] = useState(-1);
+  const lessonNameComboboxRef = useLessonNameOptionsDismissal(
+    lessonNameListOpen,
+    setLessonNameListOpen,
+    setActiveLessonNameOption,
+  );
   const [timetableLayerDialog, setTimetableLayerDialog] =
     useState<TimetableLayerDialog | null>(null);
   const [timetableHistoryDialog, setTimetableHistoryDialog] =
@@ -1980,7 +2025,16 @@ function App() {
                     <label htmlFor="task-related-lesson-name">
                       Related Lesson Name（任意）
                     </label>
-                    <div className="lesson-name-combobox">
+                    <div
+                      ref={taskLessonNameComboboxRef}
+                      className="lesson-name-combobox"
+                      onBlur={(event) =>
+                        dismissLessonNameOptionsWhenFocusLeaves(event, () => {
+                          setTaskLessonNameListOpen(false);
+                          setActiveTaskLessonNameOption(-1);
+                        })
+                      }
+                    >
                     <input
                       id="task-related-lesson-name"
                       role="combobox"
@@ -2117,7 +2171,9 @@ function App() {
                           )
                         }
                       >
-                        <option value="">選択してください</option>
+                        <option value="" disabled hidden>
+                          選択してください
+                        </option>
                         <option value="grade">Grade</option>
                         <option value="class">Class</option>
                         <option value="track">Track</option>
@@ -2705,7 +2761,16 @@ function App() {
                       休講
                     </button>
 
-                    <div className="lesson-name-combobox">
+                    <div
+                      ref={lessonNameComboboxRef}
+                      className="lesson-name-combobox"
+                      onBlur={(event) =>
+                        dismissLessonNameOptionsWhenFocusLeaves(event, () => {
+                          setLessonNameListOpen(false);
+                          setActiveLessonNameOption(-1);
+                        })
+                      }
+                    >
                       <input
                         className="direct-lesson-input"
                         aria-label="Lesson Name"

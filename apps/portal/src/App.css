@@ -622,7 +622,19 @@ body.page-scroll-locked {
 .task-due-date-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-rows: 42px;
+  align-items: stretch;
   gap: 8px;
+  min-width: 0;
+}
+
+.task-due-date-row > input[type="date"] {
+  /* iOS WebKit miscalculates padded date inputs at width: 100%. */
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 42px;
+  max-height: 42px;
 }
 
 .task-due-date-clear {
@@ -636,6 +648,7 @@ body.page-scroll-locked {
   background: #fff;
   color: var(--color-muted);
   cursor: pointer;
+  box-sizing: border-box;
 }
 
 .task-due-date-clear:hover:not(:disabled),

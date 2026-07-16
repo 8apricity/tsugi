@@ -1468,6 +1468,13 @@ button.timetable-layer-row {
   margin: 0;
 }
 
+.replacement-section-label {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 .period-reference-grid button,
 .floating-reference-list button,
 .replacement-cancel-button {

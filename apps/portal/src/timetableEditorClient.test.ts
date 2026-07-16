@@ -804,6 +804,36 @@ describe('Timetable editor client', () => {
     expect(restored.getSnapshot()).toMatchObject({ draftCount: 0, draftDates: [] })
   })
 
+  it('rejects a restored Floating Lesson Reference without a selected label', () => {
+    const storage = memoryStorage()
+    storage.setItem('tsugi:timetable-direct-add-drafts:v1', JSON.stringify({
+      editing: true,
+      lastTargetScopeType: 'track',
+      drafts: [{
+        sourceId: 'draft-without-label',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+        changeKind: 'add',
+        replacement: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: '',
+          referenceLabel: '',
+        },
+      }],
+      taskDrafts: [],
+      taskConflictSourceIds: [],
+    }))
+
+    const restored = createTimetableEditorClient({ storage })
+
+    expect(restored.getSnapshot()).toMatchObject({
+      editing: true,
+      draftCount: 0,
+    })
+    expect(restored.findDraft('track', '2026-07-10', 2)).toBeUndefined()
+  })
+
   it('submits one immutable batch and refreshes after the applied state is published', async () => {
     const events: string[] = []
     const editor = createTimetableEditorClient({

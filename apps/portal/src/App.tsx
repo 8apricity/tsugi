@@ -39,11 +39,20 @@ import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
 } from "./taskEditHistoryView";
+import {
+  formatDueDate,
+  formatSchoolDate as formatUiSchoolDate,
+  formatTaskDueLabel,
+  targetScopeLabel,
+  type TargetScopeDisplayContext,
+} from "./uiCopy";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
 const DATE_PICKER_SCALE_DISTANCE_PX = 78;
 const DAILY_PLAN_PREFETCH_RADIUS = 7;
+const NO_ACTIVE_TIMETABLE_CHANGE_MESSAGE =
+  "この適用範囲には削除できる時間割変更がありません。";
 
 type RequestStatus =
   | "checking"
@@ -516,7 +525,7 @@ function App() {
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setTimetableEditorMessage(
-          "下書きと現在のTimetable Layerを照合できませんでした。",
+          "下書きと現在の変更内容を照合できませんでした。",
         );
       });
     return () => controller.abort();
@@ -909,7 +918,7 @@ function App() {
       const body = (await response.json()) as { schoolEmail: string };
       setSchoolEmail(body.schoolEmail);
       setStatus("sent");
-      setMessage("認証コードを送信しました。メールを確認してください。");
+      setMessage("学校のメールに認証コードを送りました。");
       return;
     }
 
@@ -927,7 +936,7 @@ function App() {
 
     if (response.status === 502) {
       setMessage(
-        "認証コードを送信できませんでした。メール送信設定を確認してください。",
+        "現在、認証コードを送信できません。時間をおいてもう一度お試しください。",
       );
       return;
     }
@@ -966,7 +975,7 @@ function App() {
       if (!loadedInitialSetup) {
         setStatus("error");
         setMessage(
-          "初回設定データを読み込めませんでした。時間をおいて再度お試しください。",
+          "プロフィール設定を読み込めませんでした。時間をおいて再度お試しください。",
         );
         return;
       }
@@ -976,7 +985,9 @@ function App() {
     }
 
     setStatus("error");
-    setMessage("認証コードを確認できませんでした。もう一度入力してください。");
+    setMessage(
+      "認証コードが正しくないか、期限が切れています。もう一度お試しください。",
+    );
   }
 
   async function logout() {
@@ -1009,7 +1020,7 @@ function App() {
     if (
       timetableEditorClient.shouldConfirmExit() &&
       !window.confirm(
-        "変更の下書きは削除されます。本当に編集モードを終了しますか。",
+        "変更の下書きは削除されます。本当に編集を終了しますか。",
       )
     ) {
       return;
@@ -1098,7 +1109,7 @@ function App() {
         });
     if (result.status === "invalid-task") {
       setTimetableEditorMessage(
-        "Title、Due Date、Related Lesson Name、Target Scopeを確認してください。",
+        "タイトル、期限、関連する授業、変更適用範囲を確認してください。",
       );
       return;
     }
@@ -1232,7 +1243,7 @@ function App() {
     });
     if (result.status === "not-active") {
       setTimetableEditorMessage(
-        "適用中のTimetable Changeがないため削除できません。",
+        NO_ACTIVE_TIMETABLE_CHANGE_MESSAGE,
       );
     } else if (result.status === "limit-reached") {
       setTimetableEditorMessage(
@@ -1252,7 +1263,7 @@ function App() {
     });
     if (result.status === "not-active") {
       setTimetableEditorMessage(
-        "適用中のTimetable Changeがないため削除できません。",
+        NO_ACTIVE_TIMETABLE_CHANGE_MESSAGE,
       );
       return;
     }
@@ -1311,7 +1322,7 @@ function App() {
         !timetableEditorOptions
       ) {
         setTimetableEditorMessage(
-          "Lesson Nameの候補を読み込んでから保存してください。",
+          "授業名の候補を読み込んでいます。読み込み後に保存してください。",
         );
         return;
       }
@@ -1327,7 +1338,7 @@ function App() {
             }).resolveInput(normalizedReplacement.lessonName).replacement
           : normalizedReplacement;
       if (replacement.type === "lesson_name" && !replacement.lessonName) {
-        setTimetableEditorMessage("Lesson Nameを入力してください。");
+        setTimetableEditorMessage("授業名を入力してください。");
         return;
       }
     }
@@ -1336,7 +1347,7 @@ function App() {
       !replacement.floatingLessonReferenceLabelId
     ) {
       setTimetableEditorMessage(
-        "Floating Lesson Referenceを選択してください。",
+        "時間割記号を選択してください。",
       );
       return;
     }
@@ -1400,21 +1411,25 @@ function App() {
   }
 
   async function commitTimetableDrafts() {
+    const currentDailyPlanState = dailyPlanClient.getSnapshot().dailyPlanState;
+    const targetScopeContext = currentDailyPlanState.status === "ready"
+      ? currentDailyPlanState.dailyPlan.studentAffiliation
+      : undefined;
     const result = await timetableEditorClient.submitCurrentBatch({
       confirmSubmission: ({ changes }) => {
         const summary = changes
           .map((draft) =>
             "changeDate" in draft
-              ? `${draft.changeDate} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement)}`
+              ? `${formatUiSchoolDate(draft.changeDate, { referenceSchoolDate: selectedSchoolDate })} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement)}`
               : draft.changeKind === "remove"
-                ? `Task / ${scopeLabel(draft.targetScopeType)} / 削除`
-                : `Task / ${scopeLabel(draft.targetScopeType)} / ${draft.title} / ${draft.dueDate ?? "期限なし"}`,
+                ? `タスク / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / 削除`
+                : `タスク / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / ${draft.title} / ${formatTaskDueLabel(draft.dueDate, selectedSchoolDate)}`,
           )
           .join("\n");
         const confirmed = window.confirm(
-          `${changes.length}件をDirect Changeとして確定します。\n\n${summary}`,
+          `${changes.length}件の変更を強制的に反映します。よろしいですか？\n\n${summary}`,
         );
-        if (confirmed) setTimetableEditorMessage("確定しています。");
+        if (confirmed) setTimetableEditorMessage("変更を反映しています…");
         return confirmed;
       },
       applyFreshness: async (effect) => {
@@ -1439,14 +1454,14 @@ function App() {
     }
     if (result.status === "local-conflict") {
       setTimetableEditorMessage(
-        "競合する下書きを取り消すか、現在の状態から編集し直してください。",
+        "ほかの変更と重なっている下書きを取り消すか、現在の状態から編集し直してください。",
       );
       return;
     }
     if (result.status === "already-submitting") return;
     if (result.status === "network-error") {
       setTimetableEditorMessage(
-        "通信できませんでした。下書きは保存されています。",
+        "ネットワークに接続できません。下書きはこの端末に保存されています。",
       );
       return;
     }
@@ -1456,20 +1471,20 @@ function App() {
     ) {
       setTimetableEditorMessage(
         result.freshness === "stale"
-          ? "Active Shared Informationが更新されています。表示を再読み込みして競合する下書きを確認してください。"
-          : "Active Shared Informationが更新されています。競合する下書きを確認してください。",
+          ? "表示中の内容が更新されました。表示を再読み込みして、ほかの変更と重なっている下書きを確認してください。"
+          : "表示中の内容が更新されました。ほかの変更と重なっている下書きを確認してください。",
       );
       return;
     }
     if (result.status === "applied") {
       setTimetableEditorMessage(
         result.freshness === "stale"
-          ? "変更は確定しましたが、表示を更新できませんでした。"
+          ? "変更は反映されましたが、最新の表示を読み込めませんでした。再読み込みしてください。"
           : null,
       );
       return;
     }
-    setTimetableEditorMessage("変更を確定できませんでした。");
+    setTimetableEditorMessage("変更を反映できませんでした。もう一度お試しください。");
   }
 
   async function submitInitialSetup(event: FormEvent<HTMLFormElement>) {
@@ -1521,7 +1536,7 @@ function App() {
     return (
       <main className="app-page signup-page">
         <section className="panel signup-panel" aria-live="polite">
-          <p className="lead">セッションを確認しています。</p>
+          <p className="lead">ログイン状態を確認しています…</p>
         </section>
       </main>
     );
@@ -1578,6 +1593,9 @@ function App() {
     const taskLessonResolution = taskEditorForm?.relatedLessonInput.trim()
       ? taskLessonNameCombobox.resolveInput()
       : null;
+    const targetScopeContext = dailyPlanState.status === "ready"
+      ? dailyPlanState.dailyPlan.studentAffiliation
+      : undefined;
 
     return (
       <main className="app-page daily-plan-page">
@@ -1608,11 +1626,15 @@ function App() {
                     </p>
                   ) : (
                     <p className="menu-affiliation">
-                      Student Affiliation 未読込
+                      {dailyPlanState.status === "loading"
+                        ? "所属情報を読み込んでいます…"
+                        : dailyPlanState.status === "affiliation-renewal-needed"
+                          ? "所属の更新が必要です"
+                          : "所属情報を読み込めません"}
                     </p>
                   )}
                   <button className="menu-item" type="button" disabled>
-                    Settings
+                    設定
                   </button>
                   <button className="menu-item" type="button" onClick={logout}>
                     ログアウト
@@ -1661,24 +1683,23 @@ function App() {
           >
             {dailyPlanState.status === "loading" ? (
               <div className="panel state-panel" aria-live="polite">
-                Daily Plan を読み込んでいます。
+                この日の予定を読み込んでいます…
               </div>
             ) : null}
 
             {dailyPlanState.status === "affiliation-renewal-needed" ? (
               <div className="panel state-panel" role="status">
-                <h2>Affiliation Renewal が必要です</h2>
+                <h2>所属の更新が必要です</h2>
                 <p>
                   {dailyPlanState.schoolYear}
-                  年度の Student Affiliation を設定すると Daily Plan
-                  を表示できます。
+                  年度の所属情報を入力すると、この日の予定を確認できます。
                 </p>
               </div>
             ) : null}
 
             {dailyPlanState.status === "error" ? (
               <div className="panel state-panel" role="alert">
-                <h2>Daily Plan を読み込めませんでした</h2>
+                <h2>この日の予定を読み込めませんでした</h2>
                 <p>時間をおいて再度お試しください。</p>
                 <button
                   className="button-secondary"
@@ -1694,7 +1715,7 @@ function App() {
               <>
                 <section
                   className="panel timetable-panel"
-                  aria-label="Period list"
+                  aria-label="時間割"
                 >
                   <div className="period-list">
                     {dailyPlanState.dailyPlan.periods.map((period) => (
@@ -1760,7 +1781,7 @@ function App() {
                       <button
                         className="task-add-button"
                         type="button"
-                        aria-label="Taskを追加"
+                        aria-label="タスクを追加"
                         disabled={timetableEditor.atLimit || timetableEditor.submitting}
                         onClick={openTaskEditor}
                       >
@@ -1777,33 +1798,33 @@ function App() {
                         <span>
                           <strong>{task.title}</strong>
                           <small>
-                            {task.dueDate ?? "期限なし"}
+                            {formatTaskDueLabel(task.dueDate, selectedSchoolDate)}
                             {task.relatedLessonName
                               ? ` · ${task.relatedLessonName.lessonName}`
                               : ""}
                           </small>
                           <span className="task-scope-badge">
-                            {scopeLabel(task.targetScopeType)}
+                            {scopeLabel(task.targetScopeType, targetScopeContext)}
                           </span>
                           <small>
                             {task.conflicted
-                              ? "競合あり"
+                              ? "ほかの変更あり"
                               : task.changeKind === "remove"
-                                ? "削除の下書き"
+                                ? "削除予定"
                                 : task.changeKind === "update"
-                                  ? "更新の下書き"
-                                  : "追加の下書き"}
+                                  ? "変更予定"
+                                  : "追加予定"}
                           </small>
                         </span>
                         <button
                           className="button-link"
                           type="button"
-                          aria-label={`${task.title}の下書きを取消`}
+                          aria-label={`${task.title}の下書きを取り消す`}
                           onClick={() =>
                             timetableEditorClient.removeTaskDraft(task.sourceId)
                           }
                         >
-                          取消
+                          取り消す
                         </button>
                       </article>
                     ))}
@@ -1817,13 +1838,13 @@ function App() {
                         <span>
                           <strong>{task.title}</strong>
                           <small>
-                            {task.dueDate ?? "期限なし"}
+                            {formatTaskDueLabel(task.dueDate, selectedSchoolDate)}
                             {task.relatedLessonName
                               ? ` · ${task.relatedLessonName}`
                               : ""}
                           </small>
                           <span className="task-scope-badge">
-                            {scopeLabel(task.targetScopeType)}
+                            {scopeLabel(task.targetScopeType, targetScopeContext)}
                           </span>
                         </span>
                         <span aria-hidden="true">›</span>
@@ -1831,7 +1852,7 @@ function App() {
                     ))}
                     {timetableEditor.taskDrafts.length === 0 &&
                     dailyPlanState.dailyPlan.tasks.length === 0 ? (
-                      <p className="empty-state">Taskはありません。</p>
+                      <p className="empty-state">タスクはありません。</p>
                     ) : null}
                   </div>
                 </section>
@@ -1846,7 +1867,7 @@ function App() {
                       <article className="note-item" key={note.noteId}>
                         <p>{note.body}</p>
                         {note.relatedContext?.type === "school-date" ? (
-                          <small>{note.relatedContext.schoolDate}</small>
+                          <small>{formatUiSchoolDate(note.relatedContext.schoolDate, { referenceSchoolDate: selectedSchoolDate })}</small>
                         ) : null}
                       </article>
                     ))}
@@ -1860,7 +1881,7 @@ function App() {
             <footer className="date-strip-footer">
               <nav
                 className="date-strip"
-                aria-label="Date selection"
+                aria-label="日付を選択"
                 ref={datePickerRef}
                 onPointerDown={handleDatePickerPointerDown}
                 onScroll={handleDatePickerScroll}
@@ -1872,6 +1893,7 @@ function App() {
                     }`}
                     key={date.schoolDate}
                     type="button"
+                    aria-label={`${formatUiSchoolDate(date.schoolDate, { referenceSchoolDate: selectedSchoolDate })}（${date.weekdayLabel}）`}
                     ref={(element) => {
                       if (element) {
                         dateButtonRefs.current.set(date.schoolDate, element);
@@ -1906,7 +1928,7 @@ function App() {
                     }
                     onClick={() => void commitTimetableDrafts()}
                   >
-                    変更を確定 ({timetableEditor.draftCount})
+                    変更を反映 ({timetableEditor.draftCount})
                   </button>
                 ) : null}
                 <button
@@ -1915,8 +1937,8 @@ function App() {
                   disabled={timetableEditor.submitting}
                   aria-label={
                     timetableEditor.editing
-                      ? "編集モードを終了"
-                      : "Daily Planを編集"
+                      ? "編集を終了"
+                      : "この日の予定を編集"
                   }
                   onClick={() =>
                     timetableEditor.editing
@@ -1941,8 +1963,8 @@ function App() {
                 <header className="editor-dialog-header">
                   <h2 id="task-editor-title">
                     {taskEditorForm.editingTask
-                      ? "Taskを更新"
-                      : "Taskを追加"}
+                      ? "タスクを編集"
+                      : "タスクを追加"}
                   </h2>
                   <button
                     className="icon-button"
@@ -1955,7 +1977,7 @@ function App() {
                 </header>
                 <form onSubmit={saveTaskDraft}>
                   <label>
-                    <span>Title</span>
+                    <span>タイトル</span>
                     <input
                       autoFocus
                       required
@@ -1971,7 +1993,7 @@ function App() {
                     />
                   </label>
                   <div className="task-form-field">
-                    <label htmlFor="task-due-date">Due Date</label>
+                    <label htmlFor="task-due-date">期限</label>
                     <div className="task-due-date-row">
                       <input
                         id="task-due-date"
@@ -1993,8 +2015,8 @@ function App() {
                       <button
                         className="task-due-date-clear"
                         type="button"
-                        aria-label="Due Dateをクリア"
-                        title="Due Dateをクリア"
+                        aria-label="期限をクリア"
+                        title="期限をクリア"
                         disabled={!taskEditorForm.dueDate}
                         onClick={() =>
                           setTaskEditorForm((current) =>
@@ -2023,7 +2045,7 @@ function App() {
                   </div>
                   <div className="task-form-field">
                     <label htmlFor="task-related-lesson-name">
-                      Related Lesson Name（任意）
+                      関連する授業（原則設定する）
                     </label>
                     <div
                       ref={taskLessonNameComboboxRef}
@@ -2111,7 +2133,7 @@ function App() {
                         hasAdditionalOptions={
                           taskLessonNameSnapshot.hasAdditionalOptions
                         }
-                        ariaLabel="Registered Lesson Names"
+                        ariaLabel="登録済みの授業名"
                         onChoose={(option) => {
                           setTaskLessonNameListOpen(false);
                           setActiveTaskLessonNameOption(-1);
@@ -2141,20 +2163,23 @@ function App() {
                       taskEditorForm.editingTask.relatedLessonName
                   ) ? (
                     <p className="field-warning" role="status">
-                      custom Lesson Nameとして保存されます。
+                      候補にない授業名として保存されます。
                     </p>
                   ) : null}
                   {taskEditorForm.editingTask ? (
                     <div className="readonly-field">
-                      <span>Target Scope</span>
+                      <span>変更適用範囲</span>
                       <strong>
-                        {scopeLabel(taskEditorForm.editingTask.targetScopeType)}
+                        {scopeLabel(
+                          taskEditorForm.editingTask.targetScopeType,
+                          targetScopeContext,
+                        )}
                       </strong>
-                      <small>Target Scopeは変更できません。</small>
+                      <small>変更適用範囲は変更できません。</small>
                     </div>
                   ) : (
                     <label>
-                      <span>Target Scope</span>
+                      <span>変更適用範囲</span>
                       <select
                         required
                         value={taskEditorForm.targetScopeType ?? ""}
@@ -2174,10 +2199,13 @@ function App() {
                         <option value="" disabled hidden>
                           選択してください
                         </option>
-                        <option value="grade">Grade</option>
-                        <option value="class">Class</option>
-                        <option value="track">Track</option>
-                        <option value="student">Student</option>
+                        {(["grade", "class", "track", "student"] as const).map(
+                          (scope) => (
+                            <option key={scope} value={scope}>
+                              {scopeLabel(scope, targetScopeContext)}
+                            </option>
+                          ),
+                        )}
                       </select>
                     </label>
                   )}
@@ -2187,11 +2215,11 @@ function App() {
                       type="button"
                       onClick={() => setTaskEditorForm(null)}
                     >
-                      下書きを取り消す
+                      キャンセル
                     </button>
                     <button className="button-primary" type="submit">
                       {taskEditorForm.editingTask
-                        ? "更新を下書きに保存"
+                        ? "変更を下書きに保存"
                         : "下書きに保存"}
                     </button>
                   </div>
@@ -2209,7 +2237,7 @@ function App() {
                 aria-labelledby="task-detail-title"
               >
                 <header className="editor-dialog-header">
-                  <h2 id="task-detail-title">Task Detail</h2>
+                  <h2 id="task-detail-title">タスクの詳細</h2>
                   <button
                     className="icon-button"
                     type="button"
@@ -2220,10 +2248,10 @@ function App() {
                   </button>
                 </header>
                 <dl className="detail-list">
-                  <div><dt>Title</dt><dd>{taskDetail.title}</dd></div>
-                  <div><dt>Due Date</dt><dd>{taskDetail.dueDate ?? "期限なし"}</dd></div>
-                  <div><dt>Related Lesson Name</dt><dd>{taskDetail.relatedLessonName ?? "なし"}</dd></div>
-                  <div><dt>Target Scope</dt><dd>{scopeLabel(taskDetail.targetScopeType)}</dd></div>
+                  <div><dt>タイトル</dt><dd>{taskDetail.title}</dd></div>
+                  <div><dt>期限</dt><dd>{taskDetail.dueDate ? formatDueDate(taskDetail.dueDate, selectedSchoolDate) : "期限なし"}</dd></div>
+                  <div><dt>関連する授業</dt><dd>{taskDetail.relatedLessonName ?? "なし"}</dd></div>
+                  <div><dt>変更適用範囲</dt><dd>{scopeLabel(taskDetail.targetScopeType, targetScopeContext)}</dd></div>
                 </dl>
                 <div className="editor-dialog-actions">
                   <button
@@ -2240,7 +2268,7 @@ function App() {
                         type="button"
                         onClick={() => openTaskUpdateEditor(taskDetail)}
                       >
-                        更新
+                        編集
                       </button>
                       <button
                         className="button-danger"
@@ -2264,6 +2292,8 @@ function App() {
           {taskHistoryDialog ? (
             <TaskEditHistoryDialog
               taskTitle={taskHistoryDialog.task.title}
+              targetScopeContext={targetScopeContext}
+              referenceSchoolDate={selectedSchoolDate}
               state={taskHistoryDialog.state}
               onBack={() => {
                 setTaskDetail(taskHistoryDialog.task);
@@ -2297,7 +2327,7 @@ function App() {
                     type="button"
                     aria-label={timetableHistoryDialog.detail
                       ? "編集履歴に戻る"
-                      : "レイヤー概要に戻る"}
+                      : "変更状況に戻る"}
                     onClick={goBackInTimetableHistoryDialog}
                   >
                     ‹
@@ -2305,13 +2335,18 @@ function App() {
                   <div className="timetable-dialog-heading">
                     <h2 id="timetable-history-title">
                       {timetableHistoryDialog.detail
-                        ? "Direct Change詳細"
+                        ? "変更の詳細"
                         : "編集履歴"}
                     </h2>
                     <p className="layer-dialog-selection">
-                      {formatSchoolDateForDialog(timetableHistoryDialog.changeDate)}
+                      {formatUiSchoolDate(timetableHistoryDialog.changeDate, {
+                        referenceSchoolDate: selectedSchoolDate,
+                      })}
                       ・{timetableHistoryDialog.periodNumber}限・
-                      {scopeLabel(timetableHistoryDialog.targetScopeType)}
+                      {scopeLabel(
+                        timetableHistoryDialog.targetScopeType,
+                        targetScopeContext,
+                      )}
                     </p>
                   </div>
                   <button
@@ -2327,11 +2362,11 @@ function App() {
                 {timetableHistoryDialog.detail ? (
                   timetableHistoryDialog.detail.status === "loading" ? (
                     <p className="layer-dialog-status" aria-live="polite">
-                      Direct Changeを読み込んでいます。
+                      変更内容を読み込んでいます…
                     </p>
                   ) : timetableHistoryDialog.detail.status === "error" ? (
                     <div className="layer-dialog-status" role="alert">
-                      <p>Direct Changeを読み込めませんでした。</p>
+                      <p>変更内容を読み込めませんでした。</p>
                       <button
                         className="button-secondary"
                         type="button"
@@ -2346,6 +2381,8 @@ function App() {
                   ) : (
                     <DirectChangeDetailView
                       detail={timetableHistoryDialog.detail}
+                      targetScopeContext={targetScopeContext}
+                      referenceSchoolDate={selectedSchoolDate}
                     />
                   )
                 ) : timetableHistoryDialog.history.status === "loading" ? (
@@ -2370,7 +2407,7 @@ function App() {
                   </div>
                 ) : timetableHistoryDialog.history.entries.length === 0 ? (
                   <p className="history-empty-state">
-                    このTarget Scope・Change Date・時限の編集履歴はありません。
+                    この日・時限・変更適用範囲には編集履歴がありません。
                   </p>
                 ) : (
                   <div className="history-list" aria-label="編集履歴">
@@ -2388,8 +2425,8 @@ function App() {
                         </span>
                         <strong>{storedTransitionLabel(entry)}</strong>
                         <span>{entry.sourceType === "direct"
-                          ? "Direct Change"
-                          : "Change Proposal"}</span>
+                          ? "強制変更"
+                          : "提案による変更"}</span>
                         <span>{entry.primaryActorDisplayName}</span>
                         <time dateTime={new Date(entry.changedAt).toISOString()}>
                           {formatRelativeTime(entry.changedAt)}
@@ -2416,7 +2453,7 @@ function App() {
               >
                 <header className="editor-dialog-header">
                   <div className="layer-dialog-heading">
-                    <h2 id="timetable-layer-title">時間割の適用状態</h2>
+                    <h2 id="timetable-layer-title">時間割の変更状況</h2>
                   </div>
                   <button
                     className="icon-button"
@@ -2450,7 +2487,7 @@ function App() {
                   </button>
                   <input
                     type="date"
-                    aria-label="Change Date"
+                    aria-label="変更対象日"
                     min={schoolYearRange?.startsOn}
                     max={schoolYearRange?.endsOn}
                     value={timetableLayerDialog.schoolDate}
@@ -2494,8 +2531,8 @@ function App() {
                   <div className="layer-edit-guidance" role="status">
                     <span>
                       {timetableEditor.lastCommitFailed
-                        ? "前回の確定に失敗しました。下書きは保持されています。"
-                        : "変更を適用するTarget Scopeを選択してください。"}
+                        ? "前回の反映に失敗しました。下書きは保持されています。"
+                        : "時間割変更の適用範囲を選んでください。"}
                     </span>
                     <strong>
                       下書き {timetableEditor.draftCount}/50
@@ -2528,7 +2565,7 @@ function App() {
                 ) : layerPreview ? (
                   <div className="timetable-layer-stack">
                     <LayerRow
-                      label="デフォルト"
+                      label="通常の時間割"
                       value={`${
                         buildDateHeader(
                           timetableLayerDialog.schoolDate,
@@ -2554,21 +2591,24 @@ function App() {
                       return (
                       <LayerRow
                         key={layer.targetScopeType}
-                        label={scopeLabel(layer.targetScopeType)}
+                        label={scopeLabel(
+                          layer.targetScopeType,
+                          targetScopeContext,
+                        )}
                         value={
                           "removalPlanned" in layer && layer.removalPlanned
                             ? "削除予定"
                             : layer.state === "active"
                             ? replacementLabel(layer.replacement)
-                            : "変更なし"
+                            : "変更無し"
                         }
                         detail={
                           layer.desired
                             ? layer.conflicted
-                              ? "競合・確認が必要"
+                              ? "ほかの変更と重なっています"
                               : "removalPlanned" in layer && layer.removalPlanned
-                                ? "削除の下書き"
-                                : "保存前の希望状態"
+                                ? "削除予定"
+                                : "下書きの内容"
                             : layer.state === "active" && "changedAt" in layer
                             ? `最終更新 ${formatRelativeTime(layer.changedAt)}`
                             : undefined
@@ -2610,7 +2650,7 @@ function App() {
                       );
                     })}
                     <div className="layer-result-row">
-                      <span>最終結果</span>
+                      <span>表示される授業名</span>
                       <strong>
                         {layerPreview.finalDailyLesson.lessonName}
                       </strong>
@@ -2637,7 +2677,7 @@ function App() {
                     <button
                       className="icon-button"
                       type="button"
-                      aria-label="時間割の適用状態に戻る"
+                      aria-label="時間割の変更状況に戻る"
                       onClick={() => setTimetableEditorForm(null)}
                     >
                       ‹
@@ -2657,25 +2697,34 @@ function App() {
                   </header>
                   <div className="editor-fields">
                     <label>
-                      Change Date（固定）
-                      <output>{timetableEditorForm.changeDate}</output>
+                      変更対象日
+                      <output>{formatUiSchoolDate(
+                        timetableEditorForm.changeDate,
+                        { referenceSchoolDate: selectedSchoolDate },
+                      )}</output>
                     </label>
                     <label>
-                      時限（固定）
+                      時限
                       <output>{timetableEditorForm.periodNumber}限</output>
                     </label>
                     <label className="editor-field-wide">
-                      Target Scope（固定）
+                      変更適用範囲
                       <output>
-                        {scopeLabel(timetableEditorForm.targetScopeType)}
+                        {scopeLabel(
+                          timetableEditorForm.targetScopeType,
+                          targetScopeContext,
+                        )}
                       </output>
                     </label>
                   </div>
 
                   <div className="replacement-options">
+                    <p className="replacement-section-label">
+                      通常の時間割から選択
+                    </p>
                     <div
                       className="period-reference-grid"
-                      aria-label="Period References"
+                      aria-label="通常の時間割から選択"
                     >
                       {Array.from({ length: 7 }, (_, periodIndex) =>
                         Array.from({ length: 6 }, (_, weekdayIndex) => {
@@ -2754,7 +2803,7 @@ function App() {
                       onClick={() =>
                         setTimetableEditorForm({
                           ...timetableEditorForm,
-                          replacement: defaultReplacement("cancelled"),
+                          replacement: { type: "cancelled" },
                         })
                       }
                     >
@@ -2773,7 +2822,7 @@ function App() {
                     >
                       <input
                         className="direct-lesson-input"
-                        aria-label="Lesson Name"
+                        aria-label="授業名"
                         role="combobox"
                         aria-autocomplete="list"
                         aria-expanded={
@@ -2790,7 +2839,7 @@ function App() {
                             : undefined
                         }
                         maxLength={80}
-                        placeholder="または、この時間の名前を直接入力"
+                        placeholder="または授業名を直接入力"
                         value={
                           timetableEditorForm.replacement.type === "lesson_name"
                             ? timetableEditorForm.replacement.lessonName
@@ -2883,7 +2932,7 @@ function App() {
                       timetableEditorForm.replacement.lessonName.trim() &&
                       lessonNameCombobox.resolveInput().custom ? (
                         <p className="custom-lesson-name-warning" role="status">
-                          Custom Lesson Nameとして保存されます。
+                          候補にない授業名として保存されます。
                         </p>
                       ) : null}
                     </div>
@@ -2924,7 +2973,7 @@ function App() {
                         disabled={timetableEditor.submitting}
                         onClick={planTimetableRemoval}
                       >
-                        Timetable Changeを削除
+                        削除を下書きに追加
                       </button>
                     ) : null}
                     <button
@@ -2965,14 +3014,14 @@ function App() {
         <section className="panel signup-panel" aria-labelledby="setup-title">
           <div className="signup-header">
             <p className="eyebrow">初回設定</p>
-            <h1 id="setup-title">プロフィール設定へ進む</h1>
+            <h1 id="setup-title">プロフィールを設定</h1>
             <p className="lead">
-              認証済みです。次に表示名、実名、Student Affiliation を設定します。
+              認証できました。次に名前・所属情報を入力してください。
             </p>
           </div>
           <form className="form-grid" onSubmit={submitInitialSetup}>
             <label className="field-label" htmlFor="display-name">
-              Display Name
+              表示名（ハンドルネーム）
             </label>
             <input
               id="display-name"
@@ -2983,7 +3032,7 @@ function App() {
             />
 
             <label className="field-label" htmlFor="real-name">
-              Real Name
+              本名
             </label>
             <input
               id="real-name"
@@ -2994,7 +3043,7 @@ function App() {
             />
 
             <label className="field-label" htmlFor="grade">
-              Grade
+              学年
             </label>
             <select
               id="grade"
@@ -3014,13 +3063,13 @@ function App() {
             >
               {setupOptions.grades.map((gradeOption) => (
                 <option key={gradeOption.grade} value={gradeOption.grade}>
-                  {gradeOption.grade}
+                  {gradeOption.grade}年
                 </option>
               ))}
             </select>
 
             <label className="field-label" htmlFor="class-id">
-              Class
+              組
             </label>
             <select
               id="class-id"
@@ -3038,13 +3087,13 @@ function App() {
             >
               {classOptions.map((classOption) => (
                 <option key={classOption.classId} value={classOption.classId}>
-                  {classOption.classNumber}
+                  {classOption.classNumber}組
                 </option>
               ))}
             </select>
 
             <label className="field-label" htmlFor="track-id">
-              Track
+              履修タイプ
             </label>
             <select
               id="track-id"
@@ -3065,11 +3114,11 @@ function App() {
                 checked={confirmedSetup}
                 onChange={(event) => setConfirmedSetup(event.target.checked)}
               />
-              選択内容を確認しました
+              所属情報に間違いありません
             </label>
 
             <button className="button-primary" type="submit">
-              初回設定を確認
+              この内容で始める
             </button>
           </form>
 
@@ -3084,7 +3133,7 @@ function App() {
               <p>{message}</p>
               {setupSchoolEmail ? (
                 <p>
-                  認証済み: <strong>{setupSchoolEmail}</strong>
+                  認証済みの学校のメール: <strong>{setupSchoolEmail}</strong>
                 </p>
               ) : null}
             </div>
@@ -3098,18 +3147,22 @@ function App() {
     <main className="app-page signup-page">
       <section className="panel signup-panel" aria-labelledby="signup-title">
         <div className="signup-header">
-          <p className="eyebrow">アカウント認証</p>
-          <h1 id="signup-title">メールで始める</h1>
+          <p className="eyebrow">ログイン</p>
+          <h1 id="signup-title">学校のメールでログイン</h1>
           <p className="lead">
-            メールアドレスの8桁の番号を入力して、認証コードを送信します。
+            学校のメールの8桁の番号を入力してください。認証コードを送ります。
           </p>
         </div>
 
         <form className="form-grid" onSubmit={requestVerificationCode}>
+          <label className="field-label" htmlFor="school-email-number">
+            学校のメールの番号
+          </label>
           <div className="input-group">
             <span aria-hidden="true">110-</span>
             <input
               id="school-email-number"
+              aria-label="学校のメールの8桁の番号"
               inputMode="numeric"
               maxLength={8}
               pattern="[0-9]{8}"
@@ -3125,7 +3178,7 @@ function App() {
             type="submit"
             disabled={status === "sending"}
           >
-            {status === "sending" ? "送信中" : "認証コードを送信"}
+            {status === "sending" ? "送信中…" : "認証コードを送信"}
           </button>
         </form>
 
@@ -3164,7 +3217,7 @@ function App() {
               type="submit"
               disabled={status === "verifying"}
             >
-              {status === "verifying" ? "確認中" : "認証して進む"}
+              {status === "verifying" ? "確認中…" : "認証して進む"}
             </button>
           </form>
         ) : null}
@@ -3202,7 +3255,7 @@ function LayerRow({
       <small>{detail}</small>
       {desired ? (
         <span className={`layer-draft-badge${conflicted ? " conflict" : ""}`}>
-          {conflicted ? "競合" : "下書き"}
+          {conflicted ? "要確認" : "下書き"}
         </span>
       ) : null}
     </>
@@ -3217,7 +3270,7 @@ function LayerRow({
             className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
             type="button"
             onClick={onClick}
-            aria-label={`${label} Target Scopeを編集${desired ? "、下書きあり" : ""}`}
+            aria-label={`${label}の時間割を編集${desired ? "、下書きあり" : ""}`}
           >
             {content}
           </button>
@@ -3231,7 +3284,7 @@ function LayerRow({
             <button
               className="layer-kebab-button"
               type="button"
-              aria-label={`${label} Target Scopeのメニュー`}
+              aria-label={`${label}のメニュー`}
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
             >
@@ -3702,15 +3755,19 @@ function PeriodWheelPicker({
 
 function DirectChangeDetailView({
   detail,
+  targetScopeContext,
+  referenceSchoolDate,
 }: {
   detail: DirectTimetableChangeDetail;
+  targetScopeContext?: TargetScopeDisplayContext;
+  referenceSchoolDate: string;
 }) {
   return (
     <div className="direct-change-detail">
       <dl className="history-detail-grid">
-        <div><dt>Change Kind</dt><dd>{changeKindLabel(detail.changeKind)}</dd></div>
-        <div><dt>Source</dt><dd>Direct Change</dd></div>
-        <div><dt>Display Name</dt><dd>{detail.primaryActorDisplayName}</dd></div>
+        <div><dt>変更内容</dt><dd>{changeKindLabel(detail.changeKind)}</dd></div>
+        <div><dt>反映方法</dt><dd>強制変更</dd></div>
+        <div><dt>変更者</dt><dd>{detail.primaryActorDisplayName}</dd></div>
         <div>
           <dt>日時</dt>
           <dd><time dateTime={new Date(detail.changedAt).toISOString()}>
@@ -3718,10 +3775,13 @@ function DirectChangeDetailView({
           </time></dd>
         </div>
         <div>
-          <dt>Target Scope</dt>
-          <dd>{scopeLabel(detail.targetScope.type)}（{detail.targetScope.value}）</dd>
+          <dt>変更対象</dt>
+          <dd>{scopeLabel(detail.targetScope.type, targetScopeContext)}</dd>
         </div>
-        <div><dt>Change Date</dt><dd>{detail.changeDate}</dd></div>
+        <div><dt>変更対象日</dt><dd>{formatUiSchoolDate(
+          detail.changeDate,
+          { referenceSchoolDate },
+        )}</dd></div>
         <div><dt>時限</dt><dd>{detail.periodNumber}限</dd></div>
       </dl>
       <div className="stored-transition-detail">
@@ -3730,7 +3790,7 @@ function DirectChangeDetailView({
             <span>{detail.changeKind === "remove" ? "削除前" : "変更前"}</span>
             <strong>{replacementLabel(detail.before)}</strong>
             {isStoredReference(detail.before) ? (
-              <small>保存されたLesson Reference</small>
+              <small>保存時の時間割参照</small>
             ) : null}
           </section>
         ) : null}
@@ -3742,7 +3802,7 @@ function DirectChangeDetailView({
             <span>{detail.changeKind === "add" ? "追加後" : "変更後"}</span>
             <strong>{replacementLabel(detail.after)}</strong>
             {isStoredReference(detail.after) ? (
-              <small>保存されたLesson Reference</small>
+              <small>保存時の時間割参照</small>
             ) : null}
           </section>
         ) : null}
@@ -3779,11 +3839,6 @@ function isStoredReference(replacement: TimetableReplacement) {
     replacement.type === "floating_lesson_reference";
 }
 
-function formatSchoolDateForDialog(schoolDate: string) {
-  const [, month, day] = schoolDate.split("-");
-  return `${Number(month)}月${Number(day)}日`;
-}
-
 function formatRelativeTime(timestamp: number) {
   const elapsed = Math.max(0, Date.now() - timestamp);
   const minutes = Math.floor(elapsed / 60_000);
@@ -3815,10 +3870,11 @@ function editableTask(task: DailyPlanTaskForCache) {
   };
 }
 
-function scopeLabel(scope: TargetScopeType) {
-  return { grade: "Grade", class: "Class", track: "Track", student: "Student" }[
-    scope
-  ];
+function scopeLabel(
+  scope: TargetScopeType,
+  context?: TargetScopeDisplayContext,
+) {
+  return targetScopeLabel(scope, context);
 }
 
 function replacementLabel(replacement: TimetableReplacement) {
@@ -3830,17 +3886,6 @@ function replacementLabel(replacement: TimetableReplacement) {
     return replacement.referenceLabel;
   }
   return "休講";
-}
-
-function defaultReplacement(
-  type: TimetableReplacement["type"],
-): TimetableReplacement {
-  if (type === "lesson_name") return { type, lessonName: "" };
-  if (type === "period_reference") return { type, weekday: 1, periodNumber: 1 };
-  if (type === "floating_lesson_reference") {
-    return { type, floatingLessonReferenceLabelId: "", referenceLabel: "" };
-  }
-  return { type: "cancelled" };
 }
 
 function resolveReplacementLessonName(

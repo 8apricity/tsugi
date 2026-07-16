@@ -128,10 +128,7 @@ describe('Daily Plan module', () => {
         trackName: '文科',
       },
       tasks: [],
-      notes: [
-        { noteId: 'placeholder-school-date-note-2026-07-10' },
-        { noteId: 'placeholder-no-context-note' },
-      ],
+      notes: [],
     })
     if (result.status !== 'ready') {
       return

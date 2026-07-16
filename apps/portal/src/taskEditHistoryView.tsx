@@ -1,9 +1,13 @@
-import type { TargetScopeType } from '../shared/targetScope'
 import type {
   TaskEditHistoryEntry,
   TaskEditHistoryResponse,
   TaskHistorySnapshot,
 } from '../shared/taskEditHistory'
+import {
+  formatDueDate,
+  targetScopeLabel,
+  type TargetScopeDisplayContext,
+} from './uiCopy'
 
 export type TaskEditHistoryState =
   | { status: 'loading' }
@@ -12,12 +16,16 @@ export type TaskEditHistoryState =
 
 export function TaskEditHistoryDialog({
   taskTitle,
+  targetScopeContext,
+  referenceSchoolDate,
   state,
   onBack,
   onClose,
   onRetry,
 }: {
   taskTitle: string
+  targetScopeContext?: TargetScopeDisplayContext
+  referenceSchoolDate?: string
   state: TaskEditHistoryState
   onBack: () => void
   onClose: () => void
@@ -38,13 +46,13 @@ export function TaskEditHistoryDialog({
           <button
             className="icon-button"
             type="button"
-            aria-label="Task Detailに戻る"
+            aria-label="タスクの詳細に戻る"
             onClick={onBack}
           >
             ‹
           </button>
           <div className="timetable-dialog-heading">
-            <h2 id="task-history-title">Task Edit History</h2>
+            <h2 id="task-history-title">タスクの編集履歴</h2>
             <p className="layer-dialog-selection">{taskTitle}</p>
           </div>
           <button
@@ -59,11 +67,11 @@ export function TaskEditHistoryDialog({
         </header>
         {state.status === 'loading' ? (
           <p className="layer-dialog-status" aria-live="polite">
-            Task Edit Historyを読み込んでいます。
+            編集履歴を読み込んでいます…
           </p>
         ) : state.status === 'error' ? (
           <div className="layer-dialog-status" role="alert">
-            <p>Task Edit Historyを読み込めませんでした。</p>
+            <p>編集履歴を読み込めませんでした。</p>
             <button className="button-secondary" type="button" onClick={onRetry}>
               再読み込み
             </button>
@@ -71,10 +79,12 @@ export function TaskEditHistoryDialog({
         ) : (
           <>
             <p className="task-history-scope">
-              Target Scope: {scopeLabel(state.targetScope.type)}
-              （{state.targetScope.value}）
+              変更適用範囲: {targetScopeLabel(
+                state.targetScope.type,
+                targetScopeContext,
+              )}
             </p>
-            <ol className="task-history-list" aria-label="Task Edit History entries">
+            <ol className="task-history-list" aria-label="タスクの編集履歴">
               {state.entries.map((entry) => (
                 <li key={entry.sharedInformationChangeId}>
                   <article className="task-history-entry">
@@ -84,12 +94,12 @@ export function TaskEditHistoryDialog({
                       </span>
                       {entry.sourceType === 'direct' ? (
                         <span className="task-history-actor">
-                          <small>Direct Change・Display Name</small>
+                          <small>強制変更・変更者</small>
                           <strong>{entry.primaryActorDisplayName}</strong>
                         </span>
                       ) : (
                         <span className="task-history-actor">
-                          <small>Change Proposal</small>
+                          <small>提案による変更</small>
                         </span>
                       )}
                       <time dateTime={new Date(entry.changedAt).toISOString()}>
@@ -101,14 +111,16 @@ export function TaskEditHistoryDialog({
                         label={entry.changeKind === 'add' ? '追加前' :
                           entry.changeKind === 'remove' ? '削除前' : '変更前'}
                         snapshot={entry.before}
-                        emptyLabel="値なし"
+                        referenceSchoolDate={referenceSchoolDate}
+                        emptyLabel="なし"
                       />
                       <span className="transition-arrow" aria-hidden="true">→</span>
                       <TaskSnapshotPanel
                         label={entry.changeKind === 'add' ? '追加後' :
                           entry.changeKind === 'remove' ? '削除後' : '変更後'}
                         snapshot={entry.after}
-                        emptyLabel={entry.changeKind === 'remove' ? '削除' : '値なし'}
+                        referenceSchoolDate={referenceSchoolDate}
+                        emptyLabel={entry.changeKind === 'remove' ? '削除' : 'なし'}
                       />
                     </div>
                   </article>
@@ -126,20 +138,22 @@ function TaskSnapshotPanel({
   label,
   snapshot,
   emptyLabel,
+  referenceSchoolDate,
 }: {
   label: string
   snapshot: TaskHistorySnapshot | null
   emptyLabel: string
+  referenceSchoolDate?: string
 }) {
   return (
     <section className="task-history-snapshot">
       <h3>{label}</h3>
       {snapshot ? (
         <dl>
-          <div><dt>Title</dt><dd>{snapshot.title}</dd></div>
-          <div><dt>Due Date</dt><dd>{snapshot.dueDate ?? '期限なし'}</dd></div>
+          <div><dt>タイトル</dt><dd>{snapshot.title}</dd></div>
+          <div><dt>期限</dt><dd>{snapshot.dueDate ? formatDueDate(snapshot.dueDate, referenceSchoolDate) : '期限なし'}</dd></div>
           <div>
-            <dt>Related Lesson Name</dt>
+            <dt>関連する授業</dt>
             <dd>{snapshot.relatedLessonName ?? 'なし'}</dd>
           </div>
         </dl>
@@ -159,13 +173,4 @@ function formatExactTimestamp(timestamp: number) {
     dateStyle: 'medium',
     timeStyle: 'medium',
   }).format(new Date(timestamp))
-}
-
-function scopeLabel(scopeType: TargetScopeType) {
-  return {
-    grade: 'Grade',
-    class: 'Class',
-    track: 'Track',
-    student: 'Student',
-  }[scopeType]
 }

@@ -2510,7 +2510,7 @@ describe('Daily Plan read API', () => {
     })
   })
 
-  it('keeps 2026 Grade 2 Class 4 Lesson Slots blank while Notes remain visible', async () => {
+  it('keeps 2026 Grade 2 Class 4 Lesson Slots and unimplemented Notes blank', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(
       env,
@@ -2534,24 +2534,11 @@ describe('Daily Plan read API', () => {
         periodNumber: index + 1,
         lessonName: '',
         hasTasks: false,
-        notes:
-          index === 1
-            ? [
-                {
-                  noteId: 'placeholder-daily-lesson-note-2026-07-10-period-2',
-                  body: 'Placeholder: Bring dictionary for second period.',
-                  relatedContext: {
-                    type: 'daily-lesson',
-                    schoolDate: '2026-07-10',
-                    periodNumber: 2,
-                  },
-                },
-              ]
-            : [],
+        notes: [],
       })),
     )
     expect(body.tasks).toEqual([])
-    expect(body.notes.length).toBeGreaterThan(0)
+    expect(body.notes).toEqual([])
   })
 
   it('keeps blank Lesson Slots empty instead of returning a rest label', async () => {
@@ -2687,7 +2674,7 @@ describe('Daily Plan read API', () => {
     ])
   })
 
-  it('returns placeholder Notes for Daily Lessons, School Date, and no-context only when visible for the selected Daily Plan', async () => {
+  it('does not return placeholder Notes while Notes are unimplemented', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(
       env,
@@ -2702,35 +2689,8 @@ describe('Daily Plan read API', () => {
 
     expect(response.status).toBe(200)
     expect(body.periods[0]).toMatchObject({ periodNumber: 1, notes: [] })
-    expect(body.periods[1]).toMatchObject({
-      periodNumber: 2,
-      notes: [
-        {
-          noteId: 'placeholder-daily-lesson-note-2026-07-10-period-2',
-          body: 'Placeholder: Bring dictionary for second period.',
-          relatedContext: {
-            type: 'daily-lesson',
-            schoolDate: '2026-07-10',
-            periodNumber: 2,
-          },
-        },
-      ],
-    })
-    expect(body.notes).toEqual([
-      {
-        noteId: 'placeholder-school-date-note-2026-07-10',
-        body: 'Placeholder: Submit library form today.',
-        relatedContext: {
-          type: 'school-date',
-          schoolDate: '2026-07-10',
-        },
-      },
-      {
-        noteId: 'placeholder-no-context-note',
-        body: 'Placeholder: Student council announcement.',
-        relatedContext: null,
-      },
-    ])
+    expect(body.periods[1]).toMatchObject({ periodNumber: 2, notes: [] })
+    expect(body.notes).toEqual([])
   })
 
   it('returns a School Date keyed range of Daily Plans for prefetching', async () => {

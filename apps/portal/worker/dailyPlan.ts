@@ -356,14 +356,6 @@ function buildReadyDailyPlan({
   tasks: Awaited<ReturnType<DailyPlanStore['listActiveTasksForStudent']>>
 }): Extract<DailyPlanResult, { status: 'ready' }> {
   const weekday = weekdayForSchoolDate(schoolDate)
-  const placeholderNotes = listPlaceholderDailyPlanNotes(schoolDate)
-  const placeholderDailyLessonNotes = placeholderNotes.filter(
-    (note) => note.relatedContext?.type === 'daily-lesson',
-  )
-  const placeholderBottomNotes = placeholderNotes.filter(
-    (note) => note.relatedContext?.type !== 'daily-lesson',
-  )
-
   return {
     status: 'ready',
     schoolDate,
@@ -392,11 +384,7 @@ function buildReadyDailyPlan({
           ? { timetableChangeState: projectedLesson.timetableChangeState }
           : {}),
         hasTasks: false,
-        notes: placeholderDailyLessonNotes.filter(
-          (note) =>
-            note.relatedContext?.type === 'daily-lesson' &&
-            note.relatedContext.periodNumber === periodNumber,
-        ),
+        notes: [],
       }
     }),
     tasks: tasks.map((task) => ({
@@ -418,7 +406,7 @@ function buildReadyDailyPlan({
       targetScopeType: task.targetScope.type,
       createdAt: task.createdAt,
     })),
-    notes: placeholderBottomNotes,
+    notes: [],
   }
 }
 
@@ -456,49 +444,6 @@ async function projectDailyPlanLessons(
   }
 
   return result
-}
-
-const placeholderDailyPlanNotes: DailyPlanNote[] = [
-  {
-    noteId: 'placeholder-daily-lesson-note-2026-07-10-period-2',
-    body: 'Placeholder: Bring dictionary for second period.',
-    relatedContext: {
-      type: 'daily-lesson',
-      schoolDate: '2026-07-10',
-      periodNumber: 2,
-    },
-  },
-  {
-    noteId: 'placeholder-school-date-note-2026-07-10',
-    body: 'Placeholder: Submit library form today.',
-    relatedContext: {
-      type: 'school-date',
-      schoolDate: '2026-07-10',
-    },
-  },
-  {
-    noteId: 'placeholder-school-date-note-2026-07-12',
-    body: 'Placeholder: Other School Date note.',
-    relatedContext: {
-      type: 'school-date',
-      schoolDate: '2026-07-12',
-    },
-  },
-  {
-    noteId: 'placeholder-no-context-note',
-    body: 'Placeholder: Student council announcement.',
-    relatedContext: null,
-  },
-]
-
-function listPlaceholderDailyPlanNotes(schoolDate: string) {
-  return placeholderDailyPlanNotes.filter((note) => {
-    if (!note.relatedContext) {
-      return true
-    }
-
-    return note.relatedContext.schoolDate === schoolDate
-  })
 }
 
 function formatJstSchoolDate(now: number) {

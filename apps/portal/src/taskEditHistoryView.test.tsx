@@ -77,6 +77,8 @@ describe('Task Edit History dialog', () => {
     const markup = renderToStaticMarkup(
       <TaskEditHistoryDialog
         taskTitle="地理ワークを提出"
+        targetScopeContext={{ grade: 2, classNumber: 3, trackName: '文科' }}
+        referenceSchoolDate="2026-07-10"
         state={history}
         onBack={() => undefined}
         onClose={() => undefined}
@@ -87,28 +89,30 @@ describe('Task Edit History dialog', () => {
     expect(markup).toContain('role="dialog"')
     expect(markup).toContain('aria-modal="true"')
     expect(markup).toContain('aria-labelledby="task-history-title"')
-    expect(markup).toContain('aria-label="Task Detailに戻る"')
+    expect(markup).toContain('aria-label="タスクの詳細に戻る"')
     expect(markup).toContain('‹')
     expect(markup).toContain('aria-label="閉じる"')
     expect(markup.toLowerCase()).toContain('autofocus')
-    expect(markup).toContain('aria-label="Task Edit History entries"')
-    expect(markup).toContain('Task Edit History')
-    expect(markup).toContain('Direct Change・Display Name')
-    expect(markup).toContain('Change Proposal')
+    expect(markup).toContain('aria-label="タスクの編集履歴"')
+    expect(markup).toContain('タスクの編集履歴')
+    expect(markup).toContain('変更適用範囲: 文科')
+    expect(markup).not.toContain('track-1')
+    expect(markup).toContain('強制変更・変更者')
+    expect(markup).toContain('提案による変更')
     expect(markup).toContain('Sora')
     expect(markup).toContain('Haru')
     expect(markup).toContain('追加前')
-    expect(markup).toContain('値なし')
+    expect(markup).toContain('なし')
     expect(markup).toContain('追加後')
     expect(markup).toContain('変更前')
     expect(markup).toContain('変更後')
     expect(markup).toContain('削除前')
     expect(markup).toContain('削除')
-    expect(markup).toContain('Title')
-    expect(markup).toContain('Due Date')
-    expect(markup).toContain('Related Lesson Name')
+    expect(markup).toContain('タイトル')
+    expect(markup).toContain('期限')
+    expect(markup).toContain('関連する授業')
     expect(markup).toContain('地理ワークを提出')
-    expect(markup).toContain('2026-07-11')
+    expect(markup).toContain('7月11日まで')
     expect(markup).toContain('地理')
   })
 })

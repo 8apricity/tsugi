@@ -1146,5 +1146,7 @@ function isReplacement(value: unknown): value is TimetableReplacement {
   }
   return replacement.type === 'floating_lesson_reference' &&
     typeof replacement.floatingLessonReferenceLabelId === 'string' &&
-    typeof replacement.referenceLabel === 'string'
+    replacement.floatingLessonReferenceLabelId.length > 0 &&
+    typeof replacement.referenceLabel === 'string' &&
+    replacement.referenceLabel.length > 0
 }

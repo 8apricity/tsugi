@@ -56,7 +56,7 @@ export function NoteCard({
 }: {
   noteId: string
   body: string
-  targetScopeLabel: string
+  targetScopeLabel?: string
   draft?: boolean
   changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean
@@ -97,7 +97,9 @@ export function NoteCard({
         bodyRef={bodyRef}
       />
       <div className="note-meta">
-        <span className="task-scope-badge">{targetScopeLabel}</span>
+        {targetScopeLabel ? (
+          <span className="task-scope-badge">{targetScopeLabel}</span>
+        ) : null}
         {draft ? (
           <small>
             {changeKind === 'remove' ? '削除予定' : '下書き'}

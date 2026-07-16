@@ -656,6 +656,74 @@ describe('D1 Direct Timetable Change persistence', () => {
     ).get(`${rolledBackNote.sourceId}:snapshot`)).toEqual({ count: 0 })
   })
 
+  it('atomically stores dependent Task Notes and cascades them inside Task removal', async () => {
+    const database = createTestDatabase()
+    const adapters = createD1PersistenceAdapters(
+      new SqliteD1Database(database) as unknown as D1Database,
+    )
+    await adapters.seed.saveStudentAccount({
+      studentAccountId: 'task-note-student',
+      schoolEmail: 'task-note@example.invalid',
+      displayName: 'Task Note Student',
+    })
+    const targetScope = {
+      type: 'student' as const,
+      schoolYear: 2026,
+      studentAccountId: 'task-note-student',
+    }
+    const taskId = '33511111-1111-4111-8111-111111111111'
+    const task = {
+      kind: 'task', changeKind: 'add', sourceId: taskId,
+      sharedInformationItemId: taskId, latestChangeId: `${taskId}:change`,
+      targetScope, title: 'Task Note対象', dueDate: null,
+      relatedLessonName: null, changedByStudentAccountId: 'task-note-student',
+      changedAt: 1, createdAt: 1,
+    } satisfies DirectChangeOperation
+    const noteId = '33522222-2222-4222-8222-222222222222'
+    const note = {
+      kind: 'note', changeKind: 'add', sourceId: noteId,
+      sharedInformationItemId: noteId, latestChangeId: `${noteId}:change`,
+      targetScope, schoolDate: null, relatedTaskItemId: taskId,
+      body: 'Taskにだけ表示するノート',
+      changedByStudentAccountId: 'task-note-student', changedAt: 2, createdAt: 2,
+    } satisfies DirectChangeOperation
+
+    await expect(adapters.directChange.commitDirectChanges([task, note]))
+      .resolves.toMatchObject({ status: 'applied' })
+    expect(database.prepare(`
+      select related_context_type, related_task_item_id
+      from note_snapshots where note_snapshot_id = ?
+    `).get(`${noteId}:snapshot`)).toEqual({
+      related_context_type: 'task',
+      related_task_item_id: taskId,
+    })
+
+    const removalId = '33533333-3333-4333-8333-333333333333'
+    const removal = {
+      kind: 'task', changeKind: 'remove', sourceId: removalId,
+      sharedInformationItemId: taskId, latestChangeId: `${removalId}:change`,
+      expectedLatestChangeId: task.latestChangeId, targetScope,
+      changedByStudentAccountId: 'task-note-student', changedAt: 3,
+    } satisfies DirectChangeOperation
+    await expect(adapters.directChange.commitDirectChanges([removal]))
+      .resolves.toMatchObject({ status: 'applied' })
+    await expect(adapters.directChange.commitDirectChanges([removal]))
+      .resolves.toMatchObject({ status: 'applied' })
+
+    expect(database.prepare(`
+      select count(*) as count from shared_information_changes
+      where shared_information_item_id = ? and change_kind = 'remove'
+    `).get(noteId)).toEqual({ count: 1 })
+    await expect(adapters.noteEditHistory.listNoteEditHistory(noteId))
+      .resolves.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          changeKind: 'remove',
+          removalReason: 'task_cascade',
+          primaryActorDisplayName: 'Task Note Student',
+        }),
+      ]))
+  })
+
   it('retains applied Task proposal changes without exposing proposal participants', async () => {
     const database = createTestDatabase()
     const adapters = createD1PersistenceAdapters(

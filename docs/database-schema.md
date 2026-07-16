@@ -282,10 +282,11 @@ create table note_snapshots (
   created_at text not null,
 
   check (length(trim(body)) between 1 and 1000),
-  check (related_context_type in ('none', 'school_date')),
+  check (related_context_type in ('none', 'school_date', 'task')),
   check (
     (related_context_type = 'none' and related_school_date is null and related_period_number is null and related_task_item_id is null)
     or (related_context_type = 'school_date' and related_school_date is not null and related_period_number is null and related_task_item_id is null)
+    or (related_context_type = 'task' and related_school_date is null and related_period_number is null and related_task_item_id is not null)
   )
 );
 ```
@@ -298,7 +299,13 @@ context shapes stay reserved for later migrations.
 Migration `0016_note_lifecycle.sql` adds the `none` stored context for Notes
 without a related destination. It also enables immutable Note update/remove
 chains while keeping Target Scope and related context on the retained item and
-snapshots. Daily Lesson and Task contexts remain reserved for later work.
+snapshots. Daily Lesson context remains reserved for later work.
+
+Migration `0017_task_notes.sql` adds the `task` stored context. A Task Note
+references an active Task item and inherits that Task's Target Scope inside the
+same transaction. Removing a Task enumerates and removes all active related
+Notes in that transaction; each generated removal keeps immutable history with
+`task_cascade` as its machine-readable reason.
 
 Tasks store due timing at school-date level only. If a student needs to record a finer instruction such as "before third period" or "by the start of class", that detail belongs in a note related to the task rather than in formal task due fields.
 
@@ -369,7 +376,7 @@ Accepted proposals and direct changes both create a shared information change. A
 `changed_by_student_account_id` is stored for traceability. Ordinary shared-information views do not show student attribution. Edit history shows the student behind a direct change only to students inside the Target Scope; future proposal history may also show the proposer and the students who approved or rejected it there. Reference Scope inspection does not expose those student names.
 Timetable Change edit history queries immutable change rows by Target Scope, Change Date, and period rather than starting from only the active item. This keeps removed items visible and lets a later Direct Change addition occupy the released slot as a separate item history. `preceding_change_id` records the applied predecessor for update and remove changes, preserving causal order when timestamps tie. An update's before value comes from that preceding applied change of the same item; a remove uses that item's last active snapshot. Stored Period and Floating Lesson References are presented as stored references, not reconstructed historical Lesson Names.
 Task edit history queries immutable change rows by retained Shared Information Item identity, including after removal. Its add, update, and remove transitions follow `preceding_change_id`; registered Related Lesson Names resolve to their current Short Lesson Name when history is read.
-Note edit history uses the same retained-item and causal-link contract. It shows full Body transitions and records `student` for an ordinary removal; `task_cascade` is reserved for automatic removal caused by a future Task lifecycle implementation.
+Note edit history uses the same retained-item and causal-link contract. It shows full Body transitions and records `student` for an ordinary removal and `task_cascade` for automatic removal caused by Task deletion.
 
 ## Change Proposals
 

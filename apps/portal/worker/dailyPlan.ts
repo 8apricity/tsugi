@@ -30,6 +30,7 @@ type DailyPlanTask = {
   registeredRelatedLessonNameId?: string
   targetScopeType: 'grade' | 'class' | 'track' | 'student'
   createdAt: number
+  notes: DailyPlanNote[]
 }
 
 type DailyPlanNote = {
@@ -46,6 +47,10 @@ type DailyPlanNote = {
     | {
         type: 'school-date'
         schoolDate: string
+      }
+    | {
+        type: 'task'
+        taskId: string
       }
     | null
 }
@@ -421,19 +426,30 @@ function buildReadyDailyPlan({
         : {}),
       targetScopeType: task.targetScope.type,
       createdAt: task.createdAt,
+      notes: notes
+        .filter((note) =>
+          note.relatedTaskItemId === task.sharedInformationItemId)
+        .map(toDailyPlanNote),
     })),
-    notes: notes.map((note) => ({
-      noteId: note.sharedInformationItemId,
-      latestChangeId: note.latestChangeId,
-      body: note.body,
-      relatedContext: note.schoolDate === null
+    notes: notes
+      .filter((note) => note.relatedTaskItemId === undefined)
+      .map(toDailyPlanNote),
+  }
+}
+
+function toDailyPlanNote(
+  note: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>[number],
+): DailyPlanNote {
+  return {
+    noteId: note.sharedInformationItemId,
+    latestChangeId: note.latestChangeId,
+    body: note.body,
+    relatedContext: note.relatedTaskItemId
+      ? { type: 'task', taskId: note.relatedTaskItemId }
+      : note.schoolDate === null
         ? null
-        : {
-            type: 'school-date',
-            schoolDate: note.schoolDate,
-          },
-      targetScopeType: note.targetScope.type,
-    })),
+        : { type: 'school-date', schoolDate: note.schoolDate },
+    targetScopeType: note.targetScope.type,
   }
 }
 

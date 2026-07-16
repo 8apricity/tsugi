@@ -2122,6 +2122,147 @@ describe('Unified Direct Change API', () => {
     await expect(otherDate.json()).resolves.toMatchObject({ notes: [] })
   })
 
+  it('atomically adds a Task with its dependent Note and nests it in every applicable Daily Plan', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const taskId = '32000000-0000-4000-8000-000000000011'
+    const noteId = '32000000-0000-4000-8000-000000000012'
+
+    const response = await addDirectChanges(env, cookie, [
+      {
+        kind: 'task',
+        sourceId: taskId,
+        changeKind: 'add',
+        targetScopeType: 'track',
+        title: '期限なしの持ち物',
+        dueDate: null,
+      },
+      {
+        kind: 'note',
+        sourceId: noteId,
+        changeKind: 'add',
+        targetScopeType: 'track',
+        relatedTaskItemId: taskId,
+        body: '一行目の注意\n二行目の詳細',
+      },
+    ])
+
+    expect(response.status).toBe(201)
+    for (const schoolDate of ['2026-07-10', '2026-07-11']) {
+      const plan = await readDailyPlan(env, cookie, schoolDate)
+      await expect(plan.json()).resolves.toMatchObject({
+        tasks: [{
+          taskId,
+          notes: [{
+            noteId,
+            body: '一行目の注意\n二行目の詳細',
+            relatedContext: { type: 'task', taskId },
+            targetScopeType: 'track',
+          }],
+        }],
+        notes: [],
+      })
+    }
+  })
+
+  it('cascades every active Task Note beyond the explicit draft cap and makes retries idempotent', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const taskId = '32000000-0000-4000-8000-000000000021'
+    const firstNoteId = '32000000-0000-4000-8000-000000000022'
+    const secondNoteId = '32000000-0000-4000-8000-000000000023'
+    expect((await addDirectChanges(env, cookie, [
+      {
+        kind: 'task', sourceId: taskId, changeKind: 'add',
+        targetScopeType: 'track', title: '連鎖削除するタスク', dueDate: null,
+      },
+      {
+        kind: 'note', sourceId: firstNoteId, changeKind: 'add',
+        targetScopeType: 'track', relatedTaskItemId: taskId, body: '最初のノート',
+      },
+      {
+        kind: 'note', sourceId: secondNoteId, changeKind: 'add',
+        targetScopeType: 'track', relatedTaskItemId: taskId, body: '次のノート',
+      },
+    ])).status).toBe(201)
+    expect((await addDirectChanges(
+      env,
+      cookie,
+      Array.from({ length: 48 }, (_, index) => ({
+        kind: 'note',
+        sourceId: `32000000-0000-4000-8000-${String(index + 100).padStart(12, '0')}`,
+        changeKind: 'add',
+        targetScopeType: 'track',
+        relatedTaskItemId: taskId,
+        body: `追加ノート${index + 1}`,
+      })),
+    )).status).toBe(201)
+
+    const removal = {
+      kind: 'task',
+      sourceId: '32000000-0000-4000-8000-000000000024',
+      changeKind: 'remove',
+      targetScopeType: 'track',
+      sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${taskId}:change`,
+    }
+    expect((await addDirectChanges(env, cookie, [removal])).status).toBe(201)
+    expect((await addDirectChanges(env, cookie, [removal])).status).toBe(201)
+
+    const plan = await readDailyPlan(env, cookie, '2026-07-10')
+    await expect(plan.json()).resolves.toMatchObject({ tasks: [], notes: [] })
+    for (const noteId of [firstNoteId, secondNoteId]) {
+      const history = await readNoteEditHistory(env, cookie, noteId)
+      await expect(history.json()).resolves.toMatchObject({
+        entries: [
+          {
+            changeKind: 'remove',
+            removalReason: 'task_cascade',
+            primaryActorDisplayName: 'Test Humanities 1',
+          },
+          { changeKind: 'add' },
+        ],
+      })
+    }
+  })
+
+  it('rejects a Task Note unless its related item is an active Task with the exact Target Scope', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const taskId = '32000000-0000-4000-8000-000000000031'
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'task', sourceId: taskId, changeKind: 'add',
+      targetScopeType: 'track', title: '対象タスク', dueDate: null,
+    }])).status).toBe(201)
+
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'note', sourceId: '32000000-0000-4000-8000-000000000032',
+      changeKind: 'add', targetScopeType: 'class', relatedTaskItemId: taskId,
+      body: '範囲が違うノート',
+    }])).status).toBe(400)
+
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'task', sourceId: '32000000-0000-4000-8000-000000000033',
+      changeKind: 'remove', targetScopeType: 'track',
+      sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${taskId}:change`,
+    }])).status).toBe(201)
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'note', sourceId: '32000000-0000-4000-8000-000000000034',
+      changeKind: 'add', targetScopeType: 'track', relatedTaskItemId: taskId,
+      body: '削除後のノート',
+    }])).status).toBe(400)
+  })
+
   it('validates School Date Notes and keeps the legacy endpoint as an alias', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(

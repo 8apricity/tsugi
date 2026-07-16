@@ -32,6 +32,7 @@ type DirectChangeDraft = {
   dueDate?: unknown
   relatedLessonName?: unknown
   schoolDate?: unknown
+  relatedTaskItemId?: unknown
   body?: unknown
 }
 
@@ -295,6 +296,10 @@ export async function applyDirectChanges({
 
   const result = await store.commitDirectChanges(changes)
 
+  if (result.status === 'invalid-change') {
+    return { status: 'invalid-change' }
+  }
+
   if (result.status === 'conflict') {
     const conflictingNonTimetableSourceIds = nonTimetableConflictSourceIds(
       changes,
@@ -455,6 +460,7 @@ function parseNoteOperation({
   changedByStudentAccountId: string
   now: number
 }): DirectNoteOperation | null {
+  const hasRelatedTask = candidate.relatedTaskItemId !== undefined
   if (
     !Object.keys(candidate).every((key) => noteDraftKeys.has(key)) ||
     (changeKind !== 'add' && changeKind !== 'update' && changeKind !== 'remove') ||
@@ -470,12 +476,17 @@ function parseNoteOperation({
         candidate.expectedLatestChangeId.length < 1 ||
         candidate.expectedLatestChangeId.length > 200) ||
     (changeKind === 'add'
-      ? candidate.schoolDate !== null &&
-        (typeof candidate.schoolDate !== 'string' ||
-          !isValidSchoolDate(candidate.schoolDate) ||
-          candidate.schoolDate < schoolYear.startsOn ||
-          candidate.schoolDate > schoolYear.endsOn)
-      : candidate.schoolDate !== undefined) ||
+      ? hasRelatedTask
+        ? typeof candidate.relatedTaskItemId !== 'string' ||
+          !uuidPattern.test(candidate.relatedTaskItemId) ||
+          candidate.schoolDate !== undefined
+        : candidate.schoolDate !== null &&
+          (typeof candidate.schoolDate !== 'string' ||
+            !isValidSchoolDate(candidate.schoolDate) ||
+            candidate.schoolDate < schoolYear.startsOn ||
+            candidate.schoolDate > schoolYear.endsOn)
+      : candidate.schoolDate !== undefined ||
+        candidate.relatedTaskItemId !== undefined) ||
     (changeKind === 'remove'
       ? candidate.body !== undefined
       : typeof candidate.body !== 'string' ||
@@ -509,7 +520,10 @@ function parseNoteOperation({
     ? {
         ...common,
         changeKind,
-        schoolDate: candidate.schoolDate as string | null,
+        schoolDate: hasRelatedTask ? null : candidate.schoolDate as string | null,
+        ...(hasRelatedTask
+          ? { relatedTaskItemId: candidate.relatedTaskItemId as string }
+          : {}),
         body,
         createdAt: now,
       }
@@ -529,6 +543,7 @@ const noteDraftKeys = new Set([
   'expectedLatestChangeId',
   'targetScopeType',
   'schoolDate',
+  'relatedTaskItemId',
   'body',
 ])
 

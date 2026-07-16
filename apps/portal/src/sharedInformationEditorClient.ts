@@ -416,6 +416,18 @@ export function createSharedInformationEditorClient({
     return removed
   }
 
+  function removeDependentNoteDrafts(taskId: string) {
+    const dependentSourceIds = new Set(
+      noteDrafts
+        .filter((draft) => draft.relatedTaskItemId === taskId)
+        .map((draft) => draft.sourceId),
+    )
+    noteDrafts = noteDrafts.filter(
+      (draft) => !dependentSourceIds.has(draft.sourceId),
+    )
+    dependentSourceIds.forEach((id) => noteConflictSourceIds.delete(id))
+  }
+
   function commitPayload(
     batch: readonly TimetableChangeDraft[] = drafts,
     taskBatch: readonly TaskDraft[] = taskDrafts,
@@ -644,8 +656,14 @@ export function createSharedInformationEditorClient({
         (draft) =>
           draft.changeKind === 'add' && draft.sourceId === task.taskId,
       )
+      const taskRemovalPlanned = taskDrafts.some(
+        (draft) =>
+          draft.changeKind === 'remove' &&
+          draft.sharedInformationItemId === task.taskId,
+      )
       if (
         body === null ||
+        taskRemovalPlanned ||
         (taskDraft && taskDraft.targetScopeType !== task.targetScopeType)
       ) return { status: 'invalid-note' as const }
       if (totalDraftCount() >= maximumDraftKeys) {
@@ -784,6 +802,10 @@ export function createSharedInformationEditorClient({
           nextDrafts.push(draft)
           continue
         }
+        if (noteConflictSourceIds.has(draft.sourceId)) {
+          nextDrafts.push(draft)
+          continue
+        }
         if (
           loadedSchoolDate !== undefined &&
           draft.schoolDate !== null &&
@@ -861,15 +883,7 @@ export function createSharedInformationEditorClient({
         dueDate: activeTask.dueDate,
         relatedLessonName: activeTask.relatedLessonName,
       })
-      const dependentSourceIds = new Set(
-        noteDrafts
-          .filter((draft) => draft.relatedTaskItemId === activeTask.taskId)
-          .map((draft) => draft.sourceId),
-      )
-      noteDrafts = noteDrafts.filter(
-        (draft) => !dependentSourceIds.has(draft.sourceId),
-      )
-      dependentSourceIds.forEach((id) => noteConflictSourceIds.delete(id))
+      removeDependentNoteDrafts(activeTask.taskId)
       taskConflictSourceIds.delete(sourceId)
       editing = true
       lastCommitFailed = false
@@ -886,15 +900,7 @@ export function createSharedInformationEditorClient({
       taskDrafts = next
       taskConflictSourceIds.delete(sourceId)
       if (removedDraft?.changeKind === 'add') {
-        const dependentSourceIds = new Set(
-          noteDrafts
-            .filter((draft) => draft.relatedTaskItemId === sourceId)
-            .map((draft) => draft.sourceId),
-        )
-        noteDrafts = noteDrafts.filter(
-          (draft) => !dependentSourceIds.has(draft.sourceId),
-        )
-        dependentSourceIds.forEach((id) => noteConflictSourceIds.delete(id))
+        removeDependentNoteDrafts(sourceId)
       }
       publish()
       return { status: 'removed' as const }

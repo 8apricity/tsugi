@@ -688,6 +688,22 @@ describe('D1 Direct Timetable Change persistence', () => {
       changedByStudentAccountId: 'task-note-student', changedAt: 2, createdAt: 2,
     } satisfies DirectChangeOperation
 
+    await expect(adapters.directChange.commitDirectChanges([
+      task,
+      {
+        ...note,
+        targetScope: {
+          type: 'grade',
+          schoolYear: 2026,
+          grade: 2,
+        },
+      },
+    ])).resolves.toEqual({ status: 'invalid-change' })
+    expect(database.prepare(`
+      select count(*) as count from shared_information_items
+      where shared_information_item_id in (?, ?)
+    `).get(taskId, noteId)).toEqual({ count: 0 })
+
     await expect(adapters.directChange.commitDirectChanges([task, note]))
       .resolves.toMatchObject({ status: 'applied' })
     expect(database.prepare(`
@@ -705,6 +721,24 @@ describe('D1 Direct Timetable Change persistence', () => {
       expectedLatestChangeId: task.latestChangeId, targetScope,
       changedByStudentAccountId: 'task-note-student', changedAt: 3,
     } satisfies DirectChangeOperation
+    await expect(adapters.directChange.commitDirectChanges([
+      removal,
+      {
+        kind: 'note', changeKind: 'update',
+        sourceId: '33544444-4444-4444-8444-444444444444',
+        sharedInformationItemId: noteId,
+        latestChangeId: '33544444-4444-4444-8444-444444444444:change',
+        expectedLatestChangeId: note.latestChangeId,
+        targetScope,
+        body: 'Task削除と同時に明示更新しない',
+        changedByStudentAccountId: 'task-note-student', changedAt: 3,
+      },
+    ])).resolves.toEqual({ status: 'invalid-change' })
+    expect(database.prepare(`
+      select removed_at from shared_information_items
+      where shared_information_item_id = ?
+    `).get(taskId)).toEqual({ removed_at: null })
+
     await expect(adapters.directChange.commitDirectChanges([removal]))
       .resolves.toMatchObject({ status: 'applied' })
     await expect(adapters.directChange.commitDirectChanges([removal]))

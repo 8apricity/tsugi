@@ -27,7 +27,7 @@ describe('Note Edit History view', () => {
     )
     expect(markup).toContain('ノートの編集履歴')
     expect(markup).toContain('Sora')
-    expect(markup).toContain('タスク削除に伴う削除')
+    expect(markup).toContain('Task削除に伴う削除')
     expect(markup).toContain('1行目\n2行目\n3行目\n4行目\n5行目\n6行目')
     expect(markup).not.toContain('note-body-clamped')
   })

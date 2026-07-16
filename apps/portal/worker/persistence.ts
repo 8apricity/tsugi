@@ -1042,7 +1042,13 @@ export class InMemoryPersistenceAdapters
         .map((change) => change.sharedInformationItemId),
     )
     const invalidTaskNote = pendingNoteChanges.some((change) => {
-      if (change.changeKind !== 'add' || !change.relatedTaskItemId) return false
+      if (change.changeKind !== 'add') {
+        const activeNote = this.activeNotes.find((note) =>
+          note.sharedInformationItemId === change.sharedInformationItemId)
+        return !!activeNote?.relatedTaskItemId &&
+          pendingTaskRemovals.has(activeNote.relatedTaskItemId)
+      }
+      if (!change.relatedTaskItemId) return false
       if (pendingTaskRemovals.has(change.relatedTaskItemId)) return true
       const task = pendingTaskAdds.find(
         (candidate) =>
@@ -2650,7 +2656,7 @@ export class D1PersistenceAdapters
         .filter((change) => change.changeKind === 'remove')
         .map((change) => change.sharedInformationItemId),
     )
-    const invalidTaskNote = pendingNotes.some((change) => {
+    const invalidTaskNoteAdd = pendingNotes.some((change) => {
       if (change.changeKind !== 'add' || !change.relatedTaskItemId) return false
       if (pendingTaskRemovals.has(change.relatedTaskItemId)) return true
       const task = pendingTaskAdds.find(
@@ -2659,7 +2665,7 @@ export class D1PersistenceAdapters
       ) ?? activeTaskByItem.get(change.relatedTaskItemId)
       return !task || !targetScopesEqual(task.targetScope, change.targetScope)
     })
-    if (invalidTaskNote) return { status: 'invalid-change' as const }
+    if (invalidTaskNoteAdd) return { status: 'invalid-change' as const }
     const noteItemChanges = pendingNotes.filter(
       (change) => change.changeKind !== 'add',
     )
@@ -2669,6 +2675,12 @@ export class D1PersistenceAdapters
     const activeNoteByItem = new Map(
       activeNotes.map((note) => [note.sharedInformationItemId, note]),
     )
+    const invalidTaskNoteChange = noteItemChanges.some((change) => {
+      const activeNote = activeNoteByItem.get(change.sharedInformationItemId)
+      return !!activeNote?.relatedTaskItemId &&
+        pendingTaskRemovals.has(activeNote.relatedTaskItemId)
+    })
+    if (invalidTaskNoteChange) return { status: 'invalid-change' as const }
     const addSlotKeys = pendingTimetable
       .filter((change) => change.changeKind === 'add')
       .map(activeTimetableChangeSlotKey)

@@ -1180,6 +1180,7 @@ function App() {
     note?: DailyPlanNoteForCache,
     draft?: NoteDraft,
   ) {
+    if (taskDetail?.taskId === task.taskId) setTaskDetail(null);
     setNoteEditorForm({
       body: note?.body ?? draft?.body ?? "",
       schoolDate: null,
@@ -2093,6 +2094,10 @@ function App() {
                               <button
                                 className="button-link"
                                 type="button"
+                                disabled={
+                                  timetableEditor.atLimit ||
+                                  timetableEditor.submitting
+                                }
                                 onClick={() => openTaskNoteEditor({
                                   taskId: task.sourceId,
                                   title: task.title,
@@ -2339,12 +2344,6 @@ function App() {
                   </button>
                 </header>
                 <form onSubmit={saveNoteDraft}>
-                  {noteEditorForm.relatedTask ? (
-                    <p className="task-note-target">
-                      {noteEditorForm.relatedTask.title}
-                    </p>
-                  ) : (
-                    <>
                   <label>
                     <span>本文</span>
                     <textarea
@@ -2365,6 +2364,12 @@ function App() {
                       {noteEditorForm.body.length} / 1000
                     </small>
                   </label>
+                  {noteEditorForm.relatedTask ? (
+                    <p className="task-note-target">
+                      {noteEditorForm.relatedTask.title}
+                    </p>
+                  ) : (
+                    <>
                   <label>
                     <span>日付</span>
                     <input
@@ -2773,6 +2778,9 @@ function App() {
                       <button
                         className="button-secondary"
                         type="button"
+                        disabled={
+                          timetableEditor.atLimit || timetableEditor.submitting
+                        }
                         onClick={() => openTaskNoteEditor(taskDetail)}
                       >
                         ノートを書く

@@ -2212,6 +2212,26 @@ describe('Unified Direct Change API', () => {
       sharedInformationItemId: taskId,
       expectedLatestChangeId: `${taskId}:change`,
     }
+    expect((await addDirectChanges(env, cookie, [
+      removal,
+      {
+        kind: 'note',
+        sourceId: '32000000-0000-4000-8000-000000000025',
+        changeKind: 'update',
+        targetScopeType: 'track',
+        sharedInformationItemId: firstNoteId,
+        expectedLatestChangeId: `${firstNoteId}:change`,
+        body: 'Task削除と同時に明示更新しない',
+      },
+    ])).status).toBe(400)
+    const afterRejectedMixedRemoval = await readDailyPlan(
+      env,
+      cookie,
+      '2026-07-10',
+    )
+    await expect(afterRejectedMixedRemoval.json()).resolves.toMatchObject({
+      tasks: [expect.objectContaining({ taskId })],
+    })
     expect((await addDirectChanges(env, cookie, [removal])).status).toBe(201)
     expect((await addDirectChanges(env, cookie, [removal])).status).toBe(201)
 

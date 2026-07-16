@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { DailyPlanNoteForCache } from './dailyPlanCache'
 import type { NoteDraft } from './sharedInformationEditorClient'
-import { buildVisibleNoteList } from './noteListView'
+import {
+  buildVisibleDailyLessonNoteList,
+  buildVisibleNoteList,
+} from './noteListView'
 
 describe('Daily Plan Note list projection', () => {
   it('keeps dated then unrelated groups and replaces removals in place', () => {
@@ -39,6 +42,57 @@ describe('Daily Plan Note list projection', () => {
       'unrelated-new',
       'unrelated-old',
     ])
+  })
+
+  it('orders Daily Lesson Notes by broad-to-narrow scope and newest draft first', () => {
+    const dailyLesson = (
+      noteId: string,
+      targetScopeType: DailyPlanNoteForCache['targetScopeType'],
+    ): DailyPlanNoteForCache => ({
+      noteId,
+      latestChangeId: `${noteId}:change`,
+      body: noteId,
+      targetScopeType,
+      relatedContext: {
+        type: 'daily-lesson',
+        schoolDate: '2026-07-10',
+        periodNumber: 2,
+      },
+    })
+    const drafts = ['track-old-draft', 'track-new-draft'].map((sourceId) => ({
+      ...addDraft(sourceId, '2026-07-10'),
+      periodNumber: 2,
+      targetScopeType: 'track' as const,
+    }))
+
+    expect(buildVisibleDailyLessonNoteList(
+      [dailyLesson('student', 'student'), dailyLesson('grade', 'grade'),
+        dailyLesson('track-active', 'track')],
+      drafts,
+      '2026-07-10',
+      2,
+    ).map((item) => item.type === 'active'
+      ? item.note.noteId
+      : item.draft.sourceId)).toEqual([
+      'grade',
+      'track-new-draft',
+      'track-old-draft',
+      'track-active',
+      'student',
+    ])
+  })
+
+  it('keeps Daily Lesson Note drafts out of the general Note section', () => {
+    const dailyLessonDraft = {
+      ...addDraft('daily-lesson', '2026-07-10'),
+      periodNumber: 2,
+    }
+
+    expect(buildVisibleNoteList(
+      [],
+      [dailyLessonDraft],
+      '2026-07-10',
+    )).toEqual([])
   })
 })
 

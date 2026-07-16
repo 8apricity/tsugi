@@ -21,6 +21,18 @@ type TimetableLayerReplacement =
       { type: 'floating_lesson_reference' }
     > & { referenceLabel: string })
 
+type TimetableLayerNote = {
+  noteId: string
+  latestChangeId: string
+  body: string
+  targetScopeType: TargetScopeType
+  relatedContext: {
+    type: 'daily-lesson'
+    schoolDate: string
+    periodNumber: number
+  }
+}
+
 export type TimetableChangeLayerResult =
   | {
       status: 'ready'
@@ -31,7 +43,11 @@ export type TimetableChangeLayerResult =
         lessonName: string
       } | null
       layers: Array<
-        | { targetScopeType: TargetScopeType; state: 'unchanged' }
+        | {
+            targetScopeType: TargetScopeType
+            state: 'unchanged'
+            notes?: TimetableLayerNote[]
+          }
         | {
             targetScopeType: TargetScopeType
             state: 'active'
@@ -39,6 +55,7 @@ export type TimetableChangeLayerResult =
             latestChangeId: string
             replacement: TimetableLayerReplacement
             changedAt: number
+            notes?: TimetableLayerNote[]
           }
       >
       finalDailyLesson: {
@@ -111,7 +128,7 @@ export async function readTimetableChangeLayerRange({
     new Date(start.getTime() + day * 86_400_000).toISOString().slice(0, 10),
   )
   const weekdays = [...new Set(schoolDates.map(weekdayForSchoolDate))]
-  const [standardEntriesByWeekday, activeChanges] = await Promise.all([
+  const [standardEntriesByWeekday, activeChanges, activeNotesByDate] = await Promise.all([
     Promise.all(
       weekdays.map(async (weekday) => [
         weekday,
@@ -127,6 +144,12 @@ export async function readTimetableChangeLayerRange({
       startDate,
       endDate,
     ),
+    Promise.all(
+      schoolDates.map(async (schoolDate) => [
+        schoolDate,
+        await store.listActiveNotesForStudent(affiliation, schoolDate),
+      ] as const),
+    ).then((entries) => new Map(entries)),
   ])
 
   const states: Array<Extract<TimetableChangeLayerResult, { status: 'ready' }>> = []
@@ -145,6 +168,7 @@ export async function readTimetableChangeLayerRange({
         store,
         standardEntries,
         activeChanges: dateChanges,
+        activeNotes: activeNotesByDate.get(schoolDate) ?? [],
       }))
     }
   }
@@ -196,7 +220,7 @@ export async function readTimetableChangeLayers({
   const affiliation = context.studentAffiliation
 
   const weekday = weekdayForSchoolDate(schoolDate)
-  const [standardEntries, activeChanges] = await Promise.all([
+  const [standardEntries, activeChanges, activeNotes] = await Promise.all([
     store.listStandardTimetableEntriesForWeekday(
       affiliation.classId,
       affiliation.trackId,
@@ -207,6 +231,7 @@ export async function readTimetableChangeLayers({
       schoolDate,
       schoolDate,
     ),
+    store.listActiveNotesForStudent(affiliation, schoolDate),
   ])
   return buildReadyLayerState({
     schoolDate,
@@ -216,6 +241,7 @@ export async function readTimetableChangeLayers({
     store,
     standardEntries,
     activeChanges,
+    activeNotes,
   })
 }
 
@@ -227,6 +253,7 @@ async function buildReadyLayerState({
   store,
   standardEntries,
   activeChanges,
+  activeNotes,
 }: {
   schoolDate: string
   selectedPeriod: number
@@ -237,6 +264,7 @@ async function buildReadyLayerState({
     ReturnType<DailyPlanStore['listStandardTimetableEntriesForWeekday']>
   >
   activeChanges: ActiveTimetableChange[]
+  activeNotes: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>
 }): Promise<Extract<TimetableChangeLayerResult, { status: 'ready' }>> {
   const changesByLayer = new Map(
     activeChanges
@@ -267,6 +295,22 @@ async function buildReadyLayerState({
   const layers = await Promise.all(
     projection.layers.map(async (layer) => {
       const change = changesByLayer.get(layer.targetScopeType)
+      const notes = activeNotes
+        .filter((note) =>
+          note.schoolDate === schoolDate &&
+          note.periodNumber === selectedPeriod &&
+          note.targetScope.type === layer.targetScopeType)
+        .map((note) => ({
+          noteId: note.sharedInformationItemId,
+          latestChangeId: note.latestChangeId,
+          body: note.body,
+          targetScopeType: note.targetScope.type,
+          relatedContext: {
+            type: 'daily-lesson' as const,
+            schoolDate,
+            periodNumber: selectedPeriod,
+          },
+        }))
       return layer.state === 'active' && change
         ? {
             targetScopeType: layer.targetScopeType,
@@ -275,8 +319,13 @@ async function buildReadyLayerState({
             latestChangeId: change.latestChangeId,
             replacement: await displayReplacement(change, affiliation, store),
             changedAt: change.changedAt,
+            ...(notes.length > 0 ? { notes } : {}),
           }
-        : { targetScopeType: layer.targetScopeType, state: 'unchanged' as const }
+        : {
+            targetScopeType: layer.targetScopeType,
+            state: 'unchanged' as const,
+            ...(notes.length > 0 ? { notes } : {}),
+          }
     }),
   )
 

@@ -282,10 +282,11 @@ create table note_snapshots (
   created_at text not null,
 
   check (length(trim(body)) between 1 and 1000),
-  check (related_context_type in ('none', 'school_date', 'task')),
+  check (related_context_type in ('none', 'school_date', 'daily_lesson', 'task')),
   check (
     (related_context_type = 'none' and related_school_date is null and related_period_number is null and related_task_item_id is null)
     or (related_context_type = 'school_date' and related_school_date is not null and related_period_number is null and related_task_item_id is null)
+    or (related_context_type = 'daily_lesson' and related_school_date is not null and related_period_number between 1 and 7 and related_task_item_id is null)
     or (related_context_type = 'task' and related_school_date is null and related_period_number is null and related_task_item_id is not null)
   )
 );
@@ -306,6 +307,12 @@ references an active Task item and inherits that Task's Target Scope inside the
 same transaction. Removing a Task enumerates and removes all active related
 Notes in that transaction; each generated removal keeps immutable history with
 `task_cascade` as its machine-readable reason.
+
+Migration `0018_daily_lesson_notes.sql` adds the `daily_lesson` stored context.
+A Daily Lesson Note belongs to one School Date, period number, and Target Scope;
+it does not reference a Timetable Change item or Lesson Name. Therefore it
+survives Lesson Name changes, cancellations, Timetable Change removal, and a
+return to the Standard Timetable for that period.
 
 Tasks store due timing at school-date level only. If a student needs to record a finer instruction such as "before third period" or "by the start of class", that detail belongs in a note related to the task rather than in formal task due fields.
 

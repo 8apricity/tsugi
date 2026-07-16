@@ -224,8 +224,6 @@
 }
 
 .period-row {
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
   min-height: 48px;
   border-bottom: 1px solid var(--color-border);
 }
@@ -235,11 +233,25 @@
 }
 
 .period-row.inspectable {
+  cursor: default;
+}
+
+.period-inspect-button {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  width: 100%;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.period-row.inspectable:hover,
-.period-row.inspectable:focus-visible {
+.period-inspect-button:hover,
+.period-inspect-button:focus-visible {
   background: #f3f8f8;
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
@@ -309,6 +321,22 @@
   padding-left: 18px;
   color: var(--color-muted);
   font-size: 13px;
+}
+
+.daily-lesson-note-list,
+.layer-note-list {
+  display: grid;
+  gap: 8px;
+}
+
+.daily-lesson-note-list {
+  padding: 0 12px 12px 68px;
+}
+
+.daily-lesson-note-list .note-item,
+.layer-note-list .note-item {
+  border-left: 3px solid #c8d9dc;
+  background: #fff;
 }
 
 .daily-section {
@@ -1019,6 +1047,16 @@ body.page-scroll-locked {
   min-width: 0;
 }
 
+.layer-with-notes {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.layer-note-list {
+  padding: 0 48px 0 12px;
+}
+
 .layer-row-shell.has-menu {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
@@ -1585,6 +1623,56 @@ button.timetable-layer-row {
   gap: 10px;
   min-width: 0;
   margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.replacement-options:disabled {
+  opacity: 0.55;
+}
+
+.timetable-change-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.timetable-change-toggle input {
+  width: 18px;
+  height: 18px;
+}
+
+.daily-lesson-note-field {
+  display: grid;
+  gap: 7px;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.daily-lesson-note-field textarea {
+  width: 100%;
+  min-height: 110px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.note-fixed-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.note-fixed-context .readonly-field:last-child {
+  grid-column: 1 / -1;
 }
 
 .replacement-section-label {
@@ -1761,6 +1849,22 @@ button.timetable-layer-row {
 
   .editor-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .daily-lesson-note-list {
+    padding-left: 12px;
+  }
+
+  .layer-note-list {
+    padding-right: 0;
+  }
+
+  .note-fixed-context {
+    grid-template-columns: 1fr;
+  }
+
+  .note-fixed-context .readonly-field:last-child {
+    grid-column: auto;
   }
 
   .timetable-layer-dialog {

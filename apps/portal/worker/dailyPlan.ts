@@ -405,7 +405,12 @@ function buildReadyDailyPlan({
           ? { timetableChangeState: projectedLesson.timetableChangeState }
           : {}),
         hasTasks: false,
-        notes: [],
+        notes: notes
+          .filter((note) =>
+            note.schoolDate === schoolDate &&
+            note.periodNumber === periodNumber)
+          .sort(compareDailyLessonNotes)
+          .map(toDailyPlanNote),
       }
     }),
     tasks: tasks.map((task) => ({
@@ -432,7 +437,8 @@ function buildReadyDailyPlan({
         .map(toDailyPlanNote),
     })),
     notes: notes
-      .filter((note) => note.relatedTaskItemId === undefined)
+      .filter((note) =>
+        note.relatedTaskItemId === undefined && note.periodNumber === null)
       .map(toDailyPlanNote),
   }
 }
@@ -448,9 +454,34 @@ function toDailyPlanNote(
       ? { type: 'task', taskId: note.relatedTaskItemId }
       : note.schoolDate === null
         ? null
-        : { type: 'school-date', schoolDate: note.schoolDate },
+        : note.periodNumber === null
+          ? { type: 'school-date', schoolDate: note.schoolDate }
+          : {
+              type: 'daily-lesson',
+              schoolDate: note.schoolDate,
+              periodNumber: note.periodNumber,
+            },
     targetScopeType: note.targetScope.type,
   }
+}
+
+const targetScopeOrder = new Map([
+  ['grade', 0],
+  ['class', 1],
+  ['track', 2],
+  ['student', 3],
+])
+
+function compareDailyLessonNotes(
+  left: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>[number],
+  right: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>[number],
+) {
+  const scopeDifference =
+    (targetScopeOrder.get(left.targetScope.type) ?? 4) -
+    (targetScopeOrder.get(right.targetScope.type) ?? 4)
+  if (scopeDifference !== 0) return scopeDifference
+  if (left.createdAt !== right.createdAt) return right.createdAt - left.createdAt
+  return right.sharedInformationItemId.localeCompare(left.sharedInformationItemId)
 }
 
 async function projectDailyPlanLessons(

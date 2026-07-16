@@ -2122,6 +2122,166 @@ describe('Unified Direct Change API', () => {
     await expect(otherDate.json()).resolves.toMatchObject({ notes: [] })
   })
 
+  it('adds independent Daily Lesson Notes to the selected period and exact Target Scope layer', async () => {
+    vi.useFakeTimers()
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const addNote = async (
+      sourceId: string,
+      targetScopeType: 'grade' | 'class' | 'track' | 'student',
+      body: string,
+      now: string,
+    ) => {
+      vi.setSystemTime(new Date(now))
+      return addDirectChanges(env, cookie, [{
+        kind: 'note',
+        sourceId,
+        changeKind: 'add',
+        targetScopeType,
+        schoolDate: '2026-07-10',
+        periodNumber: 2,
+        body,
+      }])
+    }
+
+    expect((await addNote(
+      '32000000-0000-4000-8000-000000000101',
+      'track',
+      '文科の先のノート',
+      '2026-07-09T01:00:00.000Z',
+    )).status).toBe(201)
+    expect((await addNote(
+      '32000000-0000-4000-8000-000000000102',
+      'grade',
+      '学年のノート',
+      '2026-07-09T02:00:00.000Z',
+    )).status).toBe(201)
+    expect((await addNote(
+      '32000000-0000-4000-8000-000000000103',
+      'track',
+      '文科の後のノート',
+      '2026-07-09T03:00:00.000Z',
+    )).status).toBe(201)
+
+    const planResponse = await readDailyPlan(env, cookie, '2026-07-10')
+    const plan = await planResponse.json() as {
+      periods: Array<{ notes: Array<Record<string, unknown>> }>
+      notes: Array<unknown>
+    }
+    expect(plan.periods[1].notes.map((note) => note.body)).toEqual([
+      '学年のノート',
+      '文科の後のノート',
+      '文科の先のノート',
+    ])
+    expect(plan.periods[1].notes[0]).toMatchObject({
+      targetScopeType: 'grade',
+      relatedContext: {
+        type: 'daily-lesson',
+        schoolDate: '2026-07-10',
+        periodNumber: 2,
+      },
+    })
+    expect(plan.periods[1].notes[0]).not.toHaveProperty(
+      'changedByStudentAccountId',
+    )
+    expect(plan.periods[1].notes[0]).not.toHaveProperty('changedAt')
+    expect(plan.notes).toEqual([])
+
+    const layerResponse = await readTimetableChangeLayers(
+      env,
+      cookie,
+      '2026-07-10',
+      2,
+    )
+    const layerState = await layerResponse.json() as {
+      layers: Array<{
+        targetScopeType: string
+        notes: Array<{ body: string }>
+      }>
+    }
+    expect(layerState.layers.find(
+      (layer) => layer.targetScopeType === 'grade',
+    )?.notes.map((note) => note.body)).toEqual(['学年のノート'])
+    expect(layerState.layers.find(
+      (layer) => layer.targetScopeType === 'track',
+    )?.notes.map((note) => note.body)).toEqual([
+      '文科の後のノート',
+      '文科の先のノート',
+    ])
+  })
+
+  it('keeps a Daily Lesson Note attached when Timetable Changes change or disappear', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const noteId = '32000000-0000-4000-8000-000000000111'
+    const timetableId = '32000000-0000-4000-8000-000000000112'
+    expect((await addDirectChanges(env, cookie, [
+      {
+        kind: 'timetable_change', sourceId: timetableId, changeKind: 'add',
+        targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 2,
+        replacement: { type: 'cancelled' },
+      },
+      {
+        kind: 'note', sourceId: noteId, changeKind: 'add',
+        targetScopeType: 'track', schoolDate: '2026-07-10', periodNumber: 2,
+        body: '休講でも残るノート',
+      },
+    ])).status).toBe(201)
+
+    const removeId = '32000000-0000-4000-8000-000000000113'
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'timetable_change', sourceId: removeId, changeKind: 'remove',
+      targetScopeType: 'track', changeDate: '2026-07-10', periodNumber: 2,
+      sharedInformationItemId: timetableId,
+      expectedLatestChangeId: `${timetableId}:change`,
+    }])).status).toBe(201)
+
+    const plan = await readDailyPlan(env, cookie, '2026-07-10')
+    const body = await plan.json() as {
+      periods: Array<{ lessonName: string; notes: Array<Record<string, unknown>> }>
+    }
+    expect(body.periods[1]).toMatchObject({
+      lessonName: '',
+      notes: [expect.objectContaining({
+        noteId,
+        body: '休講でも残るノート',
+      })],
+    })
+
+    const rejectedNoteId = '32000000-0000-4000-8000-000000000114'
+    const rejected = await addDirectChanges(env, cookie, [
+      {
+        kind: 'timetable_change',
+        sourceId: '32000000-0000-4000-8000-000000000115',
+        changeKind: 'update',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+        sharedInformationItemId: timetableId,
+        expectedLatestChangeId: `${timetableId}:change`,
+        replacement: { type: 'lesson_name', lessonName: '数学' },
+      },
+      {
+        kind: 'note', sourceId: rejectedNoteId, changeKind: 'add',
+        targetScopeType: 'track', schoolDate: '2026-07-10', periodNumber: 2,
+        body: '競合時は追加されないノート',
+      },
+    ])
+    expect(rejected.status).toBe(409)
+    const afterRejected = await readDailyPlan(env, cookie, '2026-07-10')
+    const rejectedBody = await afterRejected.json() as {
+      periods: Array<{ notes: Array<{ noteId: string }> }>
+    }
+    expect(rejectedBody.periods[1].notes.map((note) => note.noteId))
+      .toEqual([noteId])
+  })
+
   it('atomically adds a Task with its dependent Note and nests it in every applicable Daily Plan', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(
@@ -2317,7 +2477,7 @@ describe('Unified Direct Change API', () => {
       { ...note, sourceId: '32111111-1111-4111-8111-111111111114', schoolDate: '2027-04-01' },
       { ...note, sourceId: '32111111-1111-4111-8111-111111111115', targetScopeType: undefined },
       { ...note, sourceId: '32111111-1111-4111-8111-111111111116', changeKind: 'update' },
-      { ...note, sourceId: '32111111-1111-4111-8111-111111111117', periodNumber: 1 },
+      { ...note, sourceId: '32111111-1111-4111-8111-111111111117', periodNumber: 8 },
     ]
     for (const invalidNote of invalidNotes) {
       expect((await addDirectChanges(env, cookie, [invalidNote])).status)

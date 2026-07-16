@@ -14,8 +14,11 @@ export function buildVisibleNoteList(
   noteDrafts: readonly (NoteDraft & { conflicted?: boolean })[],
   selectedSchoolDate: string,
 ): VisibleNoteListItem[] {
+  const generalNoteDrafts = noteDrafts.filter(
+    (draft) => draft.relatedTaskItemId == null && draft.periodNumber == null,
+  )
   const replacementByNoteId = new Map(
-    noteDrafts
+    generalNoteDrafts
       .filter((draft) => draft.changeKind !== 'add')
       .map((draft) => [draft.sharedInformationItemId, draft] as const),
   )
@@ -27,12 +30,12 @@ export function buildVisibleNoteList(
         : { type: 'active', note }
     })
   const activeIds = new Set(activeNotes.map((note) => note.noteId))
-  const orphanedChanges = noteDrafts.filter(
+  const orphanedChanges = generalNoteDrafts.filter(
     (draft) =>
       draft.changeKind !== 'add' &&
       !activeIds.has(draft.sharedInformationItemId),
   )
-  const additions = [...noteDrafts]
+  const additions = [...generalNoteDrafts]
     .filter((draft) => draft.changeKind === 'add')
     .reverse()
   const datedAdditions = additions
@@ -92,4 +95,58 @@ export function buildVisibleTaskNoteList(
       : { type: 'active', note }
   })
   return [...additions, ...orphanedChanges, ...projectedActive]
+}
+
+const dailyLessonScopeOrder = [
+  'grade',
+  'class',
+  'track',
+  'student',
+] as const
+
+export function buildVisibleDailyLessonNoteList(
+  activeNotes: readonly DailyPlanNoteForCache[],
+  noteDrafts: readonly (NoteDraft & { conflicted?: boolean })[],
+  schoolDate: string,
+  periodNumber: number,
+  targetScopeType?: NoteDraft['targetScopeType'],
+): VisibleNoteListItem[] {
+  const matchingActive = activeNotes.filter((note) =>
+    note.relatedContext?.type === 'daily-lesson' &&
+    note.relatedContext.schoolDate === schoolDate &&
+    note.relatedContext.periodNumber === periodNumber &&
+    (targetScopeType === undefined || note.targetScopeType === targetScopeType))
+  const matchingDrafts = noteDrafts.filter((draft) =>
+    draft.schoolDate === schoolDate &&
+    draft.periodNumber === periodNumber &&
+    (targetScopeType === undefined || draft.targetScopeType === targetScopeType))
+  const replacementByNoteId = new Map(
+    matchingDrafts
+      .filter((draft) => draft.changeKind !== 'add')
+      .map((draft) => [draft.sharedInformationItemId, draft] as const),
+  )
+  const activeIds = new Set(matchingActive.map((note) => note.noteId))
+
+  return dailyLessonScopeOrder.flatMap((scope) => {
+    if (targetScopeType !== undefined && scope !== targetScopeType) return []
+    const additions = [...matchingDrafts]
+      .filter((draft) =>
+        draft.targetScopeType === scope && draft.changeKind === 'add')
+      .reverse()
+      .map((draft): VisibleNoteListItem => ({ type: 'draft', draft }))
+    const orphanedChanges = matchingDrafts
+      .filter((draft) =>
+        draft.targetScopeType === scope && draft.changeKind !== 'add' &&
+        !activeIds.has(draft.sharedInformationItemId))
+      .map((draft): VisibleNoteListItem => ({ type: 'draft', draft }))
+    const projectedActive = matchingActive
+      .filter((note) => note.targetScopeType === scope)
+      .map((note): VisibleNoteListItem => {
+        const replacement = replacementByNoteId.get(note.noteId)
+        return replacement
+          ? { type: 'draft', draft: replacement, activeNote: note }
+          : { type: 'active', note }
+      })
+    return [...additions, ...orphanedChanges, ...projectedActive]
+  })
 }

@@ -62,6 +62,73 @@ function layerState(
 }
 
 describe('Shared Information editor client', () => {
+  it('saves zero or one Timetable Change and zero or one Daily Lesson Note from one dialog', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000001',
+      '33000000-0000-4000-8000-000000000002',
+      '33000000-0000-4000-8000-000000000003',
+    ]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+    })
+
+    expect(editor.saveDailyLessonDialogDraft({
+      targetScopeType: 'track',
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: null,
+      noteBody: '   ',
+    })).toEqual({ status: 'empty' })
+    expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
+
+    expect(editor.saveDailyLessonDialogDraft({
+      targetScopeType: 'track',
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: null,
+      noteBody: '  空欄でも残るノート  ',
+    })).toMatchObject({ status: 'saved', savedNote: true, savedTimetable: false })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 1,
+      drafts: [],
+      noteDrafts: [{
+        sourceId: '33000000-0000-4000-8000-000000000001',
+        changeKind: 'add',
+        body: '空欄でも残るノート',
+        schoolDate: '2026-07-10',
+        periodNumber: 2,
+        targetScopeType: 'track',
+      }],
+    })
+
+    expect(editor.saveDailyLessonDialogDraft({
+      targetScopeType: 'class',
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+      noteBody: '休講の案内',
+    })).toMatchObject({ status: 'saved', savedNote: true, savedTimetable: true })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 3,
+      drafts: [{
+        sourceId: '33000000-0000-4000-8000-000000000002',
+        targetScopeType: 'class',
+        changeKind: 'add',
+        replacement: { type: 'cancelled' },
+      }],
+      noteDrafts: [
+        expect.anything(),
+        expect.objectContaining({
+          sourceId: '33000000-0000-4000-8000-000000000003',
+          body: '休講の案内',
+          periodNumber: 2,
+          targetScopeType: 'class',
+        }),
+      ],
+    })
+  })
+
   it('coexists Note, Task, and Timetable Change drafts in one submitted batch', async () => {
     const ids = [
       '33000000-0000-4000-8000-000000000101',

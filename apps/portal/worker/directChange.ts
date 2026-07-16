@@ -461,6 +461,7 @@ function parseNoteOperation({
   now: number
 }): DirectNoteOperation | null {
   const hasRelatedTask = candidate.relatedTaskItemId !== undefined
+  const hasDailyLesson = candidate.periodNumber !== undefined
   if (
     !Object.keys(candidate).every((key) => noteDraftKeys.has(key)) ||
     (changeKind !== 'add' && changeKind !== 'update' && changeKind !== 'remove') ||
@@ -479,13 +480,20 @@ function parseNoteOperation({
       ? hasRelatedTask
         ? typeof candidate.relatedTaskItemId !== 'string' ||
           !uuidPattern.test(candidate.relatedTaskItemId) ||
-          candidate.schoolDate !== undefined
+          candidate.schoolDate !== undefined ||
+          candidate.periodNumber !== undefined
         : candidate.schoolDate !== null &&
           (typeof candidate.schoolDate !== 'string' ||
             !isValidSchoolDate(candidate.schoolDate) ||
             candidate.schoolDate < schoolYear.startsOn ||
-            candidate.schoolDate > schoolYear.endsOn)
+            candidate.schoolDate > schoolYear.endsOn) ||
+          (hasDailyLesson &&
+            (candidate.schoolDate === null ||
+              !Number.isInteger(candidate.periodNumber) ||
+              Number(candidate.periodNumber) < 1 ||
+              Number(candidate.periodNumber) > 7))
       : candidate.schoolDate !== undefined ||
+        candidate.periodNumber !== undefined ||
         candidate.relatedTaskItemId !== undefined) ||
     (changeKind === 'remove'
       ? candidate.body !== undefined
@@ -521,6 +529,9 @@ function parseNoteOperation({
         ...common,
         changeKind,
         schoolDate: hasRelatedTask ? null : candidate.schoolDate as string | null,
+        periodNumber: hasRelatedTask || !hasDailyLesson
+          ? null
+          : Number(candidate.periodNumber),
         ...(hasRelatedTask
           ? { relatedTaskItemId: candidate.relatedTaskItemId as string }
           : {}),
@@ -543,6 +554,7 @@ const noteDraftKeys = new Set([
   'expectedLatestChangeId',
   'targetScopeType',
   'schoolDate',
+  'periodNumber',
   'relatedTaskItemId',
   'body',
 ])

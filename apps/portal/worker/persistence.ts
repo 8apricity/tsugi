@@ -238,6 +238,7 @@ export type ActiveNote = {
   latestChangeId: string
   targetScope: TargetScope
   schoolDate: string | null
+  periodNumber: number | null
   relatedTaskItemId?: string
   body: string
   changedByStudentAccountId: string
@@ -254,6 +255,7 @@ type DirectNoteOperationBase = Pick<
 export type DirectNoteOperation =
   | (DirectNoteOperationBase & Pick<ActiveNote, 'schoolDate' | 'body' | 'createdAt'> & {
       changeKind: 'add'
+      periodNumber?: number | null
       relatedTaskItemId?: string
       expectedLatestChangeId?: never
     })
@@ -1138,7 +1140,7 @@ export class InMemoryPersistenceAdapters
       if (change.kind === 'note') {
         this.directNoteOperations.set(change.sourceId, change)
         if (change.changeKind === 'add') {
-          this.activeNotes.push(change)
+          this.activeNotes.push({ ...change, periodNumber: change.periodNumber ?? null })
         } else if (change.changeKind === 'update') {
           const index = this.activeNotes.findIndex(
             (candidate) =>
@@ -1597,6 +1599,7 @@ type ActiveNoteRow = {
   student_account_id: string | null
   body: string
   related_school_date: string | null
+  related_period_number: number | null
   related_task_item_id: string | null
   changed_by_student_account_id: string
   changed_at: string
@@ -2491,7 +2494,7 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, note.body, note.related_school_date,
-                note.related_task_item_id,
+                note.related_period_number, note.related_task_item_id,
                 latest.changed_by_student_account_id, latest.changed_at,
                 i.created_at
          from shared_information_items i
@@ -2503,7 +2506,7 @@ export class D1PersistenceAdapters
            on note.note_snapshot_id = i.current_note_snapshot_id
          where i.kind = 'note' and i.removed_at is null
            and (note.related_context_type in ('none', 'task')
-             or (note.related_context_type = 'school_date'
+             or (note.related_context_type in ('school_date', 'daily_lesson')
                and note.related_school_date = ?))
            and (select count(*) from target_scope_parts scope_part_count
                 where scope_part_count.target_scope_id = s.target_scope_id) = 1
@@ -2756,7 +2759,7 @@ export class D1PersistenceAdapters
             statements.push(
               this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.targetScope.schoolYear, createdAt),
               this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScope.type, part.grade, part.classId, part.trackId, part.studentAccountId),
-              this.db.prepare(`insert into note_snapshots (note_snapshot_id, body, related_context_type, related_school_date, related_period_number, related_task_item_id, created_at) values (?, ?, ?, ?, null, null, ?)`).bind(snapshotId, change.body, change.schoolDate === null ? 'none' : 'school_date', change.schoolDate, createdAt),
+              this.db.prepare(`insert into note_snapshots (note_snapshot_id, body, related_context_type, related_school_date, related_period_number, related_task_item_id, created_at) values (?, ?, ?, ?, ?, null, ?)`).bind(snapshotId, change.body, change.schoolDate === null ? 'none' : change.periodNumber == null ? 'school_date' : 'daily_lesson', change.schoolDate, change.periodNumber ?? null, createdAt),
               this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_task_snapshot_id, current_timetable_change_snapshot_id, current_note_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'note', ?, null, null, null, ?, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
               this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, task_snapshot_id, timetable_change_snapshot_id, note_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, null, null, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
               this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
@@ -3556,7 +3559,7 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, note.body, note.related_school_date,
-                note.related_task_item_id,
+                note.related_period_number, note.related_task_item_id,
                 c.changed_by_student_account_id, c.changed_at, i.created_at
          from shared_information_changes c
          join shared_information_items i
@@ -3581,7 +3584,7 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, note.body, note.related_school_date,
-                note.related_task_item_id,
+                note.related_period_number, note.related_task_item_id,
                 latest.changed_by_student_account_id, latest.changed_at,
                 i.created_at
          from shared_information_items i
@@ -4077,6 +4080,7 @@ function mapActiveNoteRow(row: ActiveNoteRow): ActiveNote {
     latestChangeId: row.shared_information_change_id,
     targetScope: mapTargetScopeRow(row),
     schoolDate: row.related_school_date,
+    periodNumber: row.related_period_number,
     ...(row.related_task_item_id
       ? { relatedTaskItemId: row.related_task_item_id }
       : {}),
@@ -4119,6 +4123,7 @@ function mapStoredDirectNoteOperation(
     ...common,
     changeKind: 'add',
     schoolDate: row.related_school_date,
+    periodNumber: row.related_period_number,
     ...(row.related_task_item_id
       ? { relatedTaskItemId: row.related_task_item_id }
       : {}),
@@ -4387,6 +4392,7 @@ function sameDirectChangeOperationPayload(
     if (!sameBase || left.changeKind !== right.changeKind) return false
     if (left.changeKind === 'add' && right.changeKind === 'add') {
       return left.schoolDate === right.schoolDate &&
+        left.periodNumber === right.periodNumber &&
         left.relatedTaskItemId === right.relatedTaskItemId &&
         left.body === right.body
     }

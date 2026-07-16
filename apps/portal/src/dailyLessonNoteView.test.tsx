@@ -1,0 +1,35 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
+import { DailyLessonNoteList } from './dailyLessonNoteView'
+
+describe('Daily Lesson Note view', () => {
+  it('renders scope badges and lifecycle actions without attribution or time', () => {
+    const html = renderToStaticMarkup(<DailyLessonNoteList notes={[
+      {
+        noteId: 'grade-note',
+        body: '学年のノート',
+        targetScopeLabel: '2年',
+        onOpenHistory: () => undefined,
+      },
+      {
+        noteId: 'track-draft',
+        body: '文科の下書き',
+        targetScopeLabel: '文科',
+        draft: true,
+        changeKind: 'remove',
+        conflicted: true,
+        onCancelDraft: () => undefined,
+      },
+    ]} />)
+
+    expect(html.indexOf('学年のノート')).toBeLessThan(
+      html.indexOf('文科の下書き'),
+    )
+    expect(html).toContain('2年')
+    expect(html).toContain('文科')
+    expect(html).toContain('削除予定・要確認')
+    expect(html).toContain('編集履歴')
+    expect(html).not.toContain('<time')
+    expect(html).not.toContain('投稿者')
+  })
+})

@@ -95,6 +95,7 @@ export type TaskDraft = TaskDraftBase & (
 export type NewNoteDraftForm = {
   body: string
   schoolDate: string | null
+  periodNumber?: number | null
   targetScopeType: TargetScopeType | null
 }
 
@@ -103,6 +104,7 @@ export type ActiveNoteForEditing = {
   latestChangeId: string
   body: string
   schoolDate: string | null
+  periodNumber?: number | null
   targetScopeType: TargetScopeType
   relatedTaskItemId?: string
 }
@@ -112,6 +114,7 @@ type NoteDraftBase = {
   sourceId: string
   body: string
   schoolDate: string | null
+  periodNumber?: number | null
   targetScopeType: TargetScopeType
   relatedTaskItemId?: string
 }
@@ -138,7 +141,21 @@ export type TimetableLayerState = {
     lessonName: string
   } | null
   layers: Array<
-    | { targetScopeType: TargetScopeType; state: 'unchanged' }
+    | {
+        targetScopeType: TargetScopeType
+        state: 'unchanged'
+        notes?: Array<{
+          noteId: string
+          latestChangeId: string
+          body: string
+          targetScopeType: TargetScopeType
+          relatedContext: {
+            type: 'daily-lesson'
+            schoolDate: string
+            periodNumber: number
+          }
+        }>
+      }
     | {
         targetScopeType: TargetScopeType
         state: 'active'
@@ -146,6 +163,17 @@ export type TimetableLayerState = {
         latestChangeId: string
         replacement: TimetableReplacement
         changedAt: number
+        notes?: Array<{
+          noteId: string
+          latestChangeId: string
+          body: string
+          targetScopeType: TargetScopeType
+          relatedContext: {
+            type: 'daily-lesson'
+            schoolDate: string
+            periodNumber: number
+          }
+        }>
       }
   >
   finalDailyLesson: {
@@ -214,6 +242,7 @@ export type NoteSubmissionChange = NoteSubmissionChangeBase & (
       changeKind: 'add'
       body: string
       schoolDate?: string | null
+      periodNumber?: number
       relatedTaskItemId?: string
     }
   | {
@@ -595,6 +624,116 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
+    saveDailyLessonDialogDraft({
+      targetScopeType,
+      schoolDate,
+      periodNumber,
+      replacement,
+      noteBody,
+    }: {
+      targetScopeType: TargetScopeType
+      schoolDate: string
+      periodNumber: number
+      replacement: TimetableReplacement | null
+      noteBody: string
+    }) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(schoolDate) ||
+        !Number.isInteger(periodNumber) ||
+        periodNumber < 1 ||
+        periodNumber > 7
+      ) return { status: 'invalid-note' as const }
+
+      const trimmedNoteBody = noteBody.trim()
+      const noteBodyValue = trimmedNoteBody.length === 0
+        ? null
+        : normalizeNoteBody(noteBody)
+      if (trimmedNoteBody.length > 0 && noteBodyValue === null) {
+        return { status: 'invalid-note' as const }
+      }
+      if (replacement === null && noteBodyValue === null) {
+        return { status: 'empty' as const }
+      }
+
+      const keyInput = {
+        targetScopeType,
+        changeDate: schoolDate,
+        periodNumber,
+      }
+      const key = draftKey(keyInput)
+      const existing = drafts.find((draft) => draftKey(draft) === key)
+      const serverLayer = loadedServerLayers.get(key)
+      const serverReplacement = existing?.serverReplacement ??
+        (serverLayer?.state === 'active' ? serverLayer.replacement : undefined)
+      const timetableNoop = replacement !== null && serverReplacement !== undefined &&
+        timetableReplacementsEqual(replacement, serverReplacement)
+      const willWriteTimetable = replacement !== null && !timetableNoop
+      const nextCount = totalDraftCount() -
+        (timetableNoop && existing ? 1 : 0) +
+        (!existing && willWriteTimetable ? 1 : 0) +
+        (noteBodyValue === null ? 0 : 1)
+      if (nextCount > maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+
+      let timetableSourceId: string | undefined
+      if (replacement !== null) {
+        if (timetableNoop) {
+          if (removeDraftByKey(key)) {
+            conflictKeys.delete(key)
+            stickyConflictKeys.delete(key)
+          }
+        } else {
+          timetableSourceId = existing?.sourceId ?? createId()
+          const operation = existing
+            ? existing.changeKind === 'update' || existing.changeKind === 'remove'
+              ? {
+                  changeKind: 'update' as const,
+                  sharedInformationItemId: existing.sharedInformationItemId,
+                  expectedLatestChangeId: existing.expectedLatestChangeId,
+                  serverReplacement: existing.serverReplacement,
+                }
+              : { changeKind: 'add' as const }
+            : serverLayer?.state === 'active'
+              ? {
+                  changeKind: 'update' as const,
+                  sharedInformationItemId: serverLayer.sharedInformationItemId,
+                  expectedLatestChangeId: serverLayer.latestChangeId,
+                  serverReplacement: serverLayer.replacement,
+                }
+              : { changeKind: 'add' as const }
+          drafts = drafts.filter((draft) => draftKey(draft) !== key)
+          drafts.push({ ...keyInput, replacement, ...operation, sourceId: timetableSourceId })
+          if (serverLayer) reconciledKeys.add(key)
+        }
+      }
+
+      let noteSourceId: string | undefined
+      if (noteBodyValue !== null) {
+        noteSourceId = createId()
+        noteDrafts.push({
+          kind: 'note',
+          changeKind: 'add',
+          sourceId: noteSourceId,
+          body: noteBodyValue,
+          schoolDate,
+          periodNumber,
+          targetScopeType,
+        })
+      }
+      lastTargetScopeType = targetScopeType
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return {
+        status: 'saved' as const,
+        savedTimetable: willWriteTimetable,
+        savedNote: noteBodyValue !== null,
+        ...(timetableSourceId ? { timetableSourceId } : {}),
+        ...(noteSourceId ? { noteSourceId } : {}),
+      }
+    },
     saveTaskDraft(input: NewTaskDraftForm) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const snapshot = normalizeTaskSnapshot(input)
@@ -624,6 +763,10 @@ export function createSharedInformationEditorClient({
         !input.targetScopeType ||
         (input.schoolDate !== null &&
           !/^\d{4}-\d{2}-\d{2}$/.test(input.schoolDate)) ||
+        (input.periodNumber != null &&
+          (input.schoolDate === null ||
+            !Number.isInteger(input.periodNumber) ||
+            input.periodNumber < 1 || input.periodNumber > 7)) ||
         body === null
       ) {
         return { status: 'invalid-note' as const }
@@ -638,6 +781,9 @@ export function createSharedInformationEditorClient({
         sourceId,
         body,
         schoolDate: input.schoolDate,
+        ...(input.periodNumber == null
+          ? {}
+          : { periodNumber: input.periodNumber }),
         targetScopeType: input.targetScopeType,
       })
       lastTargetScopeType = input.targetScopeType
@@ -696,7 +842,11 @@ export function createSharedInformationEditorClient({
         if (
           !input.targetScopeType ||
           (input.schoolDate !== null &&
-            !/^\d{4}-\d{2}-\d{2}$/.test(input.schoolDate))
+            !/^\d{4}-\d{2}-\d{2}$/.test(input.schoolDate)) ||
+          (input.periodNumber != null &&
+            (input.schoolDate === null ||
+              !Number.isInteger(input.periodNumber) ||
+              input.periodNumber < 1 || input.periodNumber > 7))
         ) return { status: 'invalid-note' as const }
         noteDrafts = noteDrafts.map((draft) =>
           draft.sourceId === sourceId
@@ -704,6 +854,7 @@ export function createSharedInformationEditorClient({
                 ...draft,
                 body,
                 schoolDate: input.schoolDate,
+                periodNumber: input.periodNumber ?? draft.periodNumber,
                 targetScopeType: input.targetScopeType!,
               }
             : draft,
@@ -749,6 +900,7 @@ export function createSharedInformationEditorClient({
         expectedLatestChangeId: activeNote.latestChangeId,
         body,
         schoolDate: activeNote.schoolDate,
+        periodNumber: activeNote.periodNumber,
         targetScopeType: activeNote.targetScopeType,
         ...(activeNote.relatedTaskItemId
           ? { relatedTaskItemId: activeNote.relatedTaskItemId }
@@ -780,6 +932,7 @@ export function createSharedInformationEditorClient({
         expectedLatestChangeId: activeNote.latestChangeId,
         body: activeNote.body,
         schoolDate: activeNote.schoolDate,
+        periodNumber: activeNote.periodNumber,
         targetScopeType: activeNote.targetScopeType,
         ...(activeNote.relatedTaskItemId
           ? { relatedTaskItemId: activeNote.relatedTaskItemId }
@@ -1034,6 +1187,7 @@ export function createSharedInformationEditorClient({
           return {
             targetScopeType: layer.targetScopeType,
             state: 'unchanged' as const,
+            notes: layer.notes,
             desired: true,
             removalPlanned: true,
             conflicted: conflictKeys.has(draftKey(draft)),
@@ -1338,7 +1492,12 @@ function toNoteSubmissionChange(draft: NoteDraft): NoteSubmissionChange {
         changeKind: 'add',
         ...(draft.relatedTaskItemId
           ? { relatedTaskItemId: draft.relatedTaskItemId }
-          : { schoolDate: draft.schoolDate }),
+          : {
+              schoolDate: draft.schoolDate,
+              ...(draft.periodNumber == null
+                ? {}
+                : { periodNumber: draft.periodNumber }),
+            }),
         body: draft.body,
       }
 }
@@ -1583,6 +1742,10 @@ function restoreNoteDraft(value: unknown): NoteDraft | null {
     body === null ||
     (draft.relatedTaskItemId !== undefined &&
       typeof draft.relatedTaskItemId !== 'string') ||
+    (draft.periodNumber !== undefined && draft.periodNumber !== null &&
+      (!Number.isInteger(draft.periodNumber) ||
+        Number(draft.periodNumber) < 1 || Number(draft.periodNumber) > 7)) ||
+    (draft.periodNumber != null && draft.schoolDate === null) ||
     (draft.schoolDate !== null &&
       (typeof draft.schoolDate !== 'string' ||
         !/^\d{4}-\d{2}-\d{2}$/.test(draft.schoolDate))) ||
@@ -1593,6 +1756,9 @@ function restoreNoteDraft(value: unknown): NoteDraft | null {
     sourceId: draft.sourceId as string,
     body,
     schoolDate: draft.schoolDate as string | null,
+    ...(draft.periodNumber == null
+      ? {}
+      : { periodNumber: Number(draft.periodNumber) }),
     targetScopeType: draft.targetScopeType,
     ...(typeof draft.relatedTaskItemId === 'string'
       ? { relatedTaskItemId: draft.relatedTaskItemId }

@@ -340,7 +340,8 @@ describe('D1 Direct Timetable Change persistence', () => {
         schoolYear: 2026,
         trackId: 'task-track-1',
       },
-      schoolDate: null,
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
       body: '集合場所は視聴覚室です。\n上履きを持参してください。',
       changedByStudentAccountId: 'task-student-1',
       changedAt: Date.parse('2026-07-09T04:00:00.000Z'),
@@ -371,10 +372,13 @@ describe('D1 Direct Timetable Change persistence', () => {
       expect.objectContaining({
         body: '集合場所は視聴覚室です。\n上履きを持参してください。',
         schoolDate: note.schoolDate,
+        periodNumber: note.periodNumber,
       }),
     ])
     expect(database.prepare(
-      `select i.kind, note.body, change_row.note_snapshot_id
+      `select i.kind, note.body, note.related_context_type,
+              note.related_school_date, note.related_period_number,
+              change_row.note_snapshot_id
        from shared_information_items i
        join note_snapshots note
          on note.note_snapshot_id = i.current_note_snapshot_id
@@ -384,6 +388,9 @@ describe('D1 Direct Timetable Change persistence', () => {
     ).get(note.sharedInformationItemId)).toEqual({
       kind: 'note',
       body: note.body,
+      related_context_type: 'daily_lesson',
+      related_school_date: note.schoolDate,
+      related_period_number: note.periodNumber,
       note_snapshot_id: `${note.sourceId}:snapshot`,
     })
     await expect(
@@ -416,6 +423,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       expect.objectContaining({
         body: noteUpdate.body,
         schoolDate: note.schoolDate,
+        periodNumber: note.periodNumber,
         latestChangeId: noteUpdate.latestChangeId,
       }),
     ])

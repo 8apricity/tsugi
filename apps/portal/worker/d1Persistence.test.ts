@@ -340,7 +340,7 @@ describe('D1 Direct Timetable Change persistence', () => {
         schoolYear: 2026,
         trackId: 'task-track-1',
       },
-      schoolDate: '2026-07-10',
+      schoolDate: null,
       body: '集合場所は視聴覚室です。\n上履きを持参してください。',
       changedByStudentAccountId: 'task-student-1',
       changedAt: Date.parse('2026-07-09T04:00:00.000Z'),
@@ -370,7 +370,7 @@ describe('D1 Direct Timetable Change persistence', () => {
     ).resolves.toEqual([
       expect.objectContaining({
         body: '集合場所は視聴覚室です。\n上履きを持参してください。',
-        schoolDate: '2026-07-10',
+        schoolDate: note.schoolDate,
       }),
     ])
     expect(database.prepare(
@@ -394,6 +394,66 @@ describe('D1 Direct Timetable Change persistence', () => {
       status: 'idempotency-conflict',
       conflictingSourceIds: [note.sourceId],
     })
+
+    const noteUpdate = {
+      kind: 'note',
+      changeKind: 'update',
+      sourceId: '33999999-9999-4999-8999-999999999991',
+      sharedInformationItemId: note.sharedInformationItemId,
+      latestChangeId: '33999999-9999-4999-8999-999999999991:change',
+      expectedLatestChangeId: note.latestChangeId,
+      targetScope: note.targetScope,
+      body: '更新後の全文',
+      changedByStudentAccountId: note.changedByStudentAccountId,
+      changedAt: Date.parse('2026-07-09T05:00:00.000Z'),
+    } satisfies DirectChangeOperation
+    await expect(
+      adapters.directChange.commitDirectChanges([noteUpdate]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        body: noteUpdate.body,
+        schoolDate: note.schoolDate,
+        latestChangeId: noteUpdate.latestChangeId,
+      }),
+    ])
+
+    const noteRemove = {
+      kind: 'note',
+      changeKind: 'remove',
+      sourceId: '33999999-9999-4999-8999-999999999992',
+      sharedInformationItemId: note.sharedInformationItemId,
+      latestChangeId: '33999999-9999-4999-8999-999999999992:change',
+      expectedLatestChangeId: noteUpdate.latestChangeId,
+      targetScope: note.targetScope,
+      changedByStudentAccountId: note.changedByStudentAccountId,
+      changedAt: Date.parse('2026-07-09T06:00:00.000Z'),
+      removalReason: 'student',
+    } satisfies DirectChangeOperation
+    await expect(
+      adapters.directChange.commitDirectChanges([noteRemove]),
+    ).resolves.toMatchObject({ status: 'applied' })
+    await expect(
+      adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
+    ).resolves.toEqual([])
+    await expect(
+      adapters.noteEditHistory.listNoteEditHistory(note.sharedInformationItemId),
+    ).resolves.toEqual(expect.arrayContaining([
+      { changeKind: 'add', snapshot: { body: note.body } },
+      {
+        changeKind: 'update',
+        precedingChangeId: note.latestChangeId,
+        snapshot: { body: noteUpdate.body },
+      },
+      {
+        changeKind: 'remove',
+        precedingChangeId: noteUpdate.latestChangeId,
+        snapshot: null,
+        removalReason: 'student',
+      },
+    ].map((entry) => expect.objectContaining(entry))))
     await expect(
       adapters.dailyPlan.listActiveTasksForTargetScope(
         {

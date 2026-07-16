@@ -168,6 +168,98 @@ describe('Shared Information editor client', () => {
     ])
   })
 
+  it('persists unrelated Note update/remove drafts and reconciles stale state', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000111',
+      '33000000-0000-4000-8000-000000000112',
+      '33000000-0000-4000-8000-000000000113',
+      '33000000-0000-4000-8000-000000000114',
+    ]
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({
+      storage,
+      createId: () => ids.shift()!,
+    })
+    expect(editor.saveNoteDraft({
+      body: '関連先なし',
+      schoolDate: null,
+      targetScopeType: 'track',
+    })).toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot().noteDrafts).toMatchObject([
+      { changeKind: 'add', schoolDate: null, body: '関連先なし' },
+    ])
+    expect(editor.updateNoteDraft(
+      '33000000-0000-4000-8000-000000000111',
+      { body: '編集した下書き', schoolDate: null, targetScopeType: 'class' },
+    )).toEqual({ status: 'saved' })
+    expect(editor.getSnapshot().noteDrafts).toMatchObject([{
+      sourceId: '33000000-0000-4000-8000-000000000111',
+      body: '編集した下書き',
+      targetScopeType: 'class',
+    }])
+    editor.removeNoteDraft('33000000-0000-4000-8000-000000000111')
+
+    const active = {
+      noteId: '33000000-0000-4000-8000-000000000199',
+      latestChangeId: 'note-change-1',
+      body: '変更前\n全文',
+      schoolDate: null,
+      targetScopeType: 'track' as const,
+    }
+    expect(editor.saveNoteUpdateDraft(active, '  変更後\n全文  '))
+      .toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot().noteDrafts).toMatchObject([{
+      changeKind: 'update',
+      sharedInformationItemId: active.noteId,
+      expectedLatestChangeId: active.latestChangeId,
+      body: '変更後\n全文',
+      schoolDate: null,
+    }])
+    expect(editor.saveNoteUpdateDraft(active, active.body))
+      .toEqual({ status: 'removed-noop' })
+
+    expect(editor.saveNoteUpdateDraft(active, '自動で変えない本文'))
+      .toMatchObject({ status: 'saved' })
+    const restoredUpdate = createTimetableEditorClient({ storage })
+    restoredUpdate.reconcileActiveNotes([{
+      ...active,
+      latestChangeId: 'note-change-2',
+      body: 'サーバー側の本文',
+    }])
+    expect(restoredUpdate.getSnapshot()).toMatchObject({
+      conflictCount: 1,
+      noteDrafts: [{ body: '自動で変えない本文', conflicted: true }],
+    })
+    restoredUpdate.removeNoteDraft(
+      '33000000-0000-4000-8000-000000000113',
+    )
+
+    const freshActive = {
+      ...active,
+      latestChangeId: 'note-change-2',
+      body: 'サーバー側の本文',
+    }
+    expect(restoredUpdate.saveNoteRemoveDraft(freshActive))
+      .toMatchObject({ status: 'saved' })
+    expect(createTimetableEditorClient({ storage }).getSnapshot().noteDrafts)
+      .toMatchObject([{
+        changeKind: 'remove',
+        body: freshActive.body,
+        schoolDate: null,
+        sharedInformationItemId: active.noteId,
+      }])
+
+    const restored = createTimetableEditorClient({ storage })
+    restored.reconcileActiveNotes([{
+      ...freshActive,
+      latestChangeId: 'note-change-3',
+    }])
+    expect(restored.getSnapshot()).toMatchObject({
+      conflictCount: 1,
+      noteDrafts: [{ changeKind: 'remove', conflicted: true }],
+    })
+  })
+
   it('retains and marks a Task draft after an idempotency conflict', async () => {
     const sourceId = '33000000-0000-4000-8000-000000000201'
     const storage = memoryStorage()

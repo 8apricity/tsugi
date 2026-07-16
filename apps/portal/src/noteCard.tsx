@@ -47,15 +47,23 @@ export function NoteCard({
   body,
   targetScopeLabel,
   draft = false,
+  changeKind = 'add',
   conflicted = false,
   onCancelDraft,
+  onEdit,
+  onRemove,
+  onOpenHistory,
 }: {
   noteId: string
   body: string
   targetScopeLabel: string
   draft?: boolean
+  changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean
   onCancelDraft?: () => void
+  onEdit?: () => void
+  onRemove?: () => void
+  onOpenHistory?: () => void
 }) {
   const generatedId = useId()
   const bodyId = `note-body-${generatedId.replace(/:/g, '')}`
@@ -91,16 +99,40 @@ export function NoteCard({
       <div className="note-meta">
         <span className="task-scope-badge">{targetScopeLabel}</span>
         {draft ? (
-          <small>{conflicted ? 'ほかの変更あり' : '下書き'}</small>
+          <small>
+            {changeKind === 'remove' ? '削除予定' : '下書き'}
+            {conflicted ? '・要確認' : ''}
+          </small>
         ) : null}
         {draft && onCancelDraft ? (
           <button
             className="button-link"
             type="button"
-            aria-label="ノートの下書きを取り消す"
+            aria-label={changeKind === 'remove'
+              ? 'ノートの削除を取り消す'
+              : 'ノートの下書きを取り消す'}
             onClick={onCancelDraft}
           >
-            取り消す
+            {changeKind === 'remove' ? '削除を取り消す' : '取り消す'}
+          </button>
+        ) : null}
+        {onEdit ? (
+          <button className="button-link" type="button" onClick={onEdit}>
+            編集
+          </button>
+        ) : null}
+        {!draft && onRemove ? (
+          <button className="button-link" type="button" onClick={onRemove}>
+            削除
+          </button>
+        ) : null}
+        {onOpenHistory ? (
+          <button
+            className="button-link"
+            type="button"
+            onClick={onOpenHistory}
+          >
+            編集履歴
           </button>
         ) : null}
       </div>

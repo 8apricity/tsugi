@@ -34,6 +34,7 @@ type DailyPlanTask = {
 
 type DailyPlanNote = {
   noteId: string
+  latestChangeId: string
   body: string
   targetScopeType: 'grade' | 'class' | 'track' | 'student'
   relatedContext:
@@ -423,11 +424,14 @@ function buildReadyDailyPlan({
     })),
     notes: notes.map((note) => ({
       noteId: note.sharedInformationItemId,
+      latestChangeId: note.latestChangeId,
       body: note.body,
-      relatedContext: {
-        type: 'school-date',
-        schoolDate: note.schoolDate,
-      },
+      relatedContext: note.schoolDate === null
+        ? null
+        : {
+            type: 'school-date',
+            schoolDate: note.schoolDate,
+          },
       targetScopeType: note.targetScope.type,
     })),
   }

@@ -27,6 +27,7 @@ import {
 } from "./timetableChangeHistory";
 import { readReferenceTasks } from "./referenceTasks";
 import { readTaskEditHistory } from "./taskEditHistory";
+import { readNoteEditHistory } from "./noteEditHistory";
 
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
@@ -553,6 +554,32 @@ export default {
         studentAccountStore: persistence.studentAccount,
         dailyPlanStore: persistence.dailyPlan,
         historyStore: persistence.taskEditHistory,
+      });
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "unavailable") {
+        return Response.json(result, { status: 503 });
+      }
+      if (result.status === "not-found") {
+        return new Response(null, { status: 404 });
+      }
+      return Response.json(result);
+    }
+
+    const noteHistoryMatch = url.pathname.match(/^\/api\/notes\/([^/]+)\/history$/);
+    if (noteHistoryMatch && request.method === "GET") {
+      const persistence = await getPersistenceAdapters(env);
+      const result = await readNoteEditHistory({
+        sessionToken: readCookie(request, sessionCookieName),
+        sharedInformationItemId: decodeURIComponent(noteHistoryMatch[1]),
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        dailyPlanStore: persistence.dailyPlan,
+        historyStore: persistence.noteEditHistory,
       });
       if (result.status === "unauthenticated") {
         return Response.json(result, { status: 401 });

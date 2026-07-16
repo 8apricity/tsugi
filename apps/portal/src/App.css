@@ -668,6 +668,30 @@ body.page-scroll-locked {
   width: 100%;
 }
 
+.note-character-count {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--text-muted, #6b7280);
+  text-align: right;
+}
+
+.note-clear-date {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+}
+
+.note-history-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-removal-reason {
+  margin: 0.75rem 0 0;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
 .note-editor-dialog form textarea {
   min-height: 150px;
   resize: vertical;

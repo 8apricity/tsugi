@@ -168,6 +168,149 @@ describe('Shared Information editor client', () => {
     ])
   })
 
+  it('keeps dependent Note drafts attached to stable temporary Task identity', async () => {
+    const taskId = '33000000-0000-4000-8000-000000000121'
+    const noteId = '33000000-0000-4000-8000-000000000122'
+    const storage = memoryStorage()
+    const submitted: unknown[] = []
+    const editor = createTimetableEditorClient({
+      storage,
+      createId: (() => {
+        const ids = [taskId, noteId]
+        return () => ids.shift()!
+      })(),
+      submitDirectTimetableChanges: async (payload) => {
+        submitted.push(payload)
+        return {
+          status: 'remote-conflict',
+          conflictingKeys: [],
+          conflictingSourceIds: [taskId],
+        }
+      },
+    })
+    expect(editor.saveTaskDraft({
+      title: '新規Task', dueDate: null, relatedLessonName: null,
+      targetScopeType: 'track',
+    })).toEqual({ status: 'saved', sourceId: taskId })
+    expect(editor.saveTaskNoteDraft({
+      taskId,
+      targetScopeType: 'track',
+    }, ' Task draftへのノート ')).toEqual({ status: 'saved', sourceId: noteId })
+
+    expect(createTimetableEditorClient({ storage }).getSnapshot())
+      .toMatchObject({
+        draftCount: 2,
+        noteDrafts: [{
+          sourceId: noteId,
+          relatedTaskItemId: taskId,
+          targetScopeType: 'track',
+          body: 'Task draftへのノート',
+        }],
+      })
+    await editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })
+    expect(submitted).toMatchObject([{
+      changes: [
+        { kind: 'task', sourceId: taskId },
+        {
+          kind: 'note', sourceId: noteId, changeKind: 'add',
+          targetScopeType: 'track', relatedTaskItemId: taskId,
+          body: 'Task draftへのノート',
+        },
+      ],
+    }])
+    expect(editor.getSnapshot()).toMatchObject({
+      taskDrafts: [{ sourceId: taskId, conflicted: true }],
+      noteDrafts: [{ sourceId: noteId, conflicted: true }],
+      conflictCount: 2,
+    })
+
+    const cancellable = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: (() => {
+        const ids = [taskId, noteId]
+        return () => ids.shift()!
+      })(),
+    })
+    cancellable.saveTaskDraft({
+      title: '取消Task', dueDate: null, relatedLessonName: null,
+      targetScopeType: 'track',
+    })
+    cancellable.saveTaskNoteDraft({ taskId, targetScopeType: 'track' }, '依存')
+    expect(cancellable.removeTaskDraft(taskId)).toEqual({ status: 'removed' })
+    expect(cancellable.getSnapshot()).toMatchObject({
+      draftCount: 0,
+      taskDrafts: [],
+      noteDrafts: [],
+    })
+
+    const removing = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: (() => {
+        const ids = [
+          '33000000-0000-4000-8000-000000000123',
+          '33000000-0000-4000-8000-000000000124',
+        ]
+        return () => ids.shift()!
+      })(),
+    })
+    removing.saveTaskRemoveDraft({
+      taskId: '33000000-0000-4000-8000-000000000120',
+      latestChangeId: 'task-change',
+      title: '削除予定Task', dueDate: null, relatedLessonName: null,
+      targetScopeType: 'track',
+    })
+    expect(removing.saveTaskNoteDraft({
+      taskId: '33000000-0000-4000-8000-000000000120',
+      targetScopeType: 'track',
+    }, '追加してはいけない')).toEqual({ status: 'invalid-note' })
+  })
+
+  it('keeps dependent active Note drafts conflicted after Task conflict refresh', async () => {
+    const taskDraftSourceId = '33000000-0000-4000-8000-000000000131'
+    const noteDraftSourceId = '33000000-0000-4000-8000-000000000132'
+    const ids = [taskDraftSourceId, noteDraftSourceId]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+      submitDirectTimetableChanges: async () => ({
+        status: 'remote-conflict',
+        conflictingKeys: [],
+        conflictingSourceIds: [taskDraftSourceId],
+      }),
+    })
+    const taskId = '33000000-0000-4000-8000-000000000130'
+    editor.saveTaskUpdateDraft({
+      taskId,
+      latestChangeId: 'task-change-1',
+      title: '元Task', dueDate: null, relatedLessonName: null,
+      targetScopeType: 'track',
+    }, {
+      title: '変更Task', dueDate: null, relatedLessonName: null,
+    })
+    const activeNote = {
+      noteId: '33000000-0000-4000-8000-000000000139',
+      latestChangeId: 'note-change-1',
+      body: '元Note', schoolDate: null, targetScopeType: 'track' as const,
+      relatedTaskItemId: taskId,
+    }
+    editor.saveNoteUpdateDraft(activeNote, '変更Note')
+
+    await editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })
+    editor.reconcileActiveNotes([activeNote])
+
+    expect(editor.getSnapshot()).toMatchObject({
+      taskDrafts: [{ sourceId: taskDraftSourceId, conflicted: true }],
+      noteDrafts: [{ sourceId: noteDraftSourceId, conflicted: true }],
+      conflictCount: 2,
+    })
+  })
+
   it('persists unrelated Note update/remove drafts and reconciles stale state', () => {
     const ids = [
       '33000000-0000-4000-8000-000000000111',

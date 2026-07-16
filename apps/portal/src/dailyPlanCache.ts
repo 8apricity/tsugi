@@ -37,6 +37,7 @@ export type DailyPlanTaskForCache = {
   registeredRelatedLessonNameId?: string;
   targetScopeType: "grade" | "class" | "track" | "student";
   createdAt: number;
+  notes: DailyPlanNoteForCache[];
 };
 
 export type DailyPlanNoteForCache = {
@@ -53,6 +54,10 @@ export type DailyPlanNoteForCache = {
     | {
         type: "school-date";
         schoolDate: string;
+      }
+    | {
+        type: "task";
+        taskId: string;
       }
     | null;
 };

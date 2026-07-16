@@ -238,6 +238,7 @@ export type ActiveNote = {
   latestChangeId: string
   targetScope: TargetScope
   schoolDate: string | null
+  relatedTaskItemId?: string
   body: string
   changedByStudentAccountId: string
   changedAt: number
@@ -253,6 +254,7 @@ type DirectNoteOperationBase = Pick<
 export type DirectNoteOperation =
   | (DirectNoteOperationBase & Pick<ActiveNote, 'schoolDate' | 'body' | 'createdAt'> & {
       changeKind: 'add'
+      relatedTaskItemId?: string
       expectedLatestChangeId?: never
     })
   | (DirectNoteOperationBase & Pick<ActiveNote, 'body'> & {
@@ -439,6 +441,7 @@ export type DirectChangeStore = StudentOperationalContextStore & {
     changes: DirectChangeOperation[],
   ): Promise<
     | { status: 'applied'; changes: DirectChangeOperation[] }
+    | { status: 'invalid-change' }
     | { status: 'conflict'; conflictingSourceIds: string[] }
     | { status: 'idempotency-conflict'; conflictingSourceIds: string[] }
   >
@@ -446,6 +449,7 @@ export type DirectChangeStore = StudentOperationalContextStore & {
     changes: DirectTimetableChangeOperation[],
   ): Promise<
     | { status: 'applied'; changes: DirectTimetableChangeOperation[] }
+    | { status: 'invalid-change' }
     | { status: 'conflict'; conflictingSourceIds: string[] }
     | { status: 'idempotency-conflict'; conflictingSourceIds: string[] }
   >
@@ -970,7 +974,8 @@ export class InMemoryPersistenceAdapters
   ) {
     return this.activeNotes
       .filter((note) =>
-        (note.schoolDate === null || note.schoolDate === schoolDate) &&
+        (note.relatedTaskItemId !== undefined ||
+          note.schoolDate === null || note.schoolDate === schoolDate) &&
         studentAffiliationIncludesTargetScope(affiliation, note.targetScope),
       )
       .sort(compareActiveNotes)
@@ -1028,6 +1033,33 @@ export class InMemoryPersistenceAdapters
       (change): change is Extract<DirectChangeOperation, { kind: 'note' }> =>
         change.kind === 'note',
     )
+    const pendingTaskAdds = pendingTaskChanges.filter(
+      (change) => change.changeKind === 'add',
+    )
+    const pendingTaskRemovals = new Set(
+      pendingTaskChanges
+        .filter((change) => change.changeKind === 'remove')
+        .map((change) => change.sharedInformationItemId),
+    )
+    const invalidTaskNote = pendingNoteChanges.some((change) => {
+      if (change.changeKind !== 'add') {
+        const activeNote = this.activeNotes.find((note) =>
+          note.sharedInformationItemId === change.sharedInformationItemId)
+        return !!activeNote?.relatedTaskItemId &&
+          pendingTaskRemovals.has(activeNote.relatedTaskItemId)
+      }
+      if (!change.relatedTaskItemId) return false
+      if (pendingTaskRemovals.has(change.relatedTaskItemId)) return true
+      const task = pendingTaskAdds.find(
+        (candidate) =>
+          candidate.sharedInformationItemId === change.relatedTaskItemId,
+      ) ?? this.activeTasks.find(
+        (candidate) =>
+          candidate.sharedInformationItemId === change.relatedTaskItemId,
+      )
+      return !task || !targetScopesEqual(task.targetScope, change.targetScope)
+    })
+    if (invalidTaskNote) return { status: 'invalid-change' as const }
     const conflictingSourceIds = [
       ...pendingTimetableChanges
       .filter((change) => {
@@ -1076,7 +1108,33 @@ export class InMemoryPersistenceAdapters
       return { status: 'conflict' as const, conflictingSourceIds }
     }
 
-    for (const change of pending) {
+    const cascadeRemovals: Array<Extract<
+      DirectChangeOperation,
+      { kind: 'note'; changeKind: 'remove' }
+    >> = pendingTaskChanges
+      .filter((change) => change.changeKind === 'remove')
+      .flatMap((taskRemoval) =>
+        this.activeNotes
+          .filter((note) =>
+            note.relatedTaskItemId === taskRemoval.sharedInformationItemId)
+          .map((note) => {
+            const sourceId = `${taskRemoval.sourceId}:task-cascade:${note.sharedInformationItemId}`
+            return {
+              kind: 'note' as const,
+              changeKind: 'remove' as const,
+              sourceId,
+              sharedInformationItemId: note.sharedInformationItemId,
+              latestChangeId: `${sourceId}:change`,
+              expectedLatestChangeId: note.latestChangeId,
+              targetScope: note.targetScope,
+              changedByStudentAccountId: taskRemoval.changedByStudentAccountId,
+              changedAt: taskRemoval.changedAt,
+              removalReason: 'task_cascade' as const,
+            }
+          }),
+      )
+
+    for (const change of [...cascadeRemovals, ...pending]) {
       if (change.kind === 'note') {
         this.directNoteOperations.set(change.sourceId, change)
         if (change.changeKind === 'add') {
@@ -1539,6 +1597,7 @@ type ActiveNoteRow = {
   student_account_id: string | null
   body: string
   related_school_date: string | null
+  related_task_item_id: string | null
   changed_by_student_account_id: string
   changed_at: string
   created_at: string
@@ -2432,6 +2491,7 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, note.body, note.related_school_date,
+                note.related_task_item_id,
                 latest.changed_by_student_account_id, latest.changed_at,
                 i.created_at
          from shared_information_items i
@@ -2442,7 +2502,7 @@ export class D1PersistenceAdapters
          join note_snapshots note
            on note.note_snapshot_id = i.current_note_snapshot_id
          where i.kind = 'note' and i.removed_at is null
-           and (note.related_context_type = 'none'
+           and (note.related_context_type in ('none', 'task')
              or (note.related_context_type = 'school_date'
                and note.related_school_date = ?))
            and (select count(*) from target_scope_parts scope_part_count
@@ -2565,8 +2625,21 @@ export class D1PersistenceAdapters
     const taskItemChanges = pendingTasks.filter(
       (change) => change.changeKind !== 'add',
     )
+    const relatedTaskItemIds = pending
+      .filter(
+        (change): change is Extract<
+          DirectChangeOperation,
+          { kind: 'note'; changeKind: 'add' }
+        > => change.kind === 'note' && change.changeKind === 'add',
+      )
+      .flatMap((change) => change.relatedTaskItemId
+        ? [change.relatedTaskItemId]
+        : [])
     const activeTasks = await this.findActiveTasksByItemIds(
-      taskItemChanges.map((change) => change.sharedInformationItemId),
+      [...new Set([
+        ...taskItemChanges.map((change) => change.sharedInformationItemId),
+        ...relatedTaskItemIds,
+      ])],
     )
     const activeTaskByItem = new Map(
       activeTasks.map((task) => [task.sharedInformationItemId, task]),
@@ -2575,6 +2648,24 @@ export class D1PersistenceAdapters
       (change): change is Extract<DirectChangeOperation, { kind: 'note' }> =>
         change.kind === 'note',
     )
+    const pendingTaskAdds = pendingTasks.filter(
+      (change) => change.changeKind === 'add',
+    )
+    const pendingTaskRemovals = new Set(
+      pendingTasks
+        .filter((change) => change.changeKind === 'remove')
+        .map((change) => change.sharedInformationItemId),
+    )
+    const invalidTaskNoteAdd = pendingNotes.some((change) => {
+      if (change.changeKind !== 'add' || !change.relatedTaskItemId) return false
+      if (pendingTaskRemovals.has(change.relatedTaskItemId)) return true
+      const task = pendingTaskAdds.find(
+        (candidate) =>
+          candidate.sharedInformationItemId === change.relatedTaskItemId,
+      ) ?? activeTaskByItem.get(change.relatedTaskItemId)
+      return !task || !targetScopesEqual(task.targetScope, change.targetScope)
+    })
+    if (invalidTaskNoteAdd) return { status: 'invalid-change' as const }
     const noteItemChanges = pendingNotes.filter(
       (change) => change.changeKind !== 'add',
     )
@@ -2584,6 +2675,12 @@ export class D1PersistenceAdapters
     const activeNoteByItem = new Map(
       activeNotes.map((note) => [note.sharedInformationItemId, note]),
     )
+    const invalidTaskNoteChange = noteItemChanges.some((change) => {
+      const activeNote = activeNoteByItem.get(change.sharedInformationItemId)
+      return !!activeNote?.relatedTaskItemId &&
+        pendingTaskRemovals.has(activeNote.relatedTaskItemId)
+    })
+    if (invalidTaskNoteChange) return { status: 'invalid-change' as const }
     const addSlotKeys = pendingTimetable
       .filter((change) => change.changeKind === 'add')
       .map(activeTimetableChangeSlotKey)
@@ -2634,22 +2731,37 @@ export class D1PersistenceAdapters
     }
 
     const statements: D1PreparedStatement[] = []
-    for (const change of pending) {
+    const orderedPending = [
+      ...pending.filter((change) =>
+        change.kind === 'task' && change.changeKind === 'add'),
+      ...pending.filter((change) =>
+        !(change.kind === 'task' && change.changeKind === 'add')),
+    ]
+    for (const change of orderedPending) {
       const targetScopeId = `${change.sourceId}:scope`
       const snapshotId = `${change.sourceId}:snapshot`
       const sharedChangeId = `${change.sourceId}:change`
       const createdAt = new Date(change.changedAt).toISOString()
       if (change.kind === 'note') {
         if (change.changeKind === 'add') {
-          const part = targetScopeColumns(change)
-          statements.push(
-            this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.targetScope.schoolYear, createdAt),
-            this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScope.type, part.grade, part.classId, part.trackId, part.studentAccountId),
-            this.db.prepare(`insert into note_snapshots (note_snapshot_id, body, related_context_type, related_school_date, related_period_number, related_task_item_id, created_at) values (?, ?, ?, ?, null, null, ?)`).bind(snapshotId, change.body, change.schoolDate === null ? 'none' : 'school_date', change.schoolDate, createdAt),
-            this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_task_snapshot_id, current_timetable_change_snapshot_id, current_note_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'note', ?, null, null, null, ?, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
-            this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, task_snapshot_id, timetable_change_snapshot_id, note_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, null, null, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
-            this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
-          )
+          if (change.relatedTaskItemId) {
+            statements.push(
+              this.db.prepare(`insert into note_snapshots (note_snapshot_id, body, related_context_type, related_school_date, related_period_number, related_task_item_id, created_at) select ?, ?, 'task', null, null, ?, ? from shared_information_items where shared_information_item_id = ? and kind = 'task' and removed_at is null`).bind(snapshotId, change.body, change.relatedTaskItemId, createdAt, change.relatedTaskItemId),
+              this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_task_snapshot_id, current_timetable_change_snapshot_id, current_note_snapshot_id, created_by_student_account_id, created_at, removed_at) select ?, 'note', target_scope_id, null, null, null, ?, ?, ?, null from shared_information_items where shared_information_item_id = ? and kind = 'task' and removed_at is null`).bind(change.sharedInformationItemId, snapshotId, change.changedByStudentAccountId, createdAt, change.relatedTaskItemId),
+              this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, task_snapshot_id, timetable_change_snapshot_id, note_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, null, null, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
+              this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
+            )
+          } else {
+            const part = targetScopeColumns(change)
+            statements.push(
+              this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.targetScope.schoolYear, createdAt),
+              this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScope.type, part.grade, part.classId, part.trackId, part.studentAccountId),
+              this.db.prepare(`insert into note_snapshots (note_snapshot_id, body, related_context_type, related_school_date, related_period_number, related_task_item_id, created_at) values (?, ?, ?, ?, null, null, ?)`).bind(snapshotId, change.body, change.schoolDate === null ? 'none' : 'school_date', change.schoolDate, createdAt),
+              this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_task_snapshot_id, current_timetable_change_snapshot_id, current_note_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'note', ?, null, null, null, ?, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
+              this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, task_snapshot_id, timetable_change_snapshot_id, note_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, null, null, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
+              this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
+            )
+          }
         } else if (change.changeKind === 'update') {
           statements.push(
             this.db.prepare(
@@ -2755,6 +2867,46 @@ export class D1PersistenceAdapters
           )
         } else {
           statements.push(
+            this.db.prepare(
+              `insert into shared_information_changes (
+                 shared_information_change_id, shared_information_item_id,
+                 change_kind, source_type, source_id,
+                 changed_by_student_account_id, changed_at,
+                 task_snapshot_id, timetable_change_snapshot_id,
+                 note_snapshot_id, preceding_change_id, removal_reason
+               )
+               select ? || ':task-cascade:' || note_item.shared_information_item_id || ':change',
+                      note_item.shared_information_item_id,
+                      'remove', 'direct',
+                      ? || ':task-cascade:' || note_item.shared_information_item_id,
+                      ?, ?, null, null, null, note_item.latest_change_id,
+                      'task_cascade'
+               from shared_information_items note_item
+               join note_snapshots note
+                 on note.note_snapshot_id = note_item.current_note_snapshot_id
+               where note_item.kind = 'note' and note_item.removed_at is null
+                 and note.related_task_item_id = ?`,
+            ).bind(
+              change.sourceId,
+              change.sourceId,
+              change.changedByStudentAccountId,
+              createdAt,
+              change.sharedInformationItemId,
+            ),
+            this.db.prepare(
+              `update shared_information_items
+               set latest_change_id = ? || ':task-cascade:' || shared_information_item_id || ':change',
+                   removed_at = ?
+               where kind = 'note' and removed_at is null
+                 and current_note_snapshot_id in (
+                   select note_snapshot_id from note_snapshots
+                   where related_task_item_id = ?
+                 )`,
+            ).bind(
+              change.sourceId,
+              createdAt,
+              change.sharedInformationItemId,
+            ),
             this.db.prepare(
               `insert into shared_information_changes (
                  shared_information_change_id, shared_information_item_id,
@@ -3404,6 +3556,7 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, note.body, note.related_school_date,
+                note.related_task_item_id,
                 c.changed_by_student_account_id, c.changed_at, i.created_at
          from shared_information_changes c
          join shared_information_items i
@@ -3428,6 +3581,7 @@ export class D1PersistenceAdapters
                 i.shared_information_item_id, s.school_year,
                 p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, note.body, note.related_school_date,
+                note.related_task_item_id,
                 latest.changed_by_student_account_id, latest.changed_at,
                 i.created_at
          from shared_information_items i
@@ -3923,6 +4077,9 @@ function mapActiveNoteRow(row: ActiveNoteRow): ActiveNote {
     latestChangeId: row.shared_information_change_id,
     targetScope: mapTargetScopeRow(row),
     schoolDate: row.related_school_date,
+    ...(row.related_task_item_id
+      ? { relatedTaskItemId: row.related_task_item_id }
+      : {}),
     body: row.body,
     changedByStudentAccountId: row.changed_by_student_account_id,
     changedAt: Date.parse(row.changed_at),
@@ -3962,6 +4119,9 @@ function mapStoredDirectNoteOperation(
     ...common,
     changeKind: 'add',
     schoolDate: row.related_school_date,
+    ...(row.related_task_item_id
+      ? { relatedTaskItemId: row.related_task_item_id }
+      : {}),
     body: row.body ?? '',
     createdAt: Date.parse(row.created_at),
   }
@@ -4226,7 +4386,9 @@ function sameDirectChangeOperationPayload(
       left.changedByStudentAccountId === right.changedByStudentAccountId
     if (!sameBase || left.changeKind !== right.changeKind) return false
     if (left.changeKind === 'add' && right.changeKind === 'add') {
-      return left.schoolDate === right.schoolDate && left.body === right.body
+      return left.schoolDate === right.schoolDate &&
+        left.relatedTaskItemId === right.relatedTaskItemId &&
+        left.body === right.body
     }
     if (left.changeKind === 'update' && right.changeKind === 'update') {
       return left.expectedLatestChangeId === right.expectedLatestChangeId &&

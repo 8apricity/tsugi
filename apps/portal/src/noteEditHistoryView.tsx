@@ -76,7 +76,7 @@ export function NoteEditHistoryDialog({
                       </time>
                     </header>
                     {entry.removalReason === 'task_cascade' ? (
-                      <p className="note-removal-reason">タスク削除に伴う削除</p>
+                      <p className="note-removal-reason">Task削除に伴う削除</p>
                     ) : null}
                     <div className="task-history-transition">
                       <NoteSnapshotPanel

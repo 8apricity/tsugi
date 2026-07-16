@@ -104,6 +104,7 @@ export type ActiveNoteForEditing = {
   body: string
   schoolDate: string | null
   targetScopeType: TargetScopeType
+  relatedTaskItemId?: string
 }
 
 type NoteDraftBase = {
@@ -112,6 +113,7 @@ type NoteDraftBase = {
   body: string
   schoolDate: string | null
   targetScopeType: TargetScopeType
+  relatedTaskItemId?: string
 }
 
 export type NoteDraft = NoteDraftBase & (
@@ -208,7 +210,12 @@ type NoteSubmissionChangeBase = {
 }
 
 export type NoteSubmissionChange = NoteSubmissionChangeBase & (
-  | { changeKind: 'add'; body: string; schoolDate: string | null }
+  | {
+      changeKind: 'add'
+      body: string
+      schoolDate?: string | null
+      relatedTaskItemId?: string
+    }
   | {
       changeKind: 'update'
       body: string
@@ -409,6 +416,18 @@ export function createSharedInformationEditorClient({
     return removed
   }
 
+  function removeDependentNoteDrafts(taskId: string) {
+    const dependentSourceIds = new Set(
+      noteDrafts
+        .filter((draft) => draft.relatedTaskItemId === taskId)
+        .map((draft) => draft.sourceId),
+    )
+    noteDrafts = noteDrafts.filter(
+      (draft) => !dependentSourceIds.has(draft.sourceId),
+    )
+    dependentSourceIds.forEach((id) => noteConflictSourceIds.delete(id))
+  }
+
   function commitPayload(
     batch: readonly TimetableChangeDraft[] = drafts,
     taskBatch: readonly TaskDraft[] = taskDrafts,
@@ -455,8 +474,15 @@ export function createSharedInformationEditorClient({
       reconciledKeys.delete(serializedKey)
     })
     conflictingSourceIds.forEach((sourceId) => {
-      if (taskDrafts.some((draft) => draft.sourceId === sourceId)) {
+      const taskDraft = taskDrafts.find((draft) => draft.sourceId === sourceId)
+      if (taskDraft) {
         taskConflictSourceIds.add(sourceId)
+        const taskIdentity = taskDraft.changeKind === 'add'
+          ? taskDraft.sourceId
+          : taskDraft.sharedInformationItemId
+        noteDrafts
+          .filter((draft) => draft.relatedTaskItemId === taskIdentity)
+          .forEach((draft) => noteConflictSourceIds.add(draft.sourceId))
       }
       if (noteDrafts.some((draft) => draft.sourceId === sourceId)) {
         noteConflictSourceIds.add(sourceId)
@@ -620,6 +646,44 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
+    saveTaskNoteDraft(
+      task: { taskId: string; targetScopeType: TargetScopeType },
+      desiredBody: string,
+    ) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const body = normalizeNoteBody(desiredBody)
+      const taskDraft = taskDrafts.find(
+        (draft) =>
+          draft.changeKind === 'add' && draft.sourceId === task.taskId,
+      )
+      const taskRemovalPlanned = taskDrafts.some(
+        (draft) =>
+          draft.changeKind === 'remove' &&
+          draft.sharedInformationItemId === task.taskId,
+      )
+      if (
+        body === null ||
+        taskRemovalPlanned ||
+        (taskDraft && taskDraft.targetScopeType !== task.targetScopeType)
+      ) return { status: 'invalid-note' as const }
+      if (totalDraftCount() >= maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+      const sourceId = createId()
+      noteDrafts.push({
+        kind: 'note',
+        changeKind: 'add',
+        sourceId,
+        body,
+        schoolDate: null,
+        targetScopeType: task.targetScopeType,
+        relatedTaskItemId: task.taskId,
+      })
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
     updateNoteDraft(sourceId: string, input: NewNoteDraftForm) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const existing = noteDrafts.find((draft) => draft.sourceId === sourceId)
@@ -686,6 +750,9 @@ export function createSharedInformationEditorClient({
         body,
         schoolDate: activeNote.schoolDate,
         targetScopeType: activeNote.targetScopeType,
+        ...(activeNote.relatedTaskItemId
+          ? { relatedTaskItemId: activeNote.relatedTaskItemId }
+          : {}),
       })
       noteConflictSourceIds.delete(sourceId)
       editing = true
@@ -714,6 +781,9 @@ export function createSharedInformationEditorClient({
         body: activeNote.body,
         schoolDate: activeNote.schoolDate,
         targetScopeType: activeNote.targetScopeType,
+        ...(activeNote.relatedTaskItemId
+          ? { relatedTaskItemId: activeNote.relatedTaskItemId }
+          : {}),
       })
       noteConflictSourceIds.delete(sourceId)
       editing = true
@@ -729,6 +799,10 @@ export function createSharedInformationEditorClient({
       const nextDrafts: NoteDraft[] = []
       for (const draft of noteDrafts) {
         if (draft.changeKind === 'add') {
+          nextDrafts.push(draft)
+          continue
+        }
+        if (noteConflictSourceIds.has(draft.sourceId)) {
           nextDrafts.push(draft)
           continue
         }
@@ -809,6 +883,7 @@ export function createSharedInformationEditorClient({
         dueDate: activeTask.dueDate,
         relatedLessonName: activeTask.relatedLessonName,
       })
+      removeDependentNoteDrafts(activeTask.taskId)
       taskConflictSourceIds.delete(sourceId)
       editing = true
       lastCommitFailed = false
@@ -817,12 +892,16 @@ export function createSharedInformationEditorClient({
     },
     removeTaskDraft(sourceId: string) {
       if (submitting) return { status: 'submission-in-progress' as const }
+      const removedDraft = taskDrafts.find((draft) => draft.sourceId === sourceId)
       const next = taskDrafts.filter((draft) => draft.sourceId !== sourceId)
       if (next.length === taskDrafts.length) {
         return { status: 'unchanged' as const }
       }
       taskDrafts = next
       taskConflictSourceIds.delete(sourceId)
+      if (removedDraft?.changeKind === 'add') {
+        removeDependentNoteDrafts(sourceId)
+      }
       publish()
       return { status: 'removed' as const }
     },
@@ -1257,7 +1336,9 @@ function toNoteSubmissionChange(draft: NoteDraft): NoteSubmissionChange {
     : {
         ...base,
         changeKind: 'add',
-        schoolDate: draft.schoolDate,
+        ...(draft.relatedTaskItemId
+          ? { relatedTaskItemId: draft.relatedTaskItemId }
+          : { schoolDate: draft.schoolDate }),
         body: draft.body,
       }
 }
@@ -1500,6 +1581,8 @@ function restoreNoteDraft(value: unknown): NoteDraft | null {
       typeof draft.sourceId !== 'string') return null
   if (
     body === null ||
+    (draft.relatedTaskItemId !== undefined &&
+      typeof draft.relatedTaskItemId !== 'string') ||
     (draft.schoolDate !== null &&
       (typeof draft.schoolDate !== 'string' ||
         !/^\d{4}-\d{2}-\d{2}$/.test(draft.schoolDate))) ||
@@ -1511,6 +1594,9 @@ function restoreNoteDraft(value: unknown): NoteDraft | null {
     body,
     schoolDate: draft.schoolDate as string | null,
     targetScopeType: draft.targetScopeType,
+    ...(typeof draft.relatedTaskItemId === 'string'
+      ? { relatedTaskItemId: draft.relatedTaskItemId }
+      : {}),
   }
   if (draft.changeKind === 'update' || draft.changeKind === 'remove') {
     return typeof draft.sharedInformationItemId === 'string' &&

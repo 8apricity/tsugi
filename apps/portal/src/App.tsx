@@ -42,7 +42,9 @@ import type {
   DailyPlanTaskForCache,
 } from "./dailyPlanCache";
 import { NoteCard } from "./noteCard";
-import { buildVisibleNoteList } from "./noteListView";
+import { buildVisibleNoteList, buildVisibleTaskNoteList } from "./noteListView";
+import { taskRemovalConfirmation } from "./taskNoteCopy";
+import { TaskNoteList } from "./taskNoteView";
 import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
@@ -182,6 +184,11 @@ type TaskHistoryDialog = {
 type NoteEditorForm = NewNoteDraftForm & {
   editingNote: DailyPlanNoteForCache | null;
   editingDraft: NoteDraft | null;
+  relatedTask: {
+    taskId: string;
+    title: string;
+    targetScopeType: TargetScopeType;
+  } | null;
 };
 
 type NoteHistoryDialog = {
@@ -750,12 +757,18 @@ function App() {
   useEffect(() => {
     if (dailyPlanState.status !== "ready") return;
     timetableEditorClient.reconcileActiveNotes(
-      dailyPlanState.dailyPlan.notes.map((note) => ({
+      [
+        ...dailyPlanState.dailyPlan.notes,
+        ...dailyPlanState.dailyPlan.tasks.flatMap((task) => task.notes),
+      ].map((note) => ({
         noteId: note.noteId,
         latestChangeId: note.latestChangeId,
         body: note.body,
         schoolDate: noteSchoolDate(note),
         targetScopeType: note.targetScopeType,
+        ...(note.relatedContext?.type === "task"
+          ? { relatedTaskItemId: note.relatedContext.taskId }
+          : {}),
       })),
       dailyPlanState.dailyPlan.schoolDate,
     );
@@ -1129,6 +1142,7 @@ function App() {
       ...createNewNoteDraftForm(selectedSchoolDate),
       editingNote: null,
       editingDraft: null,
+      relatedTask: null,
     });
   }
 
@@ -1145,6 +1159,7 @@ function App() {
       targetScopeType: note.targetScopeType,
       editingNote: note,
       editingDraft: null,
+      relatedTask: null,
     });
   }
 
@@ -1156,6 +1171,23 @@ function App() {
       targetScopeType: draft.targetScopeType,
       editingNote: null,
       editingDraft: draft,
+      relatedTask: null,
+    });
+  }
+
+  function openTaskNoteEditor(
+    task: { taskId: string; title: string; targetScopeType: TargetScopeType },
+    note?: DailyPlanNoteForCache,
+    draft?: NoteDraft,
+  ) {
+    if (taskDetail?.taskId === task.taskId) setTaskDetail(null);
+    setNoteEditorForm({
+      body: note?.body ?? draft?.body ?? "",
+      schoolDate: null,
+      targetScopeType: task.targetScopeType,
+      editingNote: note ?? null,
+      editingDraft: draft ?? null,
+      relatedTask: task,
     });
   }
 
@@ -1166,6 +1198,9 @@ function App() {
       body: note.body,
       schoolDate: noteSchoolDate(note),
       targetScopeType: note.targetScopeType,
+      ...(note.relatedContext?.type === "task"
+        ? { relatedTaskItemId: note.relatedContext.taskId }
+        : {}),
     });
     if (result.status === "limit-reached") {
       setTimetableEditorMessage("下書きは合計50件までです。");
@@ -1196,7 +1231,18 @@ function App() {
             body: noteEditorForm.editingNote.body,
             schoolDate: noteSchoolDate(noteEditorForm.editingNote),
             targetScopeType: noteEditorForm.editingNote.targetScopeType,
+            ...(noteEditorForm.editingNote.relatedContext?.type === "task"
+              ? {
+                  relatedTaskItemId:
+                    noteEditorForm.editingNote.relatedContext.taskId,
+                }
+              : {}),
           },
+          noteEditorForm.body,
+        )
+      : noteEditorForm.relatedTask
+      ? timetableEditorClient.saveTaskNoteDraft(
+          noteEditorForm.relatedTask,
           noteEditorForm.body,
         )
       : timetableEditorClient.saveNoteDraft(noteEditorForm);
@@ -1288,6 +1334,59 @@ function App() {
     }
     setTaskEditorForm(null);
     setTimetableEditorMessage(null);
+  }
+
+  function taskNoteList(
+    task: {
+      taskId: string;
+      title: string;
+      targetScopeType: TargetScopeType;
+    },
+    activeNotes: DailyPlanNoteForCache[],
+  ) {
+    const items = buildVisibleTaskNoteList(
+      activeNotes,
+      timetableEditor.noteDrafts,
+      task.taskId,
+    ).map((item) => {
+      if (item.type === "draft") {
+        const note = item.draft;
+        return {
+          noteId: note.sourceId,
+          body: note.body,
+          draft: true,
+          changeKind: note.changeKind,
+          conflicted: note.conflicted,
+          onCancelDraft: () =>
+            timetableEditorClient.removeNoteDraft(note.sourceId),
+          onEdit: note.changeKind === "remove"
+            ? undefined
+            : () => openTaskNoteEditor(task, undefined, note),
+          onOpenHistory: item.activeNote
+            ? () => openNoteHistory(item.activeNote!)
+            : undefined,
+        };
+      }
+      const note = item.note;
+      return {
+        noteId: note.noteId,
+        body: note.body,
+        onEdit: timetableEditor.editing
+          ? () => openTaskNoteEditor(task, note)
+          : undefined,
+        onRemove: timetableEditor.editing
+          ? () => saveNoteRemoveDraft(note)
+          : undefined,
+        onOpenHistory: () => openNoteHistory(note),
+      };
+    });
+    return <TaskNoteList notes={items} />;
+  }
+
+  function planTaskRemoval(task: DailyPlanTaskForCache) {
+    if (!window.confirm(taskRemovalConfirmation(task.notes))) return;
+    timetableEditorClient.saveTaskRemoveDraft(editableTask(task));
+    setTaskDetail(null);
   }
 
   function openTimetableEditor(periodNumber: number) {
@@ -1965,63 +2064,93 @@ function App() {
                   <div className="task-list">
                     {timetableEditor.taskDrafts.map((task) => (
                       <article
-                        className="task-item task-draft"
+                        className="task-entry task-draft"
                         key={task.sourceId}
                       >
-                        <span>
-                          <strong>{task.title}</strong>
-                          <small>
-                            {formatTaskDueLabel(task.dueDate, selectedSchoolDate)}
-                            {task.relatedLessonName
-                              ? ` · ${task.relatedLessonName.lessonName}`
-                              : ""}
-                          </small>
-                          <span className="task-scope-badge">
-                            {scopeLabel(task.targetScopeType, targetScopeContext)}
+                        <div className="task-item">
+                          <span>
+                            <strong>{task.title}</strong>
+                            <small>
+                              {formatTaskDueLabel(task.dueDate, selectedSchoolDate)}
+                              {task.relatedLessonName
+                                ? ` · ${task.relatedLessonName.lessonName}`
+                                : ""}
+                            </small>
+                            <span className="task-scope-badge">
+                              {scopeLabel(task.targetScopeType, targetScopeContext)}
+                            </span>
+                            <small>
+                              {task.conflicted
+                                ? "ほかの変更あり"
+                                : task.changeKind === "remove"
+                                  ? "削除予定"
+                                  : task.changeKind === "update"
+                                    ? "変更予定"
+                                    : "追加予定"}
+                            </small>
                           </span>
-                          <small>
-                            {task.conflicted
-                              ? "ほかの変更あり"
-                              : task.changeKind === "remove"
-                                ? "削除予定"
-                                : task.changeKind === "update"
-                                  ? "変更予定"
-                                  : "追加予定"}
-                          </small>
-                        </span>
-                        <button
-                          className="button-link"
-                          type="button"
-                          aria-label={`${task.title}の下書きを取り消す`}
-                          onClick={() =>
-                            timetableEditorClient.removeTaskDraft(task.sourceId)
-                          }
-                        >
-                          取り消す
-                        </button>
+                          <div className="task-draft-actions">
+                            {task.changeKind === "add" ? (
+                              <button
+                                className="button-link"
+                                type="button"
+                                disabled={
+                                  timetableEditor.atLimit ||
+                                  timetableEditor.submitting
+                                }
+                                onClick={() => openTaskNoteEditor({
+                                  taskId: task.sourceId,
+                                  title: task.title,
+                                  targetScopeType: task.targetScopeType,
+                                })}
+                              >
+                                ノートを書く
+                              </button>
+                            ) : null}
+                            <button
+                              className="button-link"
+                              type="button"
+                              aria-label={`${task.title}の下書きを取り消す`}
+                              onClick={() =>
+                                timetableEditorClient.removeTaskDraft(task.sourceId)
+                              }
+                            >
+                              取り消す
+                            </button>
+                          </div>
+                        </div>
+                        {task.changeKind === "add"
+                          ? taskNoteList({
+                              taskId: task.sourceId,
+                              title: task.title,
+                              targetScopeType: task.targetScopeType,
+                            }, [])
+                          : null}
                       </article>
                     ))}
                     {dailyPlanState.dailyPlan.tasks.map((task) => (
-                      <button
-                        className="task-item"
-                        type="button"
-                        key={task.taskId}
-                        onClick={() => setTaskDetail(task)}
-                      >
-                        <span>
-                          <strong>{task.title}</strong>
-                          <small>
-                            {formatTaskDueLabel(task.dueDate, selectedSchoolDate)}
-                            {task.relatedLessonName
-                              ? ` · ${task.relatedLessonName}`
-                              : ""}
-                          </small>
-                          <span className="task-scope-badge">
-                            {scopeLabel(task.targetScopeType, targetScopeContext)}
+                      <article className="task-entry" key={task.taskId}>
+                        <button
+                          className="task-item"
+                          type="button"
+                          onClick={() => setTaskDetail(task)}
+                        >
+                          <span>
+                            <strong>{task.title}</strong>
+                            <small>
+                              {formatTaskDueLabel(task.dueDate, selectedSchoolDate)}
+                              {task.relatedLessonName
+                                ? ` · ${task.relatedLessonName}`
+                                : ""}
+                            </small>
+                            <span className="task-scope-badge">
+                              {scopeLabel(task.targetScopeType, targetScopeContext)}
+                            </span>
                           </span>
-                        </span>
-                        <span aria-hidden="true">›</span>
-                      </button>
+                          <span aria-hidden="true">›</span>
+                        </button>
+                        {taskNoteList(task, task.notes)}
+                      </article>
                     ))}
                     {timetableEditor.taskDrafts.length === 0 &&
                     dailyPlanState.dailyPlan.tasks.length === 0 ? (
@@ -2052,7 +2181,9 @@ function App() {
                     {(() => {
                       const visibleNotes = buildVisibleNoteList(
                         dailyPlanState.dailyPlan.notes,
-                        timetableEditor.noteDrafts,
+                        timetableEditor.noteDrafts.filter(
+                          (draft) => draft.relatedTaskItemId === undefined,
+                        ),
                         selectedSchoolDate,
                       );
                       if (visibleNotes.length === 0) {
@@ -2197,7 +2328,9 @@ function App() {
               >
                 <header className="editor-dialog-header">
                   <h2 id="note-editor-title">
-                    {noteEditorForm.editingNote || noteEditorForm.editingDraft
+                    {noteEditorForm.relatedTask
+                      ? "ノートを書く"
+                      : noteEditorForm.editingNote || noteEditorForm.editingDraft
                       ? "ノートを編集"
                       : "ノートを追加"}
                   </h2>
@@ -2231,6 +2364,12 @@ function App() {
                       {noteEditorForm.body.length} / 1000
                     </small>
                   </label>
+                  {noteEditorForm.relatedTask ? (
+                    <p className="task-note-target">
+                      {noteEditorForm.relatedTask.title}
+                    </p>
+                  ) : (
+                    <>
                   <label>
                     <span>日付</span>
                     <input
@@ -2303,6 +2442,8 @@ function App() {
                       )}
                     </select>
                   </label>
+                    </>
+                  )}
                   <div className="editor-dialog-actions">
                     <button
                       className="button-secondary"
@@ -2623,6 +2764,7 @@ function App() {
                   <div><dt>関連する授業</dt><dd>{taskDetail.relatedLessonName ?? "なし"}</dd></div>
                   <div><dt>変更適用範囲</dt><dd>{scopeLabel(taskDetail.targetScopeType, targetScopeContext)}</dd></div>
                 </dl>
+                {taskNoteList(taskDetail, taskDetail.notes)}
                 <div className="editor-dialog-actions">
                   <button
                     className="button-secondary"
@@ -2636,6 +2778,16 @@ function App() {
                       <button
                         className="button-secondary"
                         type="button"
+                        disabled={
+                          timetableEditor.atLimit || timetableEditor.submitting
+                        }
+                        onClick={() => openTaskNoteEditor(taskDetail)}
+                      >
+                        ノートを書く
+                      </button>
+                      <button
+                        className="button-secondary"
+                        type="button"
                         onClick={() => openTaskUpdateEditor(taskDetail)}
                       >
                         編集
@@ -2643,12 +2795,7 @@ function App() {
                       <button
                         className="button-danger"
                         type="button"
-                        onClick={() => {
-                          timetableEditorClient.saveTaskRemoveDraft(
-                            editableTask(taskDetail),
-                          );
-                          setTaskDetail(null);
-                        }}
+                        onClick={() => planTaskRemoval(taskDetail)}
                       >
                         削除
                       </button>

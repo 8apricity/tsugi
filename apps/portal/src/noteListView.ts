@@ -62,3 +62,34 @@ export function buildVisibleNoteList(
     ...projectActive(unrelatedActive),
   ]
 }
+
+export function buildVisibleTaskNoteList(
+  activeNotes: readonly DailyPlanNoteForCache[],
+  noteDrafts: readonly (NoteDraft & { conflicted?: boolean })[],
+  taskId: string,
+): VisibleNoteListItem[] {
+  const relatedDrafts = noteDrafts.filter(
+    (draft) => draft.relatedTaskItemId === taskId,
+  )
+  const replacementByNoteId = new Map(
+    relatedDrafts
+      .filter((draft) => draft.changeKind !== 'add')
+      .map((draft) => [draft.sharedInformationItemId, draft] as const),
+  )
+  const activeIds = new Set(activeNotes.map((note) => note.noteId))
+  const additions = [...relatedDrafts]
+    .filter((draft) => draft.changeKind === 'add')
+    .reverse()
+    .map((draft): VisibleNoteListItem => ({ type: 'draft', draft }))
+  const orphanedChanges = relatedDrafts
+    .filter((draft) =>
+      draft.changeKind !== 'add' && !activeIds.has(draft.sharedInformationItemId))
+    .map((draft): VisibleNoteListItem => ({ type: 'draft', draft }))
+  const projectedActive = activeNotes.map((note): VisibleNoteListItem => {
+    const replacement = replacementByNoteId.get(note.noteId)
+    return replacement
+      ? { type: 'draft', draft: replacement, activeNote: note }
+      : { type: 'active', note }
+  })
+  return [...additions, ...orphanedChanges, ...projectedActive]
+}

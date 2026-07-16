@@ -314,6 +314,14 @@ it does not reference a Timetable Change item or Lesson Name. Therefore it
 survives Lesson Name changes, cancellations, Timetable Change removal, and a
 return to the Standard Timetable for that period.
 
+Note Target Scope and related-context columns are immutable after addition.
+Updates create a new immutable Body snapshot only; moving or retargeting is a
+remove plus a separate add. Reference Scope reads query one validated,
+non-individual Target Scope by exact school-year/type/value equality. They return
+only active Note content needed for Daily Plan placement and never join changer
+or proposal-participant identity. Task Notes are projected only when their
+related active Task is visible in that same Reference Scope read.
+
 Tasks store due timing at school-date level only. If a student needs to record a finer instruction such as "before third period" or "by the start of class", that detail belongs in a note related to the task rather than in formal task due fields.
 
 A Task may store one optional Related Lesson Name as either a Registered Lesson Name identity or custom text with its normalized search key. It stores no related School Date or period, and therefore creates no Daily Lesson marker.
@@ -380,6 +388,10 @@ create table shared_information_changes (
 ```
 
 Accepted proposals and direct changes both create a shared information change. A separate direct changes table is intentionally not used.
+The public `/api/shared-information/direct-changes` endpoint applies explicit
+Timetable Change, Task, and Note operations through one atomic Direct Change
+contract. Task-removal-generated Note changes run inside that same transaction,
+use `task_cascade`, and do not count toward the explicit-operation limit.
 `changed_by_student_account_id` is stored for traceability. Ordinary shared-information views do not show student attribution. Edit history shows the student behind a direct change only to students inside the Target Scope; future proposal history may also show the proposer and the students who approved or rejected it there. Reference Scope inspection does not expose those student names.
 Timetable Change edit history queries immutable change rows by Target Scope, Change Date, and period rather than starting from only the active item. This keeps removed items visible and lets a later Direct Change addition occupy the released slot as a separate item history. `preceding_change_id` records the applied predecessor for update and remove changes, preserving causal order when timestamps tie. An update's before value comes from that preceding applied change of the same item; a remove uses that item's last active snapshot. Stored Period and Floating Lesson References are presented as stored references, not reconstructed historical Lesson Names.
 Task edit history queries immutable change rows by retained Shared Information Item identity, including after removal. Its add, update, and remove transitions follow `preceding_change_id`; registered Related Lesson Names resolve to their current Short Lesson Name when history is read.

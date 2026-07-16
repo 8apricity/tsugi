@@ -25,7 +25,11 @@ import {
   readDirectTimetableChangeDetail,
   readTimetableChangeHistory,
 } from "./timetableChangeHistory";
-import { readReferenceTasks } from "./referenceTasks";
+import {
+  readReferenceDailyPlan,
+  readReferenceScopeOptions,
+  readReferenceTasks,
+} from "./referenceDailyPlan";
 import { readTaskEditHistory } from "./taskEditHistory";
 import { readNoteEditHistory } from "./noteEditHistory";
 
@@ -514,9 +518,39 @@ export default {
       return Response.json(result);
     }
 
-    if (url.pathname === "/api/tasks/reference" && request.method === "GET") {
+    if (
+      url.pathname === "/api/daily-plans/reference/options" &&
+      request.method === "GET"
+    ) {
       const persistence = await getPersistenceAdapters(env);
-      const result = await readReferenceTasks({
+      const result = await readReferenceScopeOptions({
+        sessionToken: readCookie(request, sessionCookieName),
+        now: Date.now(),
+        studentAccountStore: persistence.studentAccount,
+        store: persistence.dailyPlan,
+      });
+      if (result.status === "unauthenticated") {
+        return Response.json(result, { status: 401 });
+      }
+      if (result.status === "affiliation-renewal-needed") {
+        return Response.json(result, { status: 409 });
+      }
+      if (result.status === "daily-plan-unavailable") {
+        return Response.json(result, { status: 503 });
+      }
+      return Response.json(result);
+    }
+
+    if (
+      (url.pathname === "/api/tasks/reference" ||
+        url.pathname === "/api/daily-plans/reference") &&
+      request.method === "GET"
+    ) {
+      const persistence = await getPersistenceAdapters(env);
+      const readReference = url.pathname === "/api/tasks/reference"
+        ? readReferenceTasks
+        : readReferenceDailyPlan;
+      const result = await readReference({
         sessionToken: readCookie(request, sessionCookieName),
         schoolDate: url.searchParams.get("date"),
         scopeType: url.searchParams.get("scope"),

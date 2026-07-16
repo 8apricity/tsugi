@@ -434,7 +434,32 @@ function readReferenceTasks(
   scope?: string,
   value?: string,
 ) {
-  const url = new URL('https://tsugi.test/api/tasks/reference')
+  return readReferenceContent(
+    '/api/tasks/reference', env, cookie, date, scope, value,
+  )
+}
+
+function readReferenceDailyPlan(
+  env: Env,
+  cookie = '',
+  date?: string,
+  scope?: string,
+  value?: string,
+) {
+  return readReferenceContent(
+    '/api/daily-plans/reference', env, cookie, date, scope, value,
+  )
+}
+
+function readReferenceContent(
+  pathname: '/api/tasks/reference' | '/api/daily-plans/reference',
+  env: Env,
+  cookie = '',
+  date?: string,
+  scope?: string,
+  value?: string,
+) {
+  const url = new URL(`https://tsugi.test${pathname}`)
   if (date !== undefined) url.searchParams.set('date', date)
   if (scope !== undefined) url.searchParams.set('scope', scope)
   if (value !== undefined) url.searchParams.set('value', value)
@@ -442,6 +467,15 @@ function readReferenceTasks(
   return worker.fetch(new Request(url, {
     headers: cookie ? { cookie } : {},
   }), env)
+}
+
+function readReferenceScopeOptions(env: Env, cookie = '') {
+  return worker.fetch(
+    new Request('https://tsugi.test/api/daily-plans/reference/options', {
+      headers: cookie ? { cookie } : {},
+    }),
+    env,
+  )
 }
 
 function readDirectTimetableChangeOptions(env: Env, cookie = '') {
@@ -3425,6 +3459,300 @@ describe('Reference Scope Task read API', () => {
       'class',
       'missing-class',
     )).status).toBe(400)
+  })
+})
+
+describe('Reference Scope Daily Plan read API', () => {
+  it('lists only selectable grade, class, and track scopes', async () => {
+    const env = createDailyPlanTestEnv()
+    const viewerCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    const response = await readReferenceScopeOptions(env, viewerCookie)
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      options: Array<{ type: string; value: string; label: string }>
+    }
+    expect(body.options).toContainEqual({
+      type: 'class',
+      value: '2026-grade-2-class-4',
+      label: '2年4組',
+    })
+    expect(body.options).not.toContainEqual(expect.objectContaining({
+      type: 'class',
+      value: '2026-grade-2-class-3',
+    }))
+    expect(body.options.every((option) => option.type !== 'student')).toBe(true)
+    expect((await readReferenceScopeOptions(env)).status).toBe(401)
+  })
+
+  it('projects only exact-scope School Date and unrelated Active Notes without identity', async () => {
+    const env = createDailyPlanTestEnv()
+    const classFourCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+    const viewerCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    expect((await addDirectTimetableChanges(env, classFourCookie, [
+      {
+        kind: 'note',
+        sourceId: '41900000-0000-4000-8000-000000000001',
+        changeKind: 'add',
+        targetScopeType: 'class',
+        schoolDate: '2026-07-10',
+        body: '4組の当日ノート',
+      },
+      {
+        kind: 'note',
+        sourceId: '41900000-0000-4000-8000-000000000002',
+        changeKind: 'add',
+        targetScopeType: 'class',
+        schoolDate: null,
+        body: '4組の常設ノート',
+      },
+      {
+        kind: 'note',
+        sourceId: '41900000-0000-4000-8000-000000000003',
+        changeKind: 'add',
+        targetScopeType: 'grade',
+        schoolDate: '2026-07-10',
+        body: '学年ノート',
+      },
+      {
+        kind: 'note',
+        sourceId: '41900000-0000-4000-8000-000000000004',
+        changeKind: 'add',
+        targetScopeType: 'student',
+        schoolDate: '2026-07-10',
+        body: '別Studentのノート',
+      },
+    ])).status).toBe(201)
+
+    const response = await readReferenceDailyPlan(
+      env,
+      viewerCookie,
+      '2026-07-10',
+      'class',
+      '2026-grade-2-class-4',
+    )
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      notes: Array<Record<string, unknown>>
+    }
+    expect(body.notes).toEqual([
+      expect.objectContaining({ body: '4組の当日ノート' }),
+      expect.objectContaining({ body: '4組の常設ノート' }),
+    ])
+    expect(JSON.stringify(body)).not.toContain('学年ノート')
+    expect(JSON.stringify(body)).not.toContain('別Studentのノート')
+    expect(JSON.stringify(body)).not.toContain('changedByStudentAccountId')
+    expect(JSON.stringify(body)).not.toContain('primaryActorDisplayName')
+  })
+
+  it('places Daily Lesson and visible Task Notes while hiding Notes for Tasks absent that day', async () => {
+    const env = createDailyPlanTestEnv()
+    const classFourCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+    const viewerCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const visibleTaskId = '41910000-0000-4000-8000-000000000001'
+    const hiddenTaskId = '41910000-0000-4000-8000-000000000002'
+
+    expect((await addDirectTimetableChanges(env, classFourCookie, [
+      {
+        kind: 'task',
+        sourceId: visibleTaskId,
+        changeKind: 'add',
+        targetScopeType: 'class',
+        title: '今日のタスク',
+        dueDate: '2026-07-10',
+      },
+      {
+        kind: 'task',
+        sourceId: hiddenTaskId,
+        changeKind: 'add',
+        targetScopeType: 'class',
+        title: '別日のタスク',
+        dueDate: '2026-07-11',
+      },
+      {
+        kind: 'note',
+        sourceId: '41910000-0000-4000-8000-000000000003',
+        changeKind: 'add',
+        targetScopeType: 'class',
+        schoolDate: '2026-07-10',
+        periodNumber: 2,
+        body: '2限のノート',
+      },
+      {
+        kind: 'note',
+        sourceId: '41910000-0000-4000-8000-000000000004',
+        changeKind: 'add',
+        targetScopeType: 'class',
+        relatedTaskItemId: visibleTaskId,
+        body: '見えるタスクのノート',
+      },
+      {
+        kind: 'note',
+        sourceId: '41910000-0000-4000-8000-000000000005',
+        changeKind: 'add',
+        targetScopeType: 'class',
+        relatedTaskItemId: hiddenTaskId,
+        body: '別日のタスクのノート',
+      },
+    ])).status).toBe(201)
+
+    const response = await readReferenceDailyPlan(
+      env,
+      viewerCookie,
+      '2026-07-10',
+      'class',
+      '2026-grade-2-class-4',
+    )
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      periods: Array<{ periodNumber: number; notes: Array<{ body: string }> }>
+      tasks: Array<{ title: string; notes: Array<{ body: string }> }>
+    }
+    expect(body.periods.find((period) => period.periodNumber === 2)?.notes)
+      .toEqual([expect.objectContaining({ body: '2限のノート' })])
+    expect(body.tasks).toEqual([
+      expect.objectContaining({
+        title: '今日のタスク',
+        notes: [expect.objectContaining({ body: '見えるタスクのノート' })],
+      }),
+    ])
+    expect(JSON.stringify(body)).not.toContain('別日のタスクのノート')
+  })
+
+  it('keeps a Task Note attached after its visible Task is updated', async () => {
+    const env = createDailyPlanTestEnv()
+    const classFourCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+    const viewerCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const taskId = '41915000-0000-4000-8000-000000000001'
+    expect((await addDirectTimetableChanges(env, classFourCookie, [
+      {
+        kind: 'task', sourceId: taskId, changeKind: 'add',
+        targetScopeType: 'class', title: '更新前', dueDate: '2026-07-10',
+      },
+      {
+        kind: 'note', sourceId: '41915000-0000-4000-8000-000000000002',
+        changeKind: 'add', targetScopeType: 'class',
+        relatedTaskItemId: taskId, body: '引き継ぐノート',
+      },
+    ])).status).toBe(201)
+    const updateSourceId = '41915000-0000-4000-8000-000000000003'
+    expect((await addDirectTimetableChanges(env, classFourCookie, [{
+      kind: 'task', sourceId: updateSourceId, changeKind: 'update',
+      targetScopeType: 'class', sharedInformationItemId: taskId,
+      expectedLatestChangeId: `${taskId}:change`, title: '更新後',
+      dueDate: '2026-07-10', relatedLessonName: null,
+    }])).status).toBe(201)
+
+    const response = await readReferenceDailyPlan(
+      env, viewerCookie, '2026-07-10', 'class', '2026-grade-2-class-4',
+    )
+    await expect(response.json()).resolves.toMatchObject({
+      tasks: [{
+        taskId,
+        title: '更新後',
+        notes: [{
+          body: '引き継ぐノート',
+          relatedContext: { type: 'task', taskId },
+        }],
+      }],
+    })
+
+    const legacy = await readReferenceTasks(
+      env, viewerCookie, '2026-07-10', 'class', '2026-grade-2-class-4',
+    )
+    const legacyBody = await legacy.json() as Record<string, unknown> & {
+      tasks: Array<{ taskId: string }>
+    }
+    expect(legacyBody.tasks[0].taskId).toBe(updateSourceId)
+    expect(legacyBody).not.toHaveProperty('notes')
+    expect(legacyBody).not.toHaveProperty('periods')
+  })
+
+  it('rejects individual and own scopes, denies history, and does not expand Creator Scope', async () => {
+    const env = createDailyPlanTestEnv()
+    const classFourCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+    const viewerCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const referenceNoteId = '41920000-0000-4000-8000-000000000001'
+    expect((await addDirectTimetableChanges(env, classFourCookie, [{
+      kind: 'note',
+      sourceId: referenceNoteId,
+      changeKind: 'add',
+      targetScopeType: 'class',
+      schoolDate: '2026-07-10',
+      body: '参照だけのノート',
+    }])).status).toBe(201)
+
+    expect((await readReferenceDailyPlan(
+      env,
+      viewerCookie,
+      '2026-07-10',
+      'student',
+      'test-student-2026-2-4-humanities-1',
+    )).status).toBe(400)
+    expect((await readReferenceDailyPlan(
+      env,
+      viewerCookie,
+      '2026-07-10',
+      'class',
+      '2026-grade-2-class-3',
+    )).status).toBe(400)
+    expect((await readNoteEditHistory(
+      env,
+      viewerCookie,
+      referenceNoteId,
+    )).status).toBe(404)
+
+    expect((await readReferenceDailyPlan(
+      env,
+      viewerCookie,
+      '2026-07-10',
+      'class',
+      '2026-grade-2-class-4',
+    )).status).toBe(200)
+    expect((await addDirectTimetableChanges(env, viewerCookie, [{
+      kind: 'note',
+      sourceId: '41920000-0000-4000-8000-000000000002',
+      changeKind: 'add',
+      targetScopeType: 'class',
+      schoolDate: '2026-07-10',
+      body: '自分のクラスにだけ作成',
+    }])).status).toBe(201)
+    const reread = await readReferenceDailyPlan(
+      env,
+      viewerCookie,
+      '2026-07-10',
+      'class',
+      '2026-grade-2-class-4',
+    )
+    expect(JSON.stringify(await reread.json())).not.toContain('自分のクラスにだけ作成')
   })
 })
 

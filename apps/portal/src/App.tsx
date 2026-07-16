@@ -50,6 +50,12 @@ import {
 import { taskRemovalConfirmation } from "./taskNoteCopy";
 import { TaskNoteList } from "./taskNoteView";
 import { DailyLessonNoteList } from "./dailyLessonNoteView";
+import { ReferenceDailyPlanNotes } from "./referenceDailyPlanNoteView";
+import type {
+  ReferenceDailyPlanContent,
+  ReferenceScopeOption,
+  ReferenceScopeOptions,
+} from "../shared/referenceDailyPlan";
 import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
@@ -204,8 +210,24 @@ type NoteHistoryDialog = {
   state: NoteEditHistoryState;
 };
 
+type ReferenceScopeOptionsState =
+  | { status: "loading" }
+  | { status: "error" }
+  | ReferenceScopeOptions;
+
+type ReferenceDailyPlanState =
+  | { status: "error"; schoolDate: string; referenceScopeValue: string }
+  | ({
+      status: "ready";
+      referenceScopeValue: string;
+    } & ReferenceDailyPlanContent);
+
 function lessonNameOptionId(prefix: string, index: number) {
   return `${prefix}-${index}`;
+}
+
+function referenceScopeKey(scope: ReferenceScopeOption) {
+  return `${scope.type}:${scope.value}`;
 }
 
 function shouldShowLessonNameOptions({
@@ -333,6 +355,14 @@ function App() {
   const [status, setStatus] = useState<RequestStatus>("checking");
   const [message, setMessage] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [referencePickerOpen, setReferencePickerOpen] = useState(false);
+  const [referenceScopeOptions, setReferenceScopeOptions] =
+    useState<ReferenceScopeOptionsState | null>(null);
+  const [referencePickerScopeKey, setReferencePickerScopeKey] = useState("");
+  const [referenceScope, setReferenceScope] =
+    useState<ReferenceScopeOption | null>(null);
+  const [referenceDailyPlan, setReferenceDailyPlan] =
+    useState<ReferenceDailyPlanState | null>(null);
   const menuAreaRef = useRef<HTMLDivElement | null>(null);
   const [dailyPlanClient] = useState(() =>
     createDailyPlanClient({
@@ -429,7 +459,7 @@ function App() {
   const timetableDialogOpen = Boolean(
     timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
       taskEditorForm || noteEditorForm || taskDetail || taskHistoryDialog ||
-      noteHistoryDialog,
+      noteHistoryDialog || referencePickerOpen,
   );
 
   useEffect(() => {
@@ -518,6 +548,33 @@ function App() {
     dailyPlanClient.reset();
     void dailyPlanClient.loadSelectedDailyPlan();
   }, [dailyPlanClient, status, studentAccount]);
+
+  useEffect(() => {
+    if (!referenceScope) return;
+    const controller = new AbortController();
+    const url = new URL("/api/daily-plans/reference", window.location.origin);
+    url.searchParams.set("date", selectedSchoolDate);
+    url.searchParams.set("scope", referenceScope.type);
+    url.searchParams.set("value", referenceScope.value);
+    fetch(url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Reference Daily Plan unavailable");
+        return response.json() as Promise<ReferenceDailyPlanContent & { status: "ready" }>;
+      })
+      .then((dailyPlan) => setReferenceDailyPlan({
+        ...dailyPlan,
+        referenceScopeValue: referenceScope.value,
+      }))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setReferenceDailyPlan({
+          status: "error",
+          schoolDate: selectedSchoolDate,
+          referenceScopeValue: referenceScope.value,
+        });
+      });
+    return () => controller.abort();
+  }, [referenceScope, selectedSchoolDate]);
 
   useEffect(() => {
     if (
@@ -1106,6 +1163,10 @@ function App() {
     setNoteHistoryDialog(null);
     setTimetableLayerDialog(null);
     setTimetableEditorOptions(null);
+    setReferencePickerOpen(false);
+    setReferenceScopeOptions(null);
+    setReferencePickerScopeKey("");
+    setReferenceScope(null);
     setMenuOpen(false);
     setStatus("idle");
     setMessage("ログアウトしました。");
@@ -1160,6 +1221,53 @@ function App() {
       note.relatedContext?.type === "daily-lesson"
       ? note.relatedContext.schoolDate
       : null;
+  }
+
+  async function loadReferenceScopeOptions() {
+    setReferenceScopeOptions({ status: "loading" });
+    try {
+      const response = await fetch("/api/daily-plans/reference/options");
+      if (!response.ok) throw new Error("Reference Scope options unavailable");
+      const options = (await response.json()) as ReferenceScopeOptions;
+      setReferenceScopeOptions(options);
+      setReferencePickerScopeKey(
+        options.options.length > 0
+          ? referenceScopeKey(options.options[0])
+          : "",
+      );
+    } catch {
+      setReferenceScopeOptions({ status: "error" });
+    }
+  }
+
+  function openReferencePicker() {
+    setMenuOpen(false);
+    setReferencePickerOpen(true);
+    if (referenceScope) {
+      setReferencePickerScopeKey(referenceScopeKey(referenceScope));
+    }
+    if (referenceScopeOptions === null) {
+      void loadReferenceScopeOptions();
+    }
+  }
+
+  function selectReferenceScope(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (referenceScopeOptions?.status !== "ready") return;
+    const option = referenceScopeOptions.options.find(
+      (candidate) => referenceScopeKey(candidate) === referencePickerScopeKey,
+    );
+    if (!option) return;
+    if (
+      referenceScope?.type === option.type &&
+      referenceScope.value === option.value
+    ) {
+      setReferencePickerOpen(false);
+      return;
+    }
+    setReferenceDailyPlan(null);
+    setReferenceScope(option);
+    setReferencePickerOpen(false);
   }
 
   function notePeriodNumber(note: DailyPlanNoteForCache) {
@@ -1963,6 +2071,26 @@ function App() {
     const targetScopeContext = dailyPlanState.status === "ready"
       ? dailyPlanState.dailyPlan.studentAffiliation
       : undefined;
+    const referenceBasePeriods =
+      dailyPlanState.status === "ready" &&
+      dailyPlanState.dailyPlan.schoolDate === selectedSchoolDate
+        ? dailyPlanState.dailyPlan.periods.map((period) => ({
+            periodNumber: period.periodNumber,
+            lessonName: period.lessonName,
+          }))
+        : null;
+    const referencePlanMatchesSelection = Boolean(
+      referenceScope &&
+      referenceDailyPlan &&
+      referenceDailyPlan.schoolDate === selectedSchoolDate &&
+      referenceDailyPlan.referenceScopeValue === referenceScope.value,
+    );
+    const referencePlanReady =
+      referencePlanMatchesSelection &&
+      referenceDailyPlan?.status === "ready" &&
+      referenceBasePeriods !== null;
+    const referencePlanError =
+      referencePlanMatchesSelection && referenceDailyPlan?.status === "error";
 
     return (
       <main className="app-page daily-plan-page">
@@ -2003,6 +2131,25 @@ function App() {
                   <button className="menu-item" type="button" disabled>
                     設定
                   </button>
+                  <button
+                    className="menu-item"
+                    type="button"
+                    onClick={openReferencePicker}
+                  >
+                    ほかの範囲を参照
+                  </button>
+                  {referenceScope ? (
+                    <button
+                      className="menu-item"
+                      type="button"
+                      onClick={() => {
+                        setReferenceScope(null);
+                        setMenuOpen(false);
+                      }}
+                    >
+                      自分の予定に戻る
+                    </button>
+                  ) : null}
                   <button className="menu-item" type="button" onClick={logout}>
                     ログアウト
                   </button>
@@ -2025,7 +2172,11 @@ function App() {
                 </span>
               ) : null}
             </h1>
-            {timetableEditor.editing ? (
+            {referenceScope ? (
+              <span className="reference-mode-indicator" role="status">
+                参照中
+              </span>
+            ) : timetableEditor.editing ? (
               <span className="edit-mode-indicator" role="status">
                 編集中
               </span>
@@ -2048,13 +2199,53 @@ function App() {
               swipeStartXRef.current = null;
             }}
           >
-            {dailyPlanState.status === "loading" ? (
+            {referenceScope && !referencePlanReady && !referencePlanError ? (
+              <div className="panel state-panel" aria-live="polite">
+                {referenceScope.label}の予定を読み込んでいます…
+              </div>
+            ) : null}
+
+            {referenceScope && referencePlanError ? (
+              <div className="panel state-panel" role="alert">
+                <h2>参照する予定を読み込めませんでした</h2>
+                <p>範囲を選び直すか、時間をおいて再度お試しください。</p>
+                <button
+                  className="button-secondary"
+                  type="button"
+                  onClick={openReferencePicker}
+                >
+                  範囲を選び直す
+                </button>
+              </div>
+            ) : null}
+
+            {referenceScope && referencePlanReady ? (
+              <>
+                <div className="reference-scope-banner" role="status">
+                  自分の時間割で<strong>{referenceScope.label}</strong>を参照中
+                  <button
+                    className="button-link"
+                    type="button"
+                    onClick={openReferencePicker}
+                  >
+                    範囲を変更
+                  </button>
+                </div>
+                <ReferenceDailyPlanNotes
+                  {...referenceDailyPlan}
+                  basePeriods={referenceBasePeriods}
+                  targetScopeLabel={referenceScope.label}
+                />
+              </>
+            ) : null}
+
+            {!referenceScope && dailyPlanState.status === "loading" ? (
               <div className="panel state-panel" aria-live="polite">
                 この日の予定を読み込んでいます…
               </div>
             ) : null}
 
-            {dailyPlanState.status === "affiliation-renewal-needed" ? (
+            {!referenceScope && dailyPlanState.status === "affiliation-renewal-needed" ? (
               <div className="panel state-panel" role="status">
                 <h2>所属の更新が必要です</h2>
                 <p>
@@ -2064,7 +2255,7 @@ function App() {
               </div>
             ) : null}
 
-            {dailyPlanState.status === "error" ? (
+            {!referenceScope && dailyPlanState.status === "error" ? (
               <div className="panel state-panel" role="alert">
                 <h2>この日の予定を読み込めませんでした</h2>
                 <p>時間をおいて再度お試しください。</p>
@@ -2078,7 +2269,7 @@ function App() {
               </div>
             ) : null}
 
-            {dailyPlanState.status === "ready" ? (
+            {!referenceScope && dailyPlanState.status === "ready" ? (
               <>
                 <section
                   className="panel timetable-panel"
@@ -2374,6 +2565,7 @@ function App() {
                   </button>
                 ))}
               </nav>
+              {!referenceScope ? (
               <div className="timetable-edit-controls">
                 {timetableEditor.editing ? (
                   <button
@@ -2407,7 +2599,81 @@ function App() {
                   <span aria-hidden="true">✎</span>
                 </button>
               </div>
+              ) : null}
             </footer>
+          ) : null}
+
+          {referencePickerOpen ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <section
+                className="timetable-editor-dialog reference-scope-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="reference-scope-title"
+              >
+                <header className="editor-dialog-header">
+                  <h2 id="reference-scope-title">ほかの範囲を参照</h2>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="閉じる"
+                    onClick={() => setReferencePickerOpen(false)}
+                  >
+                    ×
+                  </button>
+                </header>
+                {referenceScopeOptions?.status === "loading" ||
+                referenceScopeOptions === null ? (
+                  <p className="reference-scope-dialog-status" role="status">
+                    選べる範囲を読み込んでいます…
+                  </p>
+                ) : referenceScopeOptions.status === "error" ? (
+                  <div className="reference-scope-dialog-status" role="alert">
+                    <p>選べる範囲を読み込めませんでした。</p>
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => void loadReferenceScopeOptions()}
+                    >
+                      再読み込み
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={selectReferenceScope}>
+                    <label>
+                      <span>参照する変更適用範囲</span>
+                      <select
+                        value={referencePickerScopeKey}
+                        onChange={(event) =>
+                          setReferencePickerScopeKey(event.target.value)}
+                        disabled={referenceScopeOptions.options.length === 0}
+                      >
+                        {referenceScopeOptions.options.map((option) => (
+                          <option
+                            key={referenceScopeKey(option)}
+                            value={referenceScopeKey(option)}
+                          >
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {referenceScopeOptions.options.length === 0 ? (
+                      <p className="empty-state">参照できる範囲はありません。</p>
+                    ) : null}
+                    <div className="editor-dialog-actions">
+                      <button
+                        className="button-primary"
+                        type="submit"
+                        disabled={referenceScopeOptions.options.length === 0}
+                      >
+                        参照する
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+            </div>
           ) : null}
 
           {noteEditorForm ? (

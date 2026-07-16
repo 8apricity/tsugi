@@ -1047,6 +1047,78 @@ body.page-scroll-locked {
   min-width: 0;
 }
 
+.reference-mode-indicator {
+  justify-self: end;
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.reference-scope-banner {
+  display: flex;
+  width: min(100%, 860px);
+  margin: 0 auto;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-primary);
+  font-size: 13px;
+}
+
+.reference-daily-plan-notes {
+  display: grid;
+  gap: 16px;
+}
+
+.reference-period-heading,
+.reference-task-item {
+  cursor: default;
+}
+
+.reference-period-heading:hover {
+  background: transparent;
+  outline: 0;
+}
+
+.reference-scope-dialog {
+  width: min(560px, 100%);
+}
+
+.reference-scope-dialog .editor-dialog-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.reference-scope-dialog form,
+.reference-scope-dialog label {
+  display: grid;
+  gap: 10px;
+}
+
+.reference-scope-dialog label {
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.reference-scope-dialog select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: var(--color-panel);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.reference-scope-dialog-status {
+  margin: 0;
+  padding: 22px;
+}
+
 .layer-with-notes {
   display: grid;
   gap: 8px;

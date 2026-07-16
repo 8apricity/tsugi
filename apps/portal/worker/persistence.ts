@@ -393,6 +393,7 @@ export type StudentAffiliationSetupStore = {
 
 export type DailyPlanStore = StudentOperationalContextStore & {
   listClassesForSchoolYear(schoolYear: number): Promise<SchoolYearClassRecord[]>
+  listTracksForSchoolYear(schoolYear: number): Promise<TrackRecord[]>
   findSchoolYearClassById(
     classId: string,
     schoolYear: number,
@@ -434,6 +435,10 @@ export type DailyPlanStore = StudentOperationalContextStore & {
   ): Promise<ActiveTask[]>
   listActiveNotesForStudent(
     affiliation: StudentAffiliation,
+    schoolDate: string,
+  ): Promise<ActiveNote[]>
+  listActiveNotesForTargetScope(
+    targetScope: Exclude<TargetScope, { type: 'student' }>,
     schoolDate: string,
   ): Promise<ActiveNote[]>
 }
@@ -979,6 +984,19 @@ export class InMemoryPersistenceAdapters
         (note.relatedTaskItemId !== undefined ||
           note.schoolDate === null || note.schoolDate === schoolDate) &&
         studentAffiliationIncludesTargetScope(affiliation, note.targetScope),
+      )
+      .sort(compareActiveNotes)
+  }
+
+  async listActiveNotesForTargetScope(
+    targetScope: Exclude<TargetScope, { type: 'student' }>,
+    schoolDate: string,
+  ) {
+    return this.activeNotes
+      .filter((note) =>
+        (note.relatedTaskItemId !== undefined ||
+          note.schoolDate === null || note.schoolDate === schoolDate) &&
+        targetScopesEqual(note.targetScope, targetScope),
       )
       .sort(compareActiveNotes)
   }
@@ -2436,16 +2454,7 @@ export class D1PersistenceAdapters
     targetScope: Exclude<TargetScope, { type: 'student' }>,
     schoolDate: string,
   ) {
-    const scopeColumn = targetScope.type === 'grade'
-      ? 'p.grade'
-      : targetScope.type === 'class'
-        ? 'p.class_id'
-        : 'p.track_id'
-    const scopeValue = targetScope.type === 'grade'
-      ? targetScope.grade
-      : targetScope.type === 'class'
-        ? targetScope.classId
-        : targetScope.trackId
+    const { scopeColumn, scopeValue } = exactTargetScopeQuery(targetScope)
     const { results } = await this.db
       .prepare(
         `select c.source_id, c.shared_information_change_id,
@@ -2526,6 +2535,48 @@ export class D1PersistenceAdapters
         affiliation.classId,
         affiliation.trackId,
         affiliation.studentAccountId,
+      )
+      .all<ActiveNoteRow>()
+    return results.map(mapActiveNoteRow)
+  }
+
+  async listActiveNotesForTargetScope(
+    targetScope: Exclude<TargetScope, { type: 'student' }>,
+    schoolDate: string,
+  ) {
+    const { scopeColumn, scopeValue } = exactTargetScopeQuery(targetScope)
+    const { results } = await this.db
+      .prepare(
+        `select latest.source_id, latest.shared_information_change_id,
+                i.shared_information_item_id, s.school_year,
+                p.scope_type, p.grade, p.class_id, p.track_id,
+                p.student_account_id, note.body, note.related_school_date,
+                note.related_period_number, note.related_task_item_id,
+                latest.changed_by_student_account_id, latest.changed_at,
+                i.created_at
+         from shared_information_items i
+         join shared_information_changes latest
+           on latest.shared_information_change_id = i.latest_change_id
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         join note_snapshots note
+           on note.note_snapshot_id = i.current_note_snapshot_id
+         where i.kind = 'note' and i.removed_at is null
+           and (note.related_context_type in ('none', 'task')
+             or (note.related_context_type in ('school_date', 'daily_lesson')
+               and note.related_school_date = ?))
+           and (select count(*) from target_scope_parts scope_part_count
+                where scope_part_count.target_scope_id = s.target_scope_id) = 1
+           and s.school_year = ? and p.scope_type = ? and ${scopeColumn} = ?
+         order by case when note.related_context_type = 'school_date'
+                   then 0 else 1 end,
+                  i.created_at desc, i.shared_information_item_id desc`,
+      )
+      .bind(
+        schoolDate,
+        targetScope.schoolYear,
+        targetScope.type,
+        scopeValue,
       )
       .all<ActiveNoteRow>()
     return results.map(mapActiveNoteRow)
@@ -4293,6 +4344,18 @@ function targetScopeColumns(change: Pick<ActiveTimetableChange | ActiveTask | Ac
     studentAccountId:
       targetScope.type === 'student' ? targetScope.studentAccountId : null,
   }
+}
+
+function exactTargetScopeQuery(
+  targetScope: Exclude<TargetScope, { type: 'student' }>,
+) {
+  if (targetScope.type === 'grade') {
+    return { scopeColumn: 'p.grade', scopeValue: targetScope.grade }
+  }
+  if (targetScope.type === 'class') {
+    return { scopeColumn: 'p.class_id', scopeValue: targetScope.classId }
+  }
+  return { scopeColumn: 'p.track_id', scopeValue: targetScope.trackId }
 }
 
 function activeTimetableChangeSlotKey(change: Pick<

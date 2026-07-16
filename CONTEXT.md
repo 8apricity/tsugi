@@ -146,7 +146,7 @@ A student's view across multiple school dates, made from the selected daily plan
 _Avoid_: Weekly plan, calendar, dashboard
 
 **Reference Scope**:
-A target scope outside a student's own current target scopes that the student chooses to inspect through a daily plan or multi-day plan. Reference scopes may be useful for track-scoped timetables, tasks, and notes; in a class with only one track, the track scope effectively acts like a class scope. Individual-scoped tasks, notes, threads, and test result collections stay limited to their target scope.
+A target scope outside a student's own current target scopes that the student chooses to inspect through a daily plan or multi-day plan. Reference scopes may be useful for track-scoped timetables, tasks, and notes; in a class with only one track, the track scope effectively acts like a class scope. A Reference Scope read matches one allowed Target Scope exactly and is inspection-only: it does not expand Creator Scope or expose edit actions, Edit History, or Named Attribution. Individual Reference Scopes cannot be selected, and individual-scoped tasks, notes, threads, and test result collections stay limited to their Target Scope.
 _Avoid_: Reference view, public feed, unrestricted access
 
 **Standard Timetable**:
@@ -226,7 +226,7 @@ A school-life obligation shared inside the school community with a target scope 
 _Avoid_: Assignment, homework, todo
 
 **Note**:
-Shared information that records a school-life notice or reminder without being a task or timetable change. A note has a target scope and may have no related context or one related context: a school date, a daily lesson, or a task.
+Shared information that records a school-life notice or reminder without being a task or timetable change. A note has a Target Scope and may have no related context or one immutable related context: a School Date, Daily Lesson, or Task. Updating a Note changes only its Body; moving or retargeting it requires removal plus addition. Removing a Task also removes its Active Task Notes in the same change, while retaining each Note's Edit History and recording the Task cascade reason.
 _Avoid_: Announcement, comment, memo
 
 **Task Completion**:

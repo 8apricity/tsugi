@@ -427,6 +427,23 @@ describe('D1 Direct Timetable Change persistence', () => {
         latestChangeId: noteUpdate.latestChangeId,
       }),
     ])
+    await expect(
+      adapters.dailyPlan.listActiveNotesForTargetScope(
+        note.targetScope,
+        '2026-07-10',
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        body: noteUpdate.body,
+        targetScope: note.targetScope,
+      }),
+    ])
+    await expect(
+      adapters.dailyPlan.listActiveNotesForTargetScope(
+        { type: 'grade', schoolYear: 2026, grade: 2 },
+        '2026-07-10',
+      ),
+    ).resolves.toEqual([])
 
     const noteRemove = {
       kind: 'note',

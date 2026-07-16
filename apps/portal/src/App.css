@@ -348,14 +348,21 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-accent);
-  font-size: 28px;
-  line-height: 1;
   cursor: pointer;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.task-add-button:hover {
-  background: var(--color-accent-soft);
+.task-add-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
 }
 
 .task-add-button:disabled {

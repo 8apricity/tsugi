@@ -1,0 +1,109 @@
+import { useId, useLayoutEffect, useRef, useState } from 'react'
+import type { Ref } from 'react'
+import { isNoteBodyOverflowing } from './noteCardLayout'
+
+export function NoteBodyView({
+  body,
+  bodyId,
+  expanded,
+  overflowing,
+  onExpand,
+  bodyRef,
+}: {
+  body: string
+  bodyId: string
+  expanded: boolean
+  overflowing: boolean
+  onExpand(): void
+  bodyRef?: Ref<HTMLParagraphElement>
+}) {
+  return (
+    <>
+      <p
+        id={bodyId}
+        ref={bodyRef}
+        className={expanded ? 'note-body-expanded' : 'note-body-clamped'}
+      >
+        {body}
+      </p>
+      {!expanded && overflowing ? (
+        <button
+          className="note-expand-button"
+          type="button"
+          aria-expanded={false}
+          aria-controls={bodyId}
+          aria-label="ノートの続きを読む"
+          onClick={onExpand}
+        >
+          続きを読む
+        </button>
+      ) : null}
+    </>
+  )
+}
+
+export function NoteCard({
+  noteId,
+  body,
+  targetScopeLabel,
+  draft = false,
+  conflicted = false,
+  onCancelDraft,
+}: {
+  noteId: string
+  body: string
+  targetScopeLabel: string
+  draft?: boolean
+  conflicted?: boolean
+  onCancelDraft?: () => void
+}) {
+  const generatedId = useId()
+  const bodyId = `note-body-${generatedId.replace(/:/g, '')}`
+  const bodyRef = useRef<HTMLParagraphElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+
+  useLayoutEffect(() => {
+    const element = bodyRef.current
+    if (!element || expanded) return
+    const measure = () => setOverflowing(isNoteBodyOverflowing(element))
+    measure()
+    const observer = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(measure)
+    observer?.observe(element)
+    return () => observer?.disconnect()
+  }, [body, expanded])
+
+  return (
+    <article
+      className={`note-item${draft ? ' note-draft' : ''}`}
+      data-note-id={noteId}
+    >
+      <NoteBodyView
+        body={body}
+        bodyId={bodyId}
+        expanded={expanded}
+        overflowing={overflowing}
+        onExpand={() => setExpanded(true)}
+        bodyRef={bodyRef}
+      />
+      <div className="note-meta">
+        <span className="task-scope-badge">{targetScopeLabel}</span>
+        {draft ? (
+          <small>{conflicted ? 'ほかの変更あり' : '下書き'}</small>
+        ) : null}
+        {draft && onCancelDraft ? (
+          <button
+            className="button-link"
+            type="button"
+            aria-label="ノートの下書きを取り消す"
+            onClick={onCancelDraft}
+          >
+            取り消す
+          </button>
+        ) : null}
+      </div>
+    </article>
+  )
+}

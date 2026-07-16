@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createNewNoteDraftForm,
   createNewTaskDraftForm,
-  createTimetableEditorClient as createEditorClient,
+  createSharedInformationEditorClient as createEditorClient,
   normalizeDirectLessonReplacement,
   type DirectTimetableSubmissionTransportResult,
   type TimetableLayerState,
-} from './timetableEditorClient'
-import { createDirectTimetableChangeTransport } from './timetableSubmissionTransport'
+} from './sharedInformationEditorClient'
+import {
+  createSharedInformationDirectChangeTransport,
+} from './sharedInformationSubmissionTransport'
 
 type EditorOptions = Omit<
   Parameters<typeof createEditorClient>[0],
@@ -58,11 +61,12 @@ function layerState(
   }
 }
 
-describe('Timetable editor client', () => {
-  it('coexists Task and Timetable Change drafts in one submitted batch', async () => {
+describe('Shared Information editor client', () => {
+  it('coexists Note, Task, and Timetable Change drafts in one submitted batch', async () => {
     const ids = [
       '33000000-0000-4000-8000-000000000101',
       '33000000-0000-4000-8000-000000000102',
+      '33000000-0000-4000-8000-000000000103',
     ]
     const submitted: unknown[] = []
     const editor = createTimetableEditorClient({
@@ -78,6 +82,11 @@ describe('Timetable editor client', () => {
       title: '',
       dueDate: '2026-07-10',
       relatedLessonName: null,
+      targetScopeType: null,
+    })
+    expect(createNewNoteDraftForm('2026-07-10')).toEqual({
+      body: '',
+      schoolDate: '2026-07-10',
       targetScopeType: null,
     })
     expect(editor.saveTaskDraft({
@@ -104,8 +113,13 @@ describe('Timetable editor client', () => {
       periodNumber: 3,
       replacement: { type: 'lesson_name', lessonName: '総合' },
     })).toMatchObject({ status: 'saved' })
+    expect(editor.saveNoteDraft({
+      body: '  集合場所は視聴覚室です。\n上履きを持参してください。  ',
+      schoolDate: '2026-07-10',
+      targetScopeType: 'class',
+    })).toMatchObject({ status: 'saved' })
     expect(editor.getSnapshot()).toMatchObject({
-      draftCount: 2,
+      draftCount: 3,
       taskDrafts: [
         {
           title: '地理ワークを提出',
@@ -113,6 +127,11 @@ describe('Timetable editor client', () => {
           targetScopeType: 'track',
         },
       ],
+      noteDrafts: [{
+        body: '集合場所は視聴覚室です。\n上履きを持参してください。',
+        schoolDate: '2026-07-10',
+        targetScopeType: 'class',
+      }],
     })
 
     await expect(editor.submitCurrentBatch({
@@ -135,6 +154,14 @@ describe('Timetable editor client', () => {
             title: '地理ワークを提出',
             dueDate: '2026-07-10',
             relatedLessonName: { registeredLessonNameId: 'geography' },
+          },
+          {
+            kind: 'note',
+            sourceId: '33000000-0000-4000-8000-000000000103',
+            changeKind: 'add',
+            targetScopeType: 'class',
+            schoolDate: '2026-07-10',
+            body: '集合場所は視聴覚室です。\n上履きを持参してください。',
           },
         ],
       },
@@ -545,7 +572,7 @@ describe('Timetable editor client', () => {
     }
     const editor = createTimetableEditorClient({
       storage: memoryStorage(),
-      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+      submitDirectTimetableChanges: createSharedInformationDirectChangeTransport({
         fetcher: async () => Response.json({
           status: 'idempotency-conflict',
           conflictingKeys: [key],
@@ -736,7 +763,7 @@ describe('Timetable editor client', () => {
     }
     const restored = createTimetableEditorClient({
       storage,
-      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+      submitDirectTimetableChanges: createSharedInformationDirectChangeTransport({
         fetcher: async () => Response.json({
           status: 'timetable-change-conflict',
           conflictingKeys: [key],
@@ -767,7 +794,7 @@ describe('Timetable editor client', () => {
     const storage = memoryStorage()
     const editor = createTimetableEditorClient({
       storage,
-      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+      submitDirectTimetableChanges: createSharedInformationDirectChangeTransport({
         fetcher: async () => { throw new Error('offline') },
       }),
     })
@@ -802,6 +829,38 @@ describe('Timetable editor client', () => {
 
     restored.restoreServerState('student', '2026-07-11', 4)
     expect(restored.getSnapshot()).toMatchObject({ draftCount: 0, draftDates: [] })
+  })
+
+  it('restores a conflicted Note draft by source ID', async () => {
+    const sourceId = '33000000-0000-4000-8000-000000000202'
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({
+      storage,
+      createId: () => sourceId,
+      submitDirectTimetableChanges: async () => ({
+        status: 'idempotency-conflict',
+        conflictingKeys: [],
+        conflictingSourceIds: [sourceId],
+      }),
+    })
+    editor.saveNoteDraft({
+      body: '集合場所は視聴覚室です。',
+      schoolDate: '2026-07-10',
+      targetScopeType: 'class',
+    })
+
+    await editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      conflictCount: 1,
+      noteDrafts: [{ sourceId, conflicted: true }],
+    })
+    expect(createTimetableEditorClient({ storage }).getSnapshot()).toMatchObject({
+      conflictCount: 1,
+      noteDrafts: [{ sourceId, conflicted: true }],
+    })
   })
 
   it('rejects a restored Floating Lesson Reference without a selected label', () => {
@@ -961,7 +1020,7 @@ describe('Timetable editor client', () => {
     }
     const editor = createTimetableEditorClient({
       storage: memoryStorage(),
-      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+      submitDirectTimetableChanges: createSharedInformationDirectChangeTransport({
         fetcher: async () => Response.json({
           status: 'timetable-change-conflict',
           conflictingKeys: [key],
@@ -998,7 +1057,7 @@ describe('Timetable editor client', () => {
     let freshnessCalls = 0
     const editor = createTimetableEditorClient({
       storage: memoryStorage(),
-      submitDirectTimetableChanges: createDirectTimetableChangeTransport({
+      submitDirectTimetableChanges: createSharedInformationDirectChangeTransport({
         fetcher: async () => Response.json({
           status: 'affiliation-renewal-needed',
           schoolYear: 2026,

@@ -414,7 +414,8 @@
   gap: 4px;
 }
 
-.task-item .task-scope-badge {
+.task-item .task-scope-badge,
+.note-item .task-scope-badge {
   display: inline-block;
   width: fit-content;
   padding: 2px 7px;
@@ -432,6 +433,8 @@
 }
 
 .note-item {
+  display: grid;
+  gap: 8px;
   padding: 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -439,7 +442,47 @@
 }
 
 .note-item p {
-  margin: 0 0 4px;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-draft {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.note-body-clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.note-body-expanded {
+  display: block;
+}
+
+.note-expand-button {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.note-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.note-meta .button-link {
+  margin-left: auto;
 }
 
 .date-strip-footer {
@@ -585,17 +628,20 @@ body.page-scroll-locked {
 }
 
 .task-editor-dialog,
+.note-editor-dialog,
 .task-detail-dialog {
   width: min(560px, 100%);
 }
 
 .task-editor-dialog .editor-dialog-header,
+.note-editor-dialog .editor-dialog-header,
 .task-detail-dialog .editor-dialog-header {
   padding: 18px 22px;
   border-bottom: 1px solid var(--color-border);
 }
 
-.task-editor-dialog form label {
+.task-editor-dialog form label,
+.note-editor-dialog form label {
   display: grid;
   gap: 7px;
   color: var(--color-primary);
@@ -615,8 +661,17 @@ body.page-scroll-locked {
 }
 
 .task-editor-dialog form input,
-.task-editor-dialog form select {
+.task-editor-dialog form select,
+.note-editor-dialog form input,
+.note-editor-dialog form select,
+.note-editor-dialog form textarea {
   width: 100%;
+}
+
+.note-editor-dialog form textarea {
+  min-height: 150px;
+  resize: vertical;
+  white-space: pre-wrap;
 }
 
 .task-due-date-row {

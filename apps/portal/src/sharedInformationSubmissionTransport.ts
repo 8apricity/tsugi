@@ -1,14 +1,14 @@
 import { isTargetScopeType } from '../shared/targetScope'
 import type {
-  SubmitDirectTimetableChanges,
+  SubmitDirectChanges,
   TimetableLayerKey,
-} from './timetableEditorClient'
+} from './sharedInformationEditorClient'
 
-export function createDirectTimetableChangeTransport({
+export function createSharedInformationDirectChangeTransport({
   fetcher = globalThis.fetch,
-}: { fetcher?: typeof fetch } = {}): SubmitDirectTimetableChanges {
+}: { fetcher?: typeof fetch } = {}): SubmitDirectChanges {
   return async (payload) => {
-    const response = await fetcher('/api/timetable-changes/direct', {
+    const response = await fetcher('/api/shared-information/direct-changes', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
@@ -48,6 +48,9 @@ export function createDirectTimetableChangeTransport({
     return { status: 'rejected' }
   }
 }
+
+export const createDirectTimetableChangeTransport =
+  createSharedInformationDirectChangeTransport
 
 function readStringArray(value: unknown) {
   return Array.isArray(value)

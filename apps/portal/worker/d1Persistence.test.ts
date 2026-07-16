@@ -261,7 +261,7 @@ describe('D1 Direct Timetable Change persistence', () => {
     ]))
   })
 
-  it('atomically stores mixed Timetable Change and Task adds with idempotent retries', async () => {
+  it('atomically stores every Shared Information Kind with idempotent retries', async () => {
     const database = createTestDatabase()
     const adapters = createD1PersistenceAdapters(
       new SqliteD1Database(database) as unknown as D1Database,
@@ -329,12 +329,29 @@ describe('D1 Direct Timetable Change persistence', () => {
       changedAt: Date.parse('2026-07-09T03:00:00.000Z'),
       createdAt: Date.parse('2026-07-09T03:00:00.000Z'),
     } satisfies DirectChangeOperation
+    const note = {
+      kind: 'note',
+      changeKind: 'add',
+      sourceId: '33999999-9999-4999-8999-999999999999',
+      sharedInformationItemId: '33999999-9999-4999-8999-999999999999',
+      latestChangeId: '33999999-9999-4999-8999-999999999999:change',
+      targetScope: {
+        type: 'track',
+        schoolYear: 2026,
+        trackId: 'task-track-1',
+      },
+      schoolDate: '2026-07-10',
+      body: '集合場所は視聴覚室です。\n上履きを持参してください。',
+      changedByStudentAccountId: 'task-student-1',
+      changedAt: Date.parse('2026-07-09T04:00:00.000Z'),
+      createdAt: Date.parse('2026-07-09T04:00:00.000Z'),
+    } satisfies DirectChangeOperation
 
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([timetable, task]),
+      adapters.directChange.commitDirectChanges([timetable, task, note]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([timetable, task]),
+      adapters.directChange.commitDirectChanges([timetable, task, note]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
       adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-10'),
@@ -348,6 +365,35 @@ describe('D1 Direct Timetable Change persistence', () => {
         },
       }),
     ])
+    await expect(
+      adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        body: '集合場所は視聴覚室です。\n上履きを持参してください。',
+        schoolDate: '2026-07-10',
+      }),
+    ])
+    expect(database.prepare(
+      `select i.kind, note.body, change_row.note_snapshot_id
+       from shared_information_items i
+       join note_snapshots note
+         on note.note_snapshot_id = i.current_note_snapshot_id
+       join shared_information_changes change_row
+         on change_row.shared_information_change_id = i.latest_change_id
+       where i.shared_information_item_id = ?`,
+    ).get(note.sharedInformationItemId)).toEqual({
+      kind: 'note',
+      body: note.body,
+      note_snapshot_id: `${note.sourceId}:snapshot`,
+    })
+    await expect(
+      adapters.directChange.commitDirectChanges([
+        { ...note, body: 'changed retry payload' },
+      ]),
+    ).resolves.toMatchObject({
+      status: 'idempotency-conflict',
+      conflictingSourceIds: [note.sourceId],
+    })
     await expect(
       adapters.dailyPlan.listActiveTasksForTargetScope(
         {
@@ -529,15 +575,25 @@ describe('D1 Direct Timetable Change persistence', () => {
       sharedInformationItemId: '33444444-4444-4444-8444-444444444444',
       latestChangeId: '33444444-4444-4444-8444-444444444444:change',
     } satisfies DirectChangeOperation
+    const rolledBackNote = {
+      ...note,
+      sourceId: '33888888-8888-4888-8888-888888888888',
+      sharedInformationItemId: '33888888-8888-4888-8888-888888888888',
+      latestChangeId: '33888888-8888-4888-8888-888888888888:change',
+    } satisfies DirectChangeOperation
     await expect(
       adapters.directTimetableChange.commitDirectChanges([
         occupiedTimetable,
         rolledBackTask,
+        rolledBackNote,
       ]),
     ).resolves.toMatchObject({ status: 'conflict' })
     expect(database.prepare(
       'select count(*) as count from task_snapshots where task_snapshot_id = ?',
     ).get(`${rolledBackTask.sourceId}:snapshot`)).toEqual({ count: 0 })
+    expect(database.prepare(
+      'select count(*) as count from note_snapshots where note_snapshot_id = ?',
+    ).get(`${rolledBackNote.sourceId}:snapshot`)).toEqual({ count: 0 })
   })
 
   it('retains applied Task proposal changes without exposing proposal participants', async () => {

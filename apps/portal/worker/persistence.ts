@@ -231,9 +231,26 @@ export type DirectTaskOperation =
       expectedLatestChangeId: string
     })
 
+export type ActiveNote = {
+  sourceId: string
+  sharedInformationItemId: string
+  latestChangeId: string
+  targetScope: TargetScope
+  schoolDate: string
+  body: string
+  changedByStudentAccountId: string
+  changedAt: number
+  createdAt: number
+}
+
+export type DirectNoteOperation = ActiveNote & {
+  changeKind: 'add'
+}
+
 export type DirectChangeOperation =
   | ({ kind: 'timetable_change' } & DirectTimetableChangeOperation)
   | ({ kind: 'task' } & DirectTaskOperation)
+  | ({ kind: 'note' } & DirectNoteOperation)
 
 export type HistoricalTimetableChangeReplacement =
   | Exclude<TimetableChangeReplacement, { type: 'floating_lesson_reference' }>
@@ -380,9 +397,13 @@ export type DailyPlanStore = StudentOperationalContextStore & {
     targetScope: Exclude<TargetScope, { type: 'student' }>,
     schoolDate: string,
   ): Promise<ActiveTask[]>
+  listActiveNotesForStudent(
+    affiliation: StudentAffiliation,
+    schoolDate: string,
+  ): Promise<ActiveNote[]>
 }
 
-export type DirectTimetableChangeStore = StudentOperationalContextStore & {
+export type DirectChangeStore = StudentOperationalContextStore & {
   commitDirectChanges(
     changes: DirectChangeOperation[],
   ): Promise<
@@ -422,6 +443,8 @@ export type DirectTimetableChangeStore = StudentOperationalContextStore & {
   listRegisteredLessonNames(): Promise<RegisteredLessonName[]>
 }
 
+export type DirectTimetableChangeStore = DirectChangeStore
+
 export type TimetableChangeHistoryStore = {
   listTimetableChangeHistory(input: {
     targetScope: TargetScope
@@ -453,6 +476,7 @@ export type PersistenceAdapters = {
   studentAccount: StudentAccountAccessStore
   studentAffiliation: StudentAffiliationSetupStore
   dailyPlan: DailyPlanStore
+  directChange: DirectChangeStore
   directTimetableChange: DirectTimetableChangeStore
   timetableChangeHistory: TimetableChangeHistoryStore
   taskEditHistory: TaskEditHistoryStore
@@ -464,7 +488,7 @@ export class InMemoryPersistenceAdapters
     StudentAccountAccessStore,
     StudentAffiliationSetupStore,
     DailyPlanStore,
-    DirectTimetableChangeStore,
+    DirectChangeStore,
     TimetableChangeHistoryStore,
     TaskEditHistoryStore
 {
@@ -480,6 +504,7 @@ export class InMemoryPersistenceAdapters
   private standardTimetableEntries: StandardTimetableEntrySeed[] = []
   private activeTimetableChanges: ActiveTimetableChange[] = []
   private activeTasks: ActiveTask[] = []
+  private activeNotes: ActiveNote[] = []
   private directTimetableChangeOperations = new Map<
     string,
     DirectTimetableChangeOperation
@@ -487,6 +512,10 @@ export class InMemoryPersistenceAdapters
   private directTaskOperations = new Map<
     string,
     Extract<DirectChangeOperation, { kind: 'task' }>
+  >()
+  private directNoteOperations = new Map<
+    string,
+    Extract<DirectChangeOperation, { kind: 'note' }>
   >()
   private initialSetupDrafts = new Map<string, InitialSetupDraft>()
   private failNextAffiliationSave = false
@@ -896,6 +925,18 @@ export class InMemoryPersistenceAdapters
       .sort(compareActiveTasks)
   }
 
+  async listActiveNotesForStudent(
+    affiliation: StudentAffiliation,
+    schoolDate: string,
+  ) {
+    return this.activeNotes
+      .filter((note) =>
+        note.schoolDate === schoolDate &&
+        studentAffiliationIncludesTargetScope(affiliation, note.targetScope),
+      )
+      .sort(compareActiveNotes)
+  }
+
   async commitDirectTimetableChanges(changes: DirectTimetableChangeOperation[]) {
     const result = await this.commitDirectChanges(
       changes.map((change) => ({ ...change, kind: 'timetable_change' as const })),
@@ -916,11 +957,9 @@ export class InMemoryPersistenceAdapters
     const idempotencyConflicts: string[] = []
 
     for (const change of changes) {
-      const existing = change.kind === 'task'
-        ? this.directTaskOperations.get(change.sourceId) ??
-          this.directTimetableChangeOperations.get(change.sourceId)
-        : this.directTimetableChangeOperations.get(change.sourceId) ??
-          this.directTaskOperations.get(change.sourceId)
+      const existing = this.directTimetableChangeOperations.get(change.sourceId) ??
+        this.directTaskOperations.get(change.sourceId) ??
+        this.directNoteOperations.get(change.sourceId)
 
       if (existing) {
         if (!sameDirectChangeOperationPayload(existing, change)) {
@@ -982,6 +1021,11 @@ export class InMemoryPersistenceAdapters
     }
 
     for (const change of pending) {
+      if (change.kind === 'note') {
+        this.directNoteOperations.set(change.sourceId, change)
+        this.activeNotes.push(change)
+        continue
+      }
       if (change.kind === 'task') {
         this.directTaskOperations.set(change.sourceId, change)
         if (change.changeKind === 'add') {
@@ -1375,6 +1419,27 @@ type ActiveTaskRow = {
   changed_by_student_account_id: string
   changed_at: string
   created_at: string
+}
+
+type ActiveNoteRow = {
+  source_id: string
+  shared_information_change_id: string
+  shared_information_item_id: string
+  school_year: number
+  scope_type: TargetScopeType
+  grade: number | null
+  class_id: string | null
+  track_id: string | null
+  student_account_id: string | null
+  body: string
+  related_school_date: string
+  changed_by_student_account_id: string
+  changed_at: string
+  created_at: string
+}
+
+type StoredDirectNoteOperationRow = ActiveNoteRow & {
+  change_kind: 'add'
 }
 
 type StoredDirectTaskOperationRow = Omit<
@@ -2229,6 +2294,49 @@ export class D1PersistenceAdapters
     return results.map(mapActiveTaskRow)
   }
 
+  async listActiveNotesForStudent(
+    affiliation: StudentAffiliation,
+    schoolDate: string,
+  ) {
+    const { results } = await this.db
+      .prepare(
+        `select latest.source_id, latest.shared_information_change_id,
+                i.shared_information_item_id, s.school_year,
+                p.scope_type, p.grade, p.class_id, p.track_id,
+                p.student_account_id, note.body, note.related_school_date,
+                latest.changed_by_student_account_id, latest.changed_at,
+                i.created_at
+         from shared_information_items i
+         join shared_information_changes latest
+           on latest.shared_information_change_id = i.latest_change_id
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         join note_snapshots note
+           on note.note_snapshot_id = i.current_note_snapshot_id
+         where i.kind = 'note' and i.removed_at is null
+           and note.related_context_type = 'school_date'
+           and note.related_school_date = ?
+           and (select count(*) from target_scope_parts scope_part_count
+                where scope_part_count.target_scope_id = s.target_scope_id) = 1
+           and s.school_year = ?
+           and ((p.scope_type = 'grade' and p.grade = ?)
+             or (p.scope_type = 'class' and p.class_id = ?)
+             or (p.scope_type = 'track' and p.track_id = ?)
+             or (p.scope_type = 'student' and p.student_account_id = ?))
+         order by i.created_at desc, i.shared_information_item_id desc`,
+      )
+      .bind(
+        schoolDate,
+        affiliation.schoolYear,
+        affiliation.grade,
+        affiliation.classId,
+        affiliation.trackId,
+        affiliation.studentAccountId,
+      )
+      .all<ActiveNoteRow>()
+    return results.map(mapActiveNoteRow)
+  }
+
   async commitDirectChanges(changes: DirectChangeOperation[]) {
     const timetableChanges = changes.filter(
       (change): change is Extract<DirectChangeOperation, { kind: 'timetable_change' }> =>
@@ -2238,8 +2346,16 @@ export class D1PersistenceAdapters
       (change): change is Extract<DirectChangeOperation, { kind: 'task' }> =>
         change.kind === 'task',
     )
-    if (taskChanges.length > 0) {
-      return this.commitMixedDirectChanges(timetableChanges, taskChanges)
+    const noteChanges = changes.filter(
+      (change): change is Extract<DirectChangeOperation, { kind: 'note' }> =>
+        change.kind === 'note',
+    )
+    if (taskChanges.length > 0 || noteChanges.length > 0) {
+      return this.commitMixedDirectChanges(
+        timetableChanges,
+        taskChanges,
+        noteChanges,
+      )
     }
     const result = await this.commitDirectTimetableChanges(timetableChanges)
     return result.status === 'applied'
@@ -2256,14 +2372,17 @@ export class D1PersistenceAdapters
   private async commitMixedDirectChanges(
     timetableChanges: Array<Extract<DirectChangeOperation, { kind: 'timetable_change' }>>,
     taskChanges: Array<Extract<DirectChangeOperation, { kind: 'task' }>>,
+    noteChanges: Array<Extract<DirectChangeOperation, { kind: 'note' }>>,
   ) {
     const changes: DirectChangeOperation[] = [
       ...timetableChanges,
       ...taskChanges,
+      ...noteChanges,
     ]
-    const [storedTimetable, storedTasks] = await Promise.all([
+    const [storedTimetable, storedTasks, storedNotes] = await Promise.all([
       this.findDirectChangesBySourceIds(changes.map((change) => change.sourceId)),
       this.findDirectTaskOperationsBySourceIds(changes.map((change) => change.sourceId)),
+      this.findDirectNoteOperationsBySourceIds(changes.map((change) => change.sourceId)),
     ])
     const existingBySource = new Map<string, DirectChangeOperation>([
       ...storedTimetable.map((change) => [
@@ -2271,6 +2390,7 @@ export class D1PersistenceAdapters
         { ...change, kind: 'timetable_change' as const },
       ] as const),
       ...storedTasks.map((change) => [change.sourceId, change] as const),
+      ...storedNotes.map((change) => [change.sourceId, change] as const),
     ])
     const idempotencyConflicts = changes
       .filter((change) => {
@@ -2367,6 +2487,18 @@ export class D1PersistenceAdapters
       const snapshotId = `${change.sourceId}:snapshot`
       const sharedChangeId = `${change.sourceId}:change`
       const createdAt = new Date(change.changedAt).toISOString()
+      if (change.kind === 'note') {
+        const part = targetScopeColumns(change)
+        statements.push(
+          this.db.prepare(`insert into target_scopes (target_scope_id, school_year, created_at) values (?, ?, ?)`).bind(targetScopeId, change.targetScope.schoolYear, createdAt),
+          this.db.prepare(`insert into target_scope_parts (target_scope_part_id, target_scope_id, scope_type, grade, class_id, track_id, student_account_id) values (?, ?, ?, ?, ?, ?, ?)`).bind(`${change.sourceId}:part`, targetScopeId, change.targetScope.type, part.grade, part.classId, part.trackId, part.studentAccountId),
+          this.db.prepare(`insert into note_snapshots (note_snapshot_id, body, related_context_type, related_school_date, related_period_number, related_task_item_id, created_at) values (?, ?, 'school_date', ?, null, null, ?)`).bind(snapshotId, change.body, change.schoolDate, createdAt),
+          this.db.prepare(`insert into shared_information_items (shared_information_item_id, kind, target_scope_id, latest_change_id, current_task_snapshot_id, current_timetable_change_snapshot_id, current_note_snapshot_id, created_by_student_account_id, created_at, removed_at) values (?, 'note', ?, null, null, null, ?, ?, ?, null)`).bind(change.sharedInformationItemId, targetScopeId, snapshotId, change.changedByStudentAccountId, createdAt),
+          this.db.prepare(`insert into shared_information_changes (shared_information_change_id, shared_information_item_id, change_kind, source_type, source_id, changed_by_student_account_id, changed_at, task_snapshot_id, timetable_change_snapshot_id, note_snapshot_id) values (?, ?, 'add', 'direct', ?, ?, ?, null, null, ?)`).bind(sharedChangeId, change.sharedInformationItemId, change.sourceId, change.changedByStudentAccountId, createdAt, snapshotId),
+          this.db.prepare(`update shared_information_items set latest_change_id = ? where shared_information_item_id = ?`).bind(sharedChangeId, change.sharedInformationItemId),
+        )
+        continue
+      }
       if (change.kind === 'task') {
         const taskSnapshotValues = change.changeKind === 'remove'
           ? null
@@ -2549,9 +2681,10 @@ export class D1PersistenceAdapters
     try {
       await this.db.batch(statements)
     } catch {
-      const [retriedTimetable, retriedTasks] = await Promise.all([
+      const [retriedTimetable, retriedTasks, retriedNotes] = await Promise.all([
         this.findDirectChangesBySourceIds(changes.map((change) => change.sourceId)),
         this.findDirectTaskOperationsBySourceIds(changes.map((change) => change.sourceId)),
+        this.findDirectNoteOperationsBySourceIds(changes.map((change) => change.sourceId)),
       ])
       const retried = new Map<string, DirectChangeOperation>([
         ...retriedTimetable.map((change) => [
@@ -2559,6 +2692,7 @@ export class D1PersistenceAdapters
           { ...change, kind: 'timetable_change' as const },
         ] as const),
         ...retriedTasks.map((change) => [change.sourceId, change] as const),
+        ...retriedNotes.map((change) => [change.sourceId, change] as const),
       ])
       if (
         retried.size === changes.length &&
@@ -3025,6 +3159,30 @@ export class D1PersistenceAdapters
     return results.map(mapStoredDirectTaskOperation)
   }
 
+  private async findDirectNoteOperationsBySourceIds(sourceIds: string[]) {
+    if (sourceIds.length === 0) return []
+    const placeholders = sourceIds.map(() => '?').join(', ')
+    const { results } = await this.db
+      .prepare(
+        `select c.source_id, c.shared_information_change_id, c.change_kind,
+                i.shared_information_item_id, s.school_year,
+                p.scope_type, p.grade, p.class_id, p.track_id,
+                p.student_account_id, note.body, note.related_school_date,
+                c.changed_by_student_account_id, c.changed_at, i.created_at
+         from shared_information_changes c
+         join shared_information_items i
+           on i.shared_information_item_id = c.shared_information_item_id
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         join note_snapshots note on note.note_snapshot_id = c.note_snapshot_id
+         where c.source_type = 'direct' and i.kind = 'note'
+           and c.source_id in (${placeholders})`,
+      )
+      .bind(...sourceIds)
+      .all<StoredDirectNoteOperationRow>()
+    return results.map(mapStoredDirectNoteOperation)
+  }
+
   async listFloatingLessonReferenceLabels(schoolYear: number, grade: number) {
     const { results } = await this.db
       .prepare(
@@ -3280,6 +3438,7 @@ export function createInMemoryPersistenceAdapters(): PersistenceAdapters {
     studentAccount: implementation,
     studentAffiliation: implementation,
     dailyPlan: implementation,
+    directChange: implementation,
     directTimetableChange: implementation,
     timetableChangeHistory: implementation,
     taskEditHistory: implementation,
@@ -3294,6 +3453,7 @@ export function createD1PersistenceAdapters(db: D1Database): PersistenceAdapters
     studentAccount: implementation,
     studentAffiliation: implementation,
     dailyPlan: implementation,
+    directChange: implementation,
     directTimetableChange: implementation,
     timetableChangeHistory: implementation,
     taskEditHistory: implementation,
@@ -3492,6 +3652,30 @@ function mapActiveTaskRow(row: ActiveTaskRow): ActiveTask {
   }
 }
 
+function mapActiveNoteRow(row: ActiveNoteRow): ActiveNote {
+  return {
+    sourceId: row.source_id,
+    sharedInformationItemId: row.shared_information_item_id,
+    latestChangeId: row.shared_information_change_id,
+    targetScope: mapTargetScopeRow(row),
+    schoolDate: row.related_school_date,
+    body: row.body,
+    changedByStudentAccountId: row.changed_by_student_account_id,
+    changedAt: Date.parse(row.changed_at),
+    createdAt: Date.parse(row.created_at),
+  }
+}
+
+function mapStoredDirectNoteOperation(
+  row: StoredDirectNoteOperationRow,
+): Extract<DirectChangeOperation, { kind: 'note' }> {
+  return {
+    ...mapActiveNoteRow(row),
+    kind: 'note',
+    changeKind: 'add',
+  }
+}
+
 function mapStoredDirectTaskOperation(
   row: StoredDirectTaskOperationRow,
 ): Extract<DirectChangeOperation, { kind: 'task' }> {
@@ -3625,7 +3809,7 @@ function mapRegisteredLessonNameRow(row: {
   }
 }
 
-function targetScopeColumns(change: Pick<ActiveTimetableChange | ActiveTask, 'targetScope'>) {
+function targetScopeColumns(change: Pick<ActiveTimetableChange | ActiveTask | ActiveNote, 'targetScope'>) {
   const { targetScope } = change
   return {
     grade: targetScope.type === 'grade' ? targetScope.grade : null,
@@ -3722,6 +3906,16 @@ function sameDirectChangeOperationPayload(
       Extract<DirectChangeOperation, { kind: 'timetable_change' }>
     return sameDirectOperationPayload(leftTimetable, right)
   }
+  if (right.kind === 'note') {
+    return 'kind' in left && left.kind === 'note' &&
+      left.changeKind === right.changeKind &&
+      left.sourceId === right.sourceId &&
+      left.sharedInformationItemId === right.sharedInformationItemId &&
+      targetScopesEqual(left.targetScope, right.targetScope) &&
+      left.changedByStudentAccountId === right.changedByStudentAccountId &&
+      left.schoolDate === right.schoolDate &&
+      left.body === right.body
+  }
   if (!('kind' in left) || left.kind !== 'task') return false
   return left.changeKind === right.changeKind &&
     left.sourceId === right.sourceId &&
@@ -3742,6 +3936,11 @@ function compareActiveTasks(left: ActiveTask, right: ActiveTask) {
   if ((left.dueDate === null) !== (right.dueDate === null)) {
     return left.dueDate === null ? 1 : -1
   }
+  if (left.createdAt !== right.createdAt) return right.createdAt - left.createdAt
+  return right.sharedInformationItemId.localeCompare(left.sharedInformationItemId)
+}
+
+function compareActiveNotes(left: ActiveNote, right: ActiveNote) {
   if (left.createdAt !== right.createdAt) return right.createdAt - left.createdAt
   return right.sharedInformationItemId.localeCompare(left.sharedInformationItemId)
 }

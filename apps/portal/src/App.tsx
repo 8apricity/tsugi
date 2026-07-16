@@ -1659,12 +1659,12 @@ function App() {
                         <button
                           className="button-link"
                           type="button"
-                          aria-label={`${task.title}の下書きを削除`}
+                          aria-label={`${task.title}の下書きを取消`}
                           onClick={() =>
                             timetableEditorClient.removeTaskDraft(task.sourceId)
                           }
                         >
-                          削除
+                          取消
                         </button>
                       </article>
                     ))}

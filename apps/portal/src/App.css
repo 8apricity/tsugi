@@ -339,6 +339,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   width: 100%;
+  box-sizing: border-box;
   gap: 10px;
   align-items: center;
   padding: 12px;

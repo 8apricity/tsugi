@@ -417,6 +417,16 @@ function addDirectChanges(
   )
 }
 
+function readNoteEditHistory(env: Env, cookie: string, noteId: string) {
+  return worker.fetch(
+    new Request(
+      `https://tsugi.test/api/notes/${encodeURIComponent(noteId)}/history`,
+      { headers: cookie ? { cookie } : {} },
+    ),
+    env,
+  )
+}
+
 function readReferenceTasks(
   env: Env,
   cookie = '',
@@ -2182,15 +2192,166 @@ describe('Unified Direct Change API', () => {
       '後に追加したノート',
       '2026-07-09T02:00:00.000Z',
     )
+    vi.setSystemTime(new Date('2026-07-09T03:00:00.000Z'))
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'note',
+      sourceId: '32222222-2222-4222-8222-222222222223',
+      changeKind: 'add',
+      targetScopeType: 'track',
+      schoolDate: null,
+      body: '日付なしノート',
+    }])).status).toBe(201)
 
     const response = await readDailyPlan(env, cookie, '2026-07-10')
     const body = await response.json() as { notes: Array<Record<string, unknown>> }
     expect(body.notes.map((note) => note.body)).toEqual([
       '後に追加したノート',
       '先に追加したノート',
+      '日付なしノート',
     ])
     expect(body.notes[0]).not.toHaveProperty('changedByStudentAccountId')
     expect(body.notes[0]).not.toHaveProperty('changedAt')
+  })
+
+  it('applies unrelated Note add, update, and remove with atomic stale rejection', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const noteId = '32333333-3333-4333-8333-333333333331'
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'note',
+      sourceId: noteId,
+      changeKind: 'add',
+      targetScopeType: 'track',
+      schoolDate: null,
+      body: '毎日確認するノート',
+    }])).status).toBe(201)
+
+    const initialChangeId = `${noteId}:change`
+    for (const schoolDate of ['2026-07-10', '2026-07-11']) {
+      const plan = await readDailyPlan(env, cookie, schoolDate)
+      await expect(plan.json()).resolves.toMatchObject({
+        notes: [{
+          noteId,
+          latestChangeId: initialChangeId,
+          body: '毎日確認するノート',
+          relatedContext: null,
+        }],
+      })
+    }
+
+    const staleUpdateId = '32333333-3333-4333-8333-333333333332'
+    const rejected = await addDirectChanges(env, cookie, [
+      {
+        kind: 'task',
+        sourceId: '32333333-3333-4333-8333-333333333333',
+        changeKind: 'add',
+        targetScopeType: 'track',
+        title: '適用されないタスク',
+        dueDate: '2026-07-10',
+      },
+      {
+        kind: 'note',
+        sourceId: staleUpdateId,
+        changeKind: 'update',
+        targetScopeType: 'track',
+        sharedInformationItemId: noteId,
+        expectedLatestChangeId: 'stale-change',
+        body: '上書きしてはいけない本文',
+      },
+    ])
+    expect(rejected.status).toBe(409)
+    await expect(rejected.json()).resolves.toMatchObject({
+      status: 'timetable-change-conflict',
+      conflictingSourceIds: [staleUpdateId],
+    })
+    const afterRejected = await readDailyPlan(env, cookie, '2026-07-10')
+    await expect(afterRejected.json()).resolves.toMatchObject({
+      tasks: expect.not.arrayContaining([
+        expect.objectContaining({ title: '適用されないタスク' }),
+      ]),
+      notes: [expect.objectContaining({ body: '毎日確認するノート' })],
+    })
+
+    const updateId = '32333333-3333-4333-8333-333333333334'
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'note',
+      sourceId: updateId,
+      changeKind: 'update',
+      targetScopeType: 'track',
+      sharedInformationItemId: noteId,
+      expectedLatestChangeId: initialChangeId,
+      body: '更新後\n全文',
+    }])).status).toBe(201)
+
+    const removeId = '32333333-3333-4333-8333-333333333335'
+    expect((await addDirectChanges(env, cookie, [{
+      kind: 'note',
+      sourceId: removeId,
+      changeKind: 'remove',
+      targetScopeType: 'track',
+      sharedInformationItemId: noteId,
+      expectedLatestChangeId: `${updateId}:change`,
+    }])).status).toBe(201)
+    const removedPlan = await readDailyPlan(env, cookie, '2026-07-10')
+    await expect(removedPlan.json()).resolves.toMatchObject({ notes: [] })
+  })
+
+  it('retains causal Note Edit History for Target Scope Students only', async () => {
+    vi.useFakeTimers()
+    const env = createDailyPlanTestEnv()
+    const trackCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const outsideCookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-4-humanities-1',
+    )
+    const noteId = '32444444-4444-4444-8444-444444444441'
+    vi.setSystemTime(new Date('2026-07-09T01:02:03.000Z'))
+    await addDirectChanges(env, trackCookie, [{
+      kind: 'note', sourceId: noteId, changeKind: 'add',
+      targetScopeType: 'track', schoolDate: '2026-07-10', body: '追加時\n全文',
+    }])
+    const updateId = '32444444-4444-4444-8444-444444444442'
+    vi.setSystemTime(new Date('2026-07-09T01:02:03.000Z'))
+    await addDirectChanges(env, trackCookie, [{
+      kind: 'note', sourceId: updateId, changeKind: 'update',
+      targetScopeType: 'track', sharedInformationItemId: noteId,
+      expectedLatestChangeId: `${noteId}:change`, body: '更新時\n全文',
+    }])
+    const removeId = '32444444-4444-4444-8444-444444444443'
+    await addDirectChanges(env, trackCookie, [{
+      kind: 'note', sourceId: removeId, changeKind: 'remove',
+      targetScopeType: 'track', sharedInformationItemId: noteId,
+      expectedLatestChangeId: `${updateId}:change`,
+    }])
+
+    const history = await readNoteEditHistory(env, trackCookie, noteId)
+    expect(history.status).toBe(200)
+    await expect(history.json()).resolves.toMatchObject({
+      status: 'ready',
+      noteId,
+      entries: [
+        {
+          changeKind: 'remove', before: { body: '更新時\n全文' }, after: null,
+          removalReason: 'student', primaryActorDisplayName: 'Test Humanities 1',
+        },
+        {
+          changeKind: 'update', before: { body: '追加時\n全文' },
+          after: { body: '更新時\n全文' },
+        },
+        { changeKind: 'add', before: null, after: { body: '追加時\n全文' } },
+      ],
+    })
+    expect((await readNoteEditHistory(env, outsideCookie, noteId)).status)
+      .toBe(404)
+    expect((await readNoteEditHistory(env, '', noteId)).status).toBe(401)
+    expect((await readNoteEditHistory(env, trackCookie, 'unknown')).status)
+      .toBe(404)
   })
 
   it('atomically adds a Timetable Change and Task to the selected-date Daily Plan', async () => {

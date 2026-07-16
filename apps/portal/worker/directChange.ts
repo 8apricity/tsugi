@@ -274,10 +274,21 @@ export async function applyDirectChanges({
         candidate.sharedInformationItemId === change.sharedInformationItemId,
     )
   )
+  const noteItemChanges = changes.filter(
+    (change): change is Extract<DirectChangeOperation, { kind: 'note' }> =>
+      change.kind === 'note' && change.changeKind !== 'add',
+  )
+  const hasDuplicateNoteItem = noteItemChanges.some((change, index) =>
+    noteItemChanges.slice(0, index).some(
+      (candidate) =>
+        candidate.sharedInformationItemId === change.sharedInformationItemId,
+    )
+  )
   if (
     new Set(changes.map((change) => change.sourceId)).size !== changes.length ||
     hasDuplicateSlot ||
-    hasDuplicateTaskItem
+    hasDuplicateTaskItem ||
+    hasDuplicateNoteItem
   ) {
     return { status: 'invalid-change' }
   }
@@ -446,42 +457,76 @@ function parseNoteOperation({
 }): DirectNoteOperation | null {
   if (
     !Object.keys(candidate).every((key) => noteDraftKeys.has(key)) ||
-    changeKind !== 'add' ||
+    (changeKind !== 'add' && changeKind !== 'update' && changeKind !== 'remove') ||
     typeof candidate.sourceId !== 'string' ||
     !uuidPattern.test(candidate.sourceId) ||
     !isTargetScopeType(candidate.targetScopeType) ||
-    typeof candidate.schoolDate !== 'string' ||
-    !isValidSchoolDate(candidate.schoolDate) ||
-    candidate.schoolDate < schoolYear.startsOn ||
-    candidate.schoolDate > schoolYear.endsOn ||
-    typeof candidate.body !== 'string' ||
-    candidate.body.trim().length < 1 ||
-    candidate.body.trim().length > 1000 ||
-    candidate.sharedInformationItemId !== undefined ||
-    candidate.expectedLatestChangeId !== undefined
+    (changeKind === 'add'
+      ? candidate.sharedInformationItemId !== undefined ||
+        candidate.expectedLatestChangeId !== undefined
+      : typeof candidate.sharedInformationItemId !== 'string' ||
+        !uuidPattern.test(candidate.sharedInformationItemId) ||
+        typeof candidate.expectedLatestChangeId !== 'string' ||
+        candidate.expectedLatestChangeId.length < 1 ||
+        candidate.expectedLatestChangeId.length > 200) ||
+    (changeKind === 'add'
+      ? candidate.schoolDate !== null &&
+        (typeof candidate.schoolDate !== 'string' ||
+          !isValidSchoolDate(candidate.schoolDate) ||
+          candidate.schoolDate < schoolYear.startsOn ||
+          candidate.schoolDate > schoolYear.endsOn)
+      : candidate.schoolDate !== undefined) ||
+    (changeKind === 'remove'
+      ? candidate.body !== undefined
+      : typeof candidate.body !== 'string' ||
+        candidate.body.trim().length < 1 ||
+        candidate.body.trim().length > 1000)
   ) return null
 
-  return {
+  const common = {
     sourceId: candidate.sourceId,
-    sharedInformationItemId: candidate.sourceId,
+    sharedInformationItemId: changeKind === 'add'
+      ? candidate.sourceId
+      : candidate.sharedInformationItemId as string,
     latestChangeId: `${candidate.sourceId}:change`,
     targetScope: targetScopeForStudentAffiliation(
       affiliation,
       candidate.targetScopeType,
     ),
-    schoolDate: candidate.schoolDate,
-    body: candidate.body.trim(),
     changedByStudentAccountId,
     changedAt: now,
-    createdAt: now,
-    changeKind: 'add',
   }
+  if (changeKind === 'remove') {
+    return {
+      ...common,
+      changeKind,
+      expectedLatestChangeId: candidate.expectedLatestChangeId as string,
+      removalReason: 'student',
+    }
+  }
+  const body = (candidate.body as string).trim()
+  return changeKind === 'add'
+    ? {
+        ...common,
+        changeKind,
+        schoolDate: candidate.schoolDate as string | null,
+        body,
+        createdAt: now,
+      }
+    : {
+        ...common,
+        changeKind,
+        body,
+        expectedLatestChangeId: candidate.expectedLatestChangeId as string,
+      }
 }
 
 const noteDraftKeys = new Set([
   'kind',
   'changeKind',
   'sourceId',
+  'sharedInformationItemId',
+  'expectedLatestChangeId',
   'targetScopeType',
   'schoolDate',
   'body',

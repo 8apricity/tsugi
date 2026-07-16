@@ -94,18 +94,38 @@ export type TaskDraft = TaskDraftBase & (
 
 export type NewNoteDraftForm = {
   body: string
-  schoolDate: string
+  schoolDate: string | null
   targetScopeType: TargetScopeType | null
 }
 
-export type NoteDraft = {
-  kind: 'note'
-  changeKind: 'add'
-  sourceId: string
+export type ActiveNoteForEditing = {
+  noteId: string
+  latestChangeId: string
   body: string
-  schoolDate: string
+  schoolDate: string | null
   targetScopeType: TargetScopeType
 }
+
+type NoteDraftBase = {
+  kind: 'note'
+  sourceId: string
+  body: string
+  schoolDate: string | null
+  targetScopeType: TargetScopeType
+}
+
+export type NoteDraft = NoteDraftBase & (
+  | {
+      changeKind: 'add'
+      sharedInformationItemId?: never
+      expectedLatestChangeId?: never
+    }
+  | {
+      changeKind: 'update' | 'remove'
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+    }
+)
 
 export type TimetableLayerState = {
   status: 'ready'
@@ -181,14 +201,26 @@ export type TaskSubmissionChange = TaskSubmissionChangeBase & (
     }
 )
 
-export type NoteSubmissionChange = {
+type NoteSubmissionChangeBase = {
   kind: 'note'
-  changeKind: 'add'
   sourceId: string
-  body: string
-  schoolDate: string
   targetScopeType: TargetScopeType
 }
+
+export type NoteSubmissionChange = NoteSubmissionChangeBase & (
+  | { changeKind: 'add'; body: string; schoolDate: string | null }
+  | {
+      changeKind: 'update'
+      body: string
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+    }
+  | {
+      changeKind: 'remove'
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+    }
+)
 
 export type DirectSubmissionChange =
   | TimetableSubmissionChange
@@ -347,7 +379,8 @@ export function createSharedInformationEditorClient({
       draftDates: [...new Set([
         ...drafts.map((draft) => draft.changeDate),
         ...taskDrafts.flatMap((draft) => draft.dueDate ? [draft.dueDate] : []),
-        ...noteDrafts.map((draft) => draft.schoolDate),
+        ...noteDrafts.flatMap((draft) =>
+          draft.schoolDate === null ? [] : [draft.schoolDate]),
       ])].sort(),
     }
   }
@@ -563,7 +596,8 @@ export function createSharedInformationEditorClient({
       const body = normalizeNoteBody(input.body)
       if (
         !input.targetScopeType ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(input.schoolDate) ||
+        (input.schoolDate !== null &&
+          !/^\d{4}-\d{2}-\d{2}$/.test(input.schoolDate)) ||
         body === null
       ) {
         return { status: 'invalid-note' as const }
@@ -585,6 +619,142 @@ export function createSharedInformationEditorClient({
       lastCommitFailed = false
       publish()
       return { status: 'saved' as const, sourceId }
+    },
+    updateNoteDraft(sourceId: string, input: NewNoteDraftForm) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const existing = noteDrafts.find((draft) => draft.sourceId === sourceId)
+      if (!existing || existing.changeKind === 'remove') {
+        return { status: 'unchanged' as const }
+      }
+      const body = normalizeNoteBody(input.body)
+      if (body === null) return { status: 'invalid-note' as const }
+      if (existing.changeKind === 'add') {
+        if (
+          !input.targetScopeType ||
+          (input.schoolDate !== null &&
+            !/^\d{4}-\d{2}-\d{2}$/.test(input.schoolDate))
+        ) return { status: 'invalid-note' as const }
+        noteDrafts = noteDrafts.map((draft) =>
+          draft.sourceId === sourceId
+            ? {
+                ...draft,
+                body,
+                schoolDate: input.schoolDate,
+                targetScopeType: input.targetScopeType!,
+              }
+            : draft,
+        )
+      } else {
+        noteDrafts = noteDrafts.map((draft) =>
+          draft.sourceId === sourceId ? { ...draft, body } : draft,
+        )
+      }
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const }
+    },
+    saveNoteUpdateDraft(activeNote: ActiveNoteForEditing, desiredBody: string) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const body = normalizeNoteBody(desiredBody)
+      if (body === null) return { status: 'invalid-note' as const }
+      const existing = noteDrafts.find(
+        (draft) =>
+          draft.changeKind !== 'add' &&
+          draft.sharedInformationItemId === activeNote.noteId,
+      )
+      if (body === activeNote.body) {
+        if (existing) {
+          noteDrafts = noteDrafts.filter(
+            (draft) => draft.sourceId !== existing.sourceId,
+          )
+          noteConflictSourceIds.delete(existing.sourceId)
+          publish()
+        }
+        return { status: 'removed-noop' as const }
+      }
+      if (!existing && totalDraftCount() >= maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+      const sourceId = existing?.sourceId ?? createId()
+      noteDrafts = noteDrafts.filter((draft) => draft.sourceId !== sourceId)
+      noteDrafts.push({
+        kind: 'note',
+        changeKind: 'update',
+        sourceId,
+        sharedInformationItemId: activeNote.noteId,
+        expectedLatestChangeId: activeNote.latestChangeId,
+        body,
+        schoolDate: activeNote.schoolDate,
+        targetScopeType: activeNote.targetScopeType,
+      })
+      noteConflictSourceIds.delete(sourceId)
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
+    saveNoteRemoveDraft(activeNote: ActiveNoteForEditing) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const existing = noteDrafts.find(
+        (draft) =>
+          draft.changeKind !== 'add' &&
+          draft.sharedInformationItemId === activeNote.noteId,
+      )
+      if (!existing && totalDraftCount() >= maximumDraftKeys) {
+        return { status: 'limit-reached' as const }
+      }
+      const sourceId = existing?.sourceId ?? createId()
+      noteDrafts = noteDrafts.filter((draft) => draft.sourceId !== sourceId)
+      noteDrafts.push({
+        kind: 'note',
+        changeKind: 'remove',
+        sourceId,
+        sharedInformationItemId: activeNote.noteId,
+        expectedLatestChangeId: activeNote.latestChangeId,
+        body: activeNote.body,
+        schoolDate: activeNote.schoolDate,
+        targetScopeType: activeNote.targetScopeType,
+      })
+      noteConflictSourceIds.delete(sourceId)
+      editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
+    reconcileActiveNotes(
+      activeNotes: readonly ActiveNoteForEditing[],
+      loadedSchoolDate?: string,
+    ) {
+      const activeById = new Map(activeNotes.map((note) => [note.noteId, note]))
+      const nextDrafts: NoteDraft[] = []
+      for (const draft of noteDrafts) {
+        if (draft.changeKind === 'add') {
+          nextDrafts.push(draft)
+          continue
+        }
+        if (
+          loadedSchoolDate !== undefined &&
+          draft.schoolDate !== null &&
+          draft.schoolDate !== loadedSchoolDate
+        ) {
+          nextDrafts.push(draft)
+          continue
+        }
+        const active = activeById.get(draft.sharedInformationItemId)
+        if (!active || active.latestChangeId !== draft.expectedLatestChangeId) {
+          noteConflictSourceIds.add(draft.sourceId)
+          nextDrafts.push(draft)
+          continue
+        }
+        if (draft.changeKind === 'update' && draft.body === active.body) {
+          noteConflictSourceIds.delete(draft.sourceId)
+          continue
+        }
+        noteConflictSourceIds.delete(draft.sourceId)
+        nextDrafts.push(draft)
+      }
+      noteDrafts = nextDrafts
+      publish()
     },
     saveTaskUpdateDraft(
       activeTask: ActiveTaskForEditing,
@@ -1063,14 +1233,33 @@ function toTaskSubmissionChange(draft: TaskDraft): TaskSubmissionChange {
 }
 
 function toNoteSubmissionChange(draft: NoteDraft): NoteSubmissionChange {
-  return {
+  const base = {
     kind: 'note',
-    changeKind: 'add',
     sourceId: draft.sourceId,
     targetScopeType: draft.targetScopeType,
-    schoolDate: draft.schoolDate,
-    body: draft.body,
+  } as const
+  if (draft.changeKind === 'remove') {
+    return {
+      ...base,
+      changeKind: 'remove',
+      sharedInformationItemId: draft.sharedInformationItemId,
+      expectedLatestChangeId: draft.expectedLatestChangeId,
+    }
   }
+  return draft.changeKind === 'update'
+    ? {
+        ...base,
+        changeKind: 'update',
+        sharedInformationItemId: draft.sharedInformationItemId,
+        expectedLatestChangeId: draft.expectedLatestChangeId,
+        body: draft.body,
+      }
+    : {
+        ...base,
+        changeKind: 'add',
+        schoolDate: draft.schoolDate,
+        body: draft.body,
+      }
 }
 
 function restore(storage: StorageLike): {
@@ -1305,20 +1494,37 @@ function restoreNoteDraft(value: unknown): NoteDraft | null {
   const body = typeof draft.body === 'string'
     ? normalizeNoteBody(draft.body)
     : null
-  return draft.kind === 'note' &&
-      draft.changeKind === 'add' &&
-      typeof draft.sourceId === 'string' &&
-      body !== null &&
-      typeof draft.schoolDate === 'string' &&
-      /^\d{4}-\d{2}-\d{2}$/.test(draft.schoolDate) &&
-      isTargetScopeType(draft.targetScopeType)
-    ? {
-        kind: 'note',
-        changeKind: 'add',
-        sourceId: draft.sourceId,
-        body,
-        schoolDate: draft.schoolDate,
-        targetScopeType: draft.targetScopeType,
-      }
+  if (draft.kind !== 'note' ||
+      (draft.changeKind !== 'add' && draft.changeKind !== 'update' &&
+        draft.changeKind !== 'remove') ||
+      typeof draft.sourceId !== 'string') return null
+  if (
+    body === null ||
+    (draft.schoolDate !== null &&
+      (typeof draft.schoolDate !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(draft.schoolDate))) ||
+    !isTargetScopeType(draft.targetScopeType)
+  ) return null
+  const base = {
+    kind: 'note' as const,
+    sourceId: draft.sourceId as string,
+    body,
+    schoolDate: draft.schoolDate as string | null,
+    targetScopeType: draft.targetScopeType,
+  }
+  if (draft.changeKind === 'update' || draft.changeKind === 'remove') {
+    return typeof draft.sharedInformationItemId === 'string' &&
+        typeof draft.expectedLatestChangeId === 'string'
+      ? {
+          ...base,
+          changeKind: draft.changeKind,
+          sharedInformationItemId: draft.sharedInformationItemId,
+          expectedLatestChangeId: draft.expectedLatestChangeId,
+        }
+      : null
+  }
+  return draft.sharedInformationItemId === undefined &&
+      draft.expectedLatestChangeId === undefined
+    ? { ...base, changeKind: 'add' }
     : null
 }

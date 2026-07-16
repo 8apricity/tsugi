@@ -46,7 +46,7 @@ Showing a student's display name as the source of Tsugi activity in edit history
 _Avoid_: Real-name attribution, anonymous identity, reputation
 
 **Edit History**:
-The Target Scope student view of applied Shared Information Changes. Timetable Change edit history includes current and removed Shared Information Items that occupied one Target Scope, Change Date, and period, while Task edit history follows the add, update, and removal of one Task. Edit history shows Named Attribution only after Target Scope membership is established, derives before values from the preceding applied change of the same item, and displays stored Lesson References without claiming a reconstructed historical Lesson Name.
+The Target Scope student view of applied Shared Information Changes. Timetable Change edit history includes current and removed Shared Information Items that occupied one Target Scope, Change Date, and period, while Task and Note edit history follows the add, update, and removal of one retained item. Note edit history compares full Body values and distinguishes an ordinary removal from removal caused by a related Task. Edit history shows Named Attribution only after Target Scope membership is established, derives before values from the preceding applied change of the same item, and displays stored Lesson References without claiming a reconstructed historical Lesson Name.
 _Avoid_: Audit log, Reference Scope history, reactivation history
 
 **Student Affiliation**:

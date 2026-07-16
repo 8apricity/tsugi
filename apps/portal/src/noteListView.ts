@@ -1,0 +1,64 @@
+import type { DailyPlanNoteForCache } from './dailyPlanCache'
+import type { NoteDraft } from './sharedInformationEditorClient'
+
+export type VisibleNoteListItem =
+  | { type: 'active'; note: DailyPlanNoteForCache }
+  | {
+      type: 'draft'
+      draft: NoteDraft & { conflicted?: boolean }
+      activeNote?: DailyPlanNoteForCache
+    }
+
+export function buildVisibleNoteList(
+  activeNotes: readonly DailyPlanNoteForCache[],
+  noteDrafts: readonly (NoteDraft & { conflicted?: boolean })[],
+  selectedSchoolDate: string,
+): VisibleNoteListItem[] {
+  const replacementByNoteId = new Map(
+    noteDrafts
+      .filter((draft) => draft.changeKind !== 'add')
+      .map((draft) => [draft.sharedInformationItemId, draft] as const),
+  )
+  const projectActive = (notes: readonly DailyPlanNoteForCache[]) =>
+    notes.map((note): VisibleNoteListItem => {
+      const replacement = replacementByNoteId.get(note.noteId)
+      return replacement
+        ? { type: 'draft', draft: replacement, activeNote: note }
+        : { type: 'active', note }
+    })
+  const activeIds = new Set(activeNotes.map((note) => note.noteId))
+  const orphanedChanges = noteDrafts.filter(
+    (draft) =>
+      draft.changeKind !== 'add' &&
+      !activeIds.has(draft.sharedInformationItemId),
+  )
+  const additions = [...noteDrafts]
+    .filter((draft) => draft.changeKind === 'add')
+    .reverse()
+  const datedAdditions = additions
+    .filter((draft) => draft.schoolDate === selectedSchoolDate)
+    .map((draft): VisibleNoteListItem => ({ type: 'draft', draft }))
+  const unrelatedAdditions = additions
+    .filter((draft) => draft.schoolDate === null)
+    .map((draft): VisibleNoteListItem => ({ type: 'draft', draft }))
+  const datedActive = activeNotes.filter(
+    (note) =>
+      note.relatedContext?.type === 'school-date' &&
+      note.relatedContext.schoolDate === selectedSchoolDate,
+  )
+  const unrelatedActive = activeNotes.filter(
+    (note) => note.relatedContext === null,
+  )
+  return [
+    ...datedAdditions,
+    ...orphanedChanges
+      .filter((draft) => draft.schoolDate === selectedSchoolDate)
+      .map((draft): VisibleNoteListItem => ({ type: 'draft', draft })),
+    ...projectActive(datedActive),
+    ...unrelatedAdditions,
+    ...orphanedChanges
+      .filter((draft) => draft.schoolDate === null)
+      .map((draft): VisibleNoteListItem => ({ type: 'draft', draft })),
+    ...projectActive(unrelatedActive),
+  ]
+}

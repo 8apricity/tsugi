@@ -41,6 +41,7 @@ export type DailyPlanTaskForCache = {
 
 export type DailyPlanNoteForCache = {
   noteId: string;
+  latestChangeId: string;
   body: string;
   targetScopeType: "grade" | "class" | "track" | "student";
   relatedContext:

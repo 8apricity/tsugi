@@ -54,6 +54,36 @@ describe('School Date Note body', () => {
       .toBe(false)
   })
 
+  it('shows textual lifecycle states and keeps history outside editing mode', () => {
+    const removed = renderToStaticMarkup(
+      <NoteCard
+        noteId="note-remove"
+        body={'削除前\n全文'}
+        targetScopeLabel="文科"
+        draft
+        changeKind="remove"
+        conflicted
+        onCancelDraft={() => undefined}
+      />,
+    )
+    expect(removed).toContain('削除予定')
+    expect(removed).toContain('要確認')
+    expect(removed).toContain('削除を取り消す')
+    expect(removed).toContain('削除前\n全文')
+
+    const viewMode = renderToStaticMarkup(
+      <NoteCard
+        noteId="note-active"
+        body="本文"
+        targetScopeLabel="文科"
+        onOpenHistory={() => undefined}
+      />,
+    )
+    expect(viewMode).toContain('編集履歴')
+    expect(viewMode).not.toContain('>編集<')
+    expect(viewMode).not.toContain('>削除<')
+  })
+
   it('measures NoteCard overflow and expands through its native button', async () => {
     const scrollHeight = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,

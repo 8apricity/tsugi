@@ -2,6 +2,16 @@
 
 Description: Use this guidance when designing, prototyping, or changing application UI in this repository. The intended product feel is a clean, minimalist, Bootstrap-inspired enterprise web application for school timetable operations: functional, readable, calm, and polished without decorative visual effects.
 
+## UI Language and Domain Vocabulary
+
+- Write student-facing UI copy in natural Japanese.
+- Do not expose the canonical English terms from `CONTEXT.md` directly as labels, headings, actions, help text, validation messages, or other UI copy.
+- Treat `CONTEXT.md` as the source of conceptual meaning for engineering work, not as approved UI copy or a translation dictionary.
+- Translate or rephrase domain concepts for the student's context and mental model. Prefer clear, concise Japanese over a literal or mechanically consistent translation of the English term.
+- Keep the meaning of the underlying domain concept intact, and use consistent Japanese wording when the same concept appears in similar UI contexts.
+- Terms listed under `_Avoid_` in `CONTEXT.md` constrain engineering and domain discussion. They do not prohibit natural Japanese UI wording, provided the wording does not introduce a different or misleading concept.
+- Canonical English domain terms remain appropriate in code, tests, technical specifications, and internal engineering discussion.
+
 ## Style Direction
 
 - Use a Bootstrap-inspired interface.

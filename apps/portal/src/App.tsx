@@ -1626,7 +1626,7 @@ function App() {
                         disabled={timetableEditor.atLimit || timetableEditor.submitting}
                         onClick={openTaskEditor}
                       >
-                        <span className="task-add-icon" aria-hidden="true">＋</span>
+                        <span className="task-add-icon" aria-hidden="true" />
                       </button>
                     ) : null}
                   </div>

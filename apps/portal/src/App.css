@@ -354,6 +354,7 @@
 }
 
 .task-add-icon {
+  position: relative;
   display: inline-grid;
   place-items: center;
   width: 18px;
@@ -361,8 +362,23 @@
   border-radius: 50%;
   background: var(--color-accent);
   color: #fff;
-  font-size: 22px;
-  line-height: 1;
+}
+
+.task-add-icon::before,
+.task-add-icon::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.task-add-icon::after {
+  transform: translate(-50%, -50%) rotate(90deg);
 }
 
 .task-add-button:disabled {

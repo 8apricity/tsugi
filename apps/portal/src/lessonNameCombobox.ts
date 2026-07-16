@@ -27,11 +27,21 @@ export function createLessonNameComboboxClient({
   let expandedToAll = initialExpandedToAll
   let activeIndex = initialActiveIndex
 
+  function matchingOptions() {
+    const prioritized = filterRegisteredLessonNames(prioritizedOptions, query)
+    const prioritizedIds = new Set(
+      prioritizedOptions.map((option) => option.registeredLessonNameId),
+    )
+    const additional = filterRegisteredLessonNames(allOptions, query).filter(
+      (option) => !prioritizedIds.has(option.registeredLessonNameId),
+    )
+
+    return { prioritized, additional }
+  }
+
   function visibleOptions(): LessonNameComboboxOption[] {
-    return filterRegisteredLessonNames(
-      expandedToAll ? allOptions : prioritizedOptions,
-      query,
-    ).map((option) => ({
+    const { prioritized, additional } = matchingOptions()
+    return (expandedToAll ? [...prioritized, ...additional] : prioritized).map((option) => ({
       ...option,
       displayLabel: registeredLessonNameDisplayLabel(option),
     }))
@@ -40,10 +50,12 @@ export function createLessonNameComboboxClient({
   return {
     getSnapshot() {
       const options = visibleOptions()
+      const { additional } = matchingOptions()
       return {
         query,
         normalizedQuery: normalizeLessonName(query),
         expandedToAll,
+        hasAdditionalOptions: additional.length > 0,
         activeIndex,
         options,
       }

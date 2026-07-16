@@ -603,6 +603,55 @@ body.page-scroll-locked {
   font-weight: 700;
 }
 
+.task-form-field {
+  display: grid;
+  gap: 7px;
+}
+
+.task-form-field > label {
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.task-editor-dialog form input,
+.task-editor-dialog form select {
+  width: 100%;
+}
+
+.task-due-date-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+}
+
+.task-due-date-clear {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.task-due-date-clear:hover:not(:disabled),
+.task-due-date-clear:focus-visible:not(:disabled) {
+  border-color: #b42318;
+  color: #8f1d14;
+  outline: 2px solid rgba(180, 35, 24, 0.16);
+  outline-offset: 1px;
+}
+
+.task-due-date-clear:disabled {
+  background: #f8fafb;
+  color: #b8c0c8;
+  cursor: not-allowed;
+}
+
 .readonly-field {
   display: grid;
   gap: 7px;
@@ -632,34 +681,6 @@ body.page-scroll-locked {
   color: #8f1d14;
   font-weight: 700;
   cursor: pointer;
-}
-
-.lesson-name-options {
-  display: grid;
-  max-height: 180px;
-  overflow: auto;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.lesson-name-options button {
-  padding: 10px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--color-border);
-  background: #fff;
-  color: var(--color-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.lesson-name-options button:last-child {
-  border-bottom: 0;
-}
-
-.lesson-name-options button:hover,
-.lesson-name-options button:focus-visible,
-.lesson-name-options button.active {
-  background: var(--color-accent-soft);
 }
 
 .field-warning {
@@ -1329,7 +1350,9 @@ button.timetable-layer-row {
 .editor-fields input,
 .editor-fields select,
 .editor-fields output,
-.direct-lesson-input {
+.direct-lesson-input,
+.task-editor-dialog form input,
+.task-editor-dialog form select {
   height: 42px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -1389,6 +1412,7 @@ button.timetable-layer-row {
   width: 100%;
   border-top: 1px solid var(--color-border);
   border-radius: 0;
+  background: #f8fafb;
   color: var(--color-primary);
   font-weight: 700;
 }

@@ -34,6 +34,7 @@ describe('Lesson Name combobox client', () => {
       query: ' 地理 ',
       expandedToAll: false,
       options: [],
+      hasAdditionalOptions: true,
     })
 
     client.expandToAll()
@@ -41,6 +42,57 @@ describe('Lesson Name combobox client', () => {
       query: ' 地理 ',
       expandedToAll: true,
       options: [integratedGeography],
+      hasAdditionalOptions: true,
+    })
+  })
+
+  it('appends matching additional names after prioritized names without duplicates', () => {
+    const client = createLessonNameComboboxClient({
+      prioritizedOptions: [physicalEducation, mathematics],
+      allOptions: [integratedGeography, mathematics, physicalEducation],
+    })
+
+    expect(client.getSnapshot()).toMatchObject({
+      expandedToAll: false,
+      hasAdditionalOptions: true,
+      options: [physicalEducation, mathematics],
+    })
+
+    client.expandToAll()
+    expect(client.getSnapshot()).toMatchObject({
+      expandedToAll: true,
+      hasAdditionalOptions: true,
+      options: [physicalEducation, mathematics, integratedGeography],
+    })
+  })
+
+  it('keeps expanded ordering when the search query changes', () => {
+    const client = createLessonNameComboboxClient({
+      prioritizedOptions: [mathematics, physicalEducation],
+      allOptions: [integratedGeography, mathematics, physicalEducation],
+    })
+
+    client.expandToAll()
+    client.setQuery('地理')
+
+    expect(client.getSnapshot()).toMatchObject({
+      query: '地理',
+      expandedToAll: true,
+      hasAdditionalOptions: true,
+      options: [integratedGeography],
+    })
+  })
+
+  it('reports no additional names when every match is already prioritized', () => {
+    const client = createLessonNameComboboxClient({
+      prioritizedOptions: [mathematics, physicalEducation],
+      allOptions: [integratedGeography, mathematics, physicalEducation],
+      initialQuery: '体育',
+    })
+
+    expect(client.getSnapshot()).toMatchObject({
+      hasAdditionalOptions: false,
+      options: [physicalEducation],
     })
   })
 

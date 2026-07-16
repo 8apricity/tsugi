@@ -11,7 +11,10 @@ import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
-import { createLessonNameComboboxClient } from "./lessonNameCombobox";
+import {
+  createLessonNameComboboxClient,
+  type LessonNameComboboxOption,
+} from "./lessonNameCombobox";
 import {
   PeriodWheelInteraction,
   findPeriodClosestToCenter,
@@ -153,6 +156,81 @@ type TaskHistoryDialog = {
   requestId: number;
   state: TaskEditHistoryState;
 };
+
+function lessonNameOptionId(prefix: string, index: number) {
+  return `${prefix}-${index}`;
+}
+
+function shouldShowLessonNameOptions({
+  listOpen,
+  optionCount,
+  expandedToAll,
+  hasAdditionalOptions,
+}: {
+  listOpen: boolean;
+  optionCount: number;
+  expandedToAll: boolean;
+  hasAdditionalOptions: boolean;
+}) {
+  return (
+    listOpen &&
+    (optionCount > 0 || (!expandedToAll && hasAdditionalOptions))
+  );
+}
+
+function LessonNameOptionsPopover({
+  listboxId,
+  optionIdPrefix,
+  options,
+  activeIndex,
+  expandedToAll,
+  hasAdditionalOptions,
+  ariaLabel,
+  onChoose,
+  onExpand,
+}: {
+  listboxId: string;
+  optionIdPrefix: string;
+  options: readonly LessonNameComboboxOption[];
+  activeIndex: number;
+  expandedToAll: boolean;
+  hasAdditionalOptions: boolean;
+  ariaLabel?: string;
+  onChoose: (option: LessonNameComboboxOption) => void;
+  onExpand: () => void;
+}) {
+  return (
+    <div className="lesson-name-options-popover">
+      <div id={listboxId} role="listbox" aria-label={ariaLabel}>
+        {options.map((option, index) => (
+          <button
+            id={lessonNameOptionId(optionIdPrefix, index)}
+            type="button"
+            role="option"
+            tabIndex={-1}
+            aria-selected={index === activeIndex}
+            className={index === activeIndex ? "active" : ""}
+            key={option.registeredLessonNameId}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onChoose(option)}
+          >
+            {option.displayLabel}
+          </button>
+        ))}
+      </div>
+      {!expandedToAll && hasAdditionalOptions ? (
+        <button
+          className="lesson-name-more"
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onExpand}
+        >
+          その他の候補を表示
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function App() {
   const [schoolEmailNumber, setSchoolEmailNumber] = useState("");
@@ -1437,6 +1515,21 @@ function App() {
       initialActiveIndex: activeTaskLessonNameOption,
     });
     const taskLessonNameSnapshot = taskLessonNameCombobox.getSnapshot();
+    const lessonNameOptionsPopoverOpen = shouldShowLessonNameOptions({
+      listOpen:
+        lessonNameListOpen &&
+        timetableEditorForm?.replacement.type === "lesson_name",
+      optionCount: lessonNameComboboxSnapshot.options.length,
+      expandedToAll: lessonNameOptionsExpanded,
+      hasAdditionalOptions:
+        lessonNameComboboxSnapshot.hasAdditionalOptions,
+    });
+    const taskLessonNameOptionsPopoverOpen = shouldShowLessonNameOptions({
+      listOpen: taskLessonNameListOpen,
+      optionCount: taskLessonNameSnapshot.options.length,
+      expandedToAll: taskLessonNamesExpanded,
+      hasAdditionalOptions: taskLessonNameSnapshot.hasAdditionalOptions,
+    });
     const taskLessonResolution = taskEditorForm?.relatedLessonInput.trim()
       ? taskLessonNameCombobox.resolveInput()
       : null;
@@ -1832,50 +1925,75 @@ function App() {
                       }
                     />
                   </label>
-                  <label>
-                    <span>Due Date</span>
+                  <div className="task-form-field">
+                    <label htmlFor="task-due-date">Due Date</label>
+                    <div className="task-due-date-row">
+                      <input
+                        id="task-due-date"
+                        type="date"
+                        min={schoolYearRange?.startsOn}
+                        max={schoolYearRange?.endsOn}
+                        value={taskEditorForm.dueDate ?? ""}
+                        onChange={(event) =>
+                          setTaskEditorForm((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  dueDate: event.target.value || null,
+                                }
+                              : current,
+                          )
+                        }
+                      />
+                      <button
+                        className="task-due-date-clear"
+                        type="button"
+                        aria-label="Due Dateをクリア"
+                        title="Due Dateをクリア"
+                        disabled={!taskEditorForm.dueDate}
+                        onClick={() =>
+                          setTaskEditorForm((current) =>
+                            current ? { ...current, dueDate: null } : current,
+                          )
+                        }
+                      >
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 24 24"
+                          width="20"
+                          height="20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M4 7h16" />
+                          <path d="M9 7V4h6v3" />
+                          <path d="m6 7 1 13h10l1-13" />
+                          <path d="M10 11v5M14 11v5" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="task-form-field">
+                    <label htmlFor="task-related-lesson-name">
+                      Related Lesson Name（任意）
+                    </label>
+                    <div className="lesson-name-combobox">
                     <input
-                      type="date"
-                      min={schoolYearRange?.startsOn}
-                      max={schoolYearRange?.endsOn}
-                      value={taskEditorForm.dueDate ?? ""}
-                      onChange={(event) =>
-                        setTaskEditorForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                dueDate: event.target.value || null,
-                              }
-                            : current,
-                        )
-                      }
-                    />
-                  </label>
-                  <button
-                    className="button-link"
-                    type="button"
-                    onClick={() =>
-                      setTaskEditorForm((current) =>
-                        current ? { ...current, dueDate: null } : current,
-                      )
-                    }
-                  >
-                    Due Dateをクリア
-                  </button>
-                  <label>
-                    <span>Related Lesson Name（任意）</span>
-                    <input
+                      id="task-related-lesson-name"
                       role="combobox"
                       aria-autocomplete="list"
-                      aria-expanded={
-                        taskLessonNameListOpen &&
-                        taskLessonNameSnapshot.options.length > 0
-                      }
+                      aria-expanded={taskLessonNameOptionsPopoverOpen}
                       aria-controls="task-lesson-name-options"
                       aria-activedescendant={
-                        taskLessonNameListOpen &&
+                        taskLessonNameOptionsPopoverOpen &&
                         taskLessonNameSnapshot.activeIndex >= 0
-                          ? `task-lesson-name-option-${taskLessonNameSnapshot.activeIndex}`
+                          ? lessonNameOptionId(
+                              "task-lesson-name-option",
+                              taskLessonNameSnapshot.activeIndex,
+                            )
                           : undefined
                       }
                       value={taskEditorForm.relatedLessonInput}
@@ -1929,58 +2047,38 @@ function App() {
                         }
                       }}
                     />
-                  </label>
-                  {taskLessonNameListOpen &&
-                  taskLessonNameSnapshot.options.length > 0 ? (
-                    <div
-                      id="task-lesson-name-options"
-                      className="lesson-name-options"
-                      role="listbox"
-                      aria-label="Registered Lesson Names"
-                    >
-                      {taskLessonNameSnapshot.options.map((option, index) => (
-                        <button
-                          id={`task-lesson-name-option-${index}`}
-                          type="button"
-                          role="option"
-                          tabIndex={-1}
-                          aria-selected={index === activeTaskLessonNameOption}
-                          className={
-                            index === activeTaskLessonNameOption ? "active" : ""
-                          }
-                          key={option.registeredLessonNameId}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => {
-                            setTaskLessonNameListOpen(false);
-                            setActiveTaskLessonNameOption(-1);
-                            setTaskEditorForm((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    relatedLessonInput: option.fullLessonName,
-                                  }
-                                : current,
-                            );
-                          }}
-                        >
-                          {option.displayLabel}
-                        </button>
-                      ))}
+                    {taskLessonNameOptionsPopoverOpen ? (
+                      <LessonNameOptionsPopover
+                        listboxId="task-lesson-name-options"
+                        optionIdPrefix="task-lesson-name-option"
+                        options={taskLessonNameSnapshot.options}
+                        activeIndex={activeTaskLessonNameOption}
+                        expandedToAll={taskLessonNamesExpanded}
+                        hasAdditionalOptions={
+                          taskLessonNameSnapshot.hasAdditionalOptions
+                        }
+                        ariaLabel="Registered Lesson Names"
+                        onChoose={(option) => {
+                          setTaskLessonNameListOpen(false);
+                          setActiveTaskLessonNameOption(-1);
+                          setTaskEditorForm((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  relatedLessonInput: option.fullLessonName,
+                                }
+                              : current,
+                          );
+                        }}
+                        onExpand={() => {
+                          setTaskLessonNamesExpanded(true);
+                          setTaskLessonNameListOpen(true);
+                          setActiveTaskLessonNameOption(-1);
+                        }}
+                      />
+                    ) : null}
                     </div>
-                  ) : null}
-                  {!taskLessonNamesExpanded ? (
-                    <button
-                      className="button-link"
-                      type="button"
-                      onClick={() => {
-                        setTaskLessonNamesExpanded(true);
-                        setTaskLessonNameListOpen(true);
-                        setActiveTaskLessonNameOption(-1);
-                      }}
-                    >
-                      More
-                    </button>
-                  ) : null}
+                  </div>
                   {taskLessonResolution?.custom &&
                   !(
                     taskEditorForm.editingTask
@@ -2033,7 +2131,7 @@ function App() {
                       type="button"
                       onClick={() => setTaskEditorForm(null)}
                     >
-                      キャンセル
+                      下書きを取り消す
                     </button>
                     <button className="button-primary" type="submit">
                       {taskEditorForm.editingTask
@@ -2614,14 +2712,16 @@ function App() {
                         role="combobox"
                         aria-autocomplete="list"
                         aria-expanded={
-                          lessonNameListOpen &&
-                          timetableEditorForm.replacement.type === "lesson_name"
+                          lessonNameOptionsPopoverOpen
                         }
                         aria-controls="lesson-name-options"
                         aria-activedescendant={
-                          lessonNameListOpen &&
+                          lessonNameOptionsPopoverOpen &&
                           lessonNameComboboxSnapshot.activeIndex >= 0
-                            ? `lesson-name-option-${lessonNameComboboxSnapshot.activeIndex}`
+                            ? lessonNameOptionId(
+                                "lesson-name-option",
+                                lessonNameComboboxSnapshot.activeIndex,
+                              )
                             : undefined
                         }
                         maxLength={80}
@@ -2679,59 +2779,38 @@ function App() {
                           }
                         }}
                       />
-                      {lessonNameListOpen &&
-                      timetableEditorForm.replacement.type === "lesson_name" ? (
-                        <div className="lesson-name-options-popover">
-                          <div id="lesson-name-options" role="listbox">
-                            {lessonNameComboboxSnapshot.options.map((option, index) => (
-                              <button
-                                id={`lesson-name-option-${index}`}
-                                role="option"
-                                tabIndex={-1}
-                                aria-selected={index === activeLessonNameOption}
-                                className={
-                                  index === activeLessonNameOption
-                                    ? "active"
-                                    : ""
-                                }
-                                type="button"
-                                key={option.registeredLessonNameId}
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => {
-                                  lessonNameCombobox.setActiveIndex(index);
-                                  const replacement =
-                                    lessonNameCombobox.chooseActive();
-                                  if (!replacement) return;
-                                  setTimetableEditorForm({
-                                    ...timetableEditorForm,
-                                    replacement,
-                                  });
-                                  setLessonNameListOpen(false);
-                                  setActiveLessonNameOption(-1);
-                                }}
-                              >
-                                {option.displayLabel}
-                              </button>
-                            ))}
-                          </div>
-                          {!lessonNameOptionsExpanded ? (
-                            <button
-                              className="lesson-name-more"
-                              type="button"
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => {
-                                lessonNameCombobox.expandToAll();
-                                const snapshot = lessonNameCombobox.getSnapshot();
-                                setLessonNameOptionsExpanded(
-                                  snapshot.expandedToAll,
-                                );
-                                setActiveLessonNameOption(snapshot.activeIndex);
-                              }}
-                            >
-                              More
-                            </button>
-                          ) : null}
-                        </div>
+                      {lessonNameOptionsPopoverOpen ? (
+                        <LessonNameOptionsPopover
+                          listboxId="lesson-name-options"
+                          optionIdPrefix="lesson-name-option"
+                          options={lessonNameComboboxSnapshot.options}
+                          activeIndex={activeLessonNameOption}
+                          expandedToAll={lessonNameOptionsExpanded}
+                          hasAdditionalOptions={
+                            lessonNameComboboxSnapshot.hasAdditionalOptions
+                          }
+                          onChoose={(option) => {
+                            setTimetableEditorForm({
+                              ...timetableEditorForm,
+                              replacement: {
+                                type: "lesson_name",
+                                registeredLessonNameId:
+                                  option.registeredLessonNameId,
+                                lessonName: option.shortLessonName,
+                              },
+                            });
+                            setLessonNameListOpen(false);
+                            setActiveLessonNameOption(-1);
+                          }}
+                          onExpand={() => {
+                            lessonNameCombobox.expandToAll();
+                            const snapshot = lessonNameCombobox.getSnapshot();
+                            setLessonNameOptionsExpanded(
+                              snapshot.expandedToAll,
+                            );
+                            setActiveLessonNameOption(snapshot.activeIndex);
+                          }}
+                        />
                       ) : null}
                       {timetableEditorForm.replacement.type === "lesson_name" &&
                       timetableEditorOptions &&

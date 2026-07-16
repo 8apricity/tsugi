@@ -324,15 +324,43 @@
 }
 
 .daily-section-heading {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  padding-bottom: 10px;
 }
 
 .daily-section-heading h2 {
   margin: 0;
+}
+
+.task-add-button {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.task-add-button:hover {
+  background: var(--color-accent-soft);
+}
+
+.task-add-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .task-item {

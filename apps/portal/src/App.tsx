@@ -1620,12 +1620,13 @@ function App() {
                     <h2 id="tasks-title">タスク</h2>
                     {timetableEditor.editing ? (
                       <button
-                        className="button-secondary"
+                        className="task-add-button"
                         type="button"
+                        aria-label="Taskを追加"
                         disabled={timetableEditor.atLimit || timetableEditor.submitting}
                         onClick={openTaskEditor}
                       >
-                        Taskを追加
+                        <span aria-hidden="true">＋</span>
                       </button>
                     ) : null}
                   </div>

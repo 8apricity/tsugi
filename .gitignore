@@ -11,6 +11,8 @@ lerna-debug.log*
 dist
 dist-ssr
 *.local
+playwright-report/
+test-results/
 
 # Editor directories and files
 .vscode/*

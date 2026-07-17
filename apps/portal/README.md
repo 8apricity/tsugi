@@ -1,5 +1,14 @@
 # Tsugi Portal
 
+## Automated Chromium Smoke Test
+
+From repository root, run `pnpm test:browser:chromium`. It recreates an
+isolated local D1 location, seeds only fixed `test-student-*` QA identities,
+serves current Portal code, authenticates from Node, and opens Chromium with
+disposable authenticated state. These fixed identities are not real Students.
+See [`docs/agents/browser-testing.md`](../../docs/agents/browser-testing.md) for
+the server-only command, isolation boundary, secret handling, and artifacts.
+
 ## Test Login For Local/Staging QA
 
 Test login is an API-only QA helper for local and staging multi-account checks. It must stay disabled in production. The direct secret-header endpoint is for Node-side automation only; interactive Browser work must use a one-time login ticket.

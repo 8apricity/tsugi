@@ -4,10 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "pnpm --dir apps/portal build",
+    "browser:test:serve": "node scripts/serve-browser-tests.mjs",
+    "build": "pnpm --dir apps/portal build && pnpm typecheck:browser",
     "issue:interactive-test-login-ticket": "node scripts/issue-interactive-test-login-ticket.mjs",
-    "lint": "pnpm --dir apps/portal lint",
-    "test": "pnpm --dir apps/portal test"
+    "lint": "pnpm --dir apps/portal lint && pnpm lint:browser",
+    "lint:browser": "eslint playwright.config.ts tests/browser scripts/serve-browser-tests.mjs",
+    "test": "pnpm --dir apps/portal test",
+    "test:browser:chromium": "playwright test --project=chromium",
+    "typecheck:browser": "tsc --project tsconfig.browser.json"
   },
   "keywords": [],
   "author": "",

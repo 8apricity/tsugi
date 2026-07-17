@@ -1,5 +1,56 @@
 # Browser testing
 
+## Local automated Chromium smoke test
+
+Run from repository root:
+
+```powershell
+pnpm test:browser:chromium
+```
+
+Playwright owns server startup for this command. Its configured server command
+is also available directly when only local preparation and serving are needed:
+
+```powershell
+pnpm browser:test:serve
+```
+
+That one command deletes and recreates only
+`apps/portal/.wrangler/browser-test`, applies every local D1 migration there,
+inserts the fixed test Students from `db/seeds/test-students.sql`, builds current
+Portal code, and serves it on `http://127.0.0.1:8790`. Ordinary local
+development state under Wrangler's default persistence location is not read or
+changed. Stop the standalone server with Ctrl+C; rerunning it safely recreates
+the dedicated browser-test database.
+
+Fixed test Students are disposable QA identities whose Student Account IDs
+start with `test-student-`. They are not real Students and the dedicated local
+database must not contain real school or personal data. Never apply the fixed
+test Student seed to production.
+
+Before Chromium starts, Playwright generates an ephemeral test-login secret in
+Node. A global setup creates a Node-side `APIRequestContext`, calls the existing
+`POST /api/test/login` endpoint for
+`test-student-2026-2-3-humanities-1`, and writes the resulting cookies to
+`test-results/playwright/auth/chromium.json`. The Chromium project passes that
+state into its `BrowserContext`; no UI login step runs. The secret is not
+written to the state file or supplied to a page, URL, DOM, application-managed
+storage, screenshot, trace, or committed file.
+
+Both the Chromium auth state and browser-test D1 state are disposable and
+ignored by Git. Passing runs retain no screenshots or traces. Failures retain
+an automatic screenshot and trace below `test-results/playwright/chromium`;
+the HTML report is written to `playwright-report`. Delete these local artifacts
+when no longer needed because auth state and failure diagnostics can contain a
+test Student session.
+
+The smoke suite verifies the unauthenticated School Email login and an
+authenticated Daily Plan. If Chromium is not installed locally, run:
+
+```powershell
+pnpm exec playwright install chromium
+```
+
 ## Interactive Browser secret-header decision
 
 **Decision: use the one-time login-ticket fallback.** Direct use of the

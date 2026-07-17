@@ -2477,6 +2477,96 @@ describe('Unified Direct Change API', () => {
     }])).status).toBe(400)
   })
 
+  it('applies parent updates together with their Daily Lesson and Task Notes', async () => {
+    const env = createDailyPlanTestEnv()
+    const cookie = await testLoginCookie(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const timetableId = '32000000-0000-4000-8000-000000000041'
+    const taskId = '32000000-0000-4000-8000-000000000042'
+    expect((await addDirectChanges(env, cookie, [
+      {
+        sourceId: timetableId,
+        changeKind: 'add',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+        replacement: { type: 'cancelled' },
+      },
+      {
+        kind: 'task',
+        sourceId: taskId,
+        changeKind: 'add',
+        targetScopeType: 'track',
+        title: '更新前のタスク',
+        dueDate: '2026-07-10',
+      },
+    ])).status).toBe(201)
+
+    const timetableUpdateId = '32000000-0000-4000-8000-000000000043'
+    const dailyLessonNoteId = '32000000-0000-4000-8000-000000000044'
+    const taskUpdateId = '32000000-0000-4000-8000-000000000045'
+    const taskNoteId = '32000000-0000-4000-8000-000000000046'
+    const response = await addDirectChanges(env, cookie, [
+      {
+        sourceId: timetableUpdateId,
+        changeKind: 'update',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
+        replacement: { type: 'lesson_name', lessonName: '現代文' },
+        sharedInformationItemId: timetableId,
+        expectedLatestChangeId: `${timetableId}:change`,
+      },
+      {
+        kind: 'task',
+        sourceId: taskUpdateId,
+        changeKind: 'update',
+        targetScopeType: 'track',
+        sharedInformationItemId: taskId,
+        expectedLatestChangeId: `${taskId}:change`,
+        title: '更新後のタスク',
+        dueDate: '2026-07-10',
+        relatedLessonName: null,
+      },
+      {
+        kind: 'note',
+        sourceId: dailyLessonNoteId,
+        changeKind: 'add',
+        targetScopeType: 'track',
+        schoolDate: '2026-07-10',
+        periodNumber: 2,
+        body: '授業変更と同時に追加するノート',
+      },
+      {
+        kind: 'note',
+        sourceId: taskNoteId,
+        changeKind: 'add',
+        targetScopeType: 'track',
+        relatedTaskItemId: taskId,
+        body: 'タスク変更と同時に追加するノート',
+      },
+    ])
+
+    expect(response.status).toBe(201)
+    await expect((await readDailyPlan(env, cookie, '2026-07-10')).json())
+      .resolves.toMatchObject({
+        periods: expect.arrayContaining([
+          expect.objectContaining({
+            periodNumber: 2,
+            lessonName: '現代文',
+            notes: [expect.objectContaining({ noteId: dailyLessonNoteId })],
+          }),
+        ]),
+        tasks: [expect.objectContaining({
+          taskId,
+          title: '更新後のタスク',
+          notes: [expect.objectContaining({ noteId: taskNoteId })],
+        })],
+      })
+  })
+
   it('validates School Date Notes and keeps the legacy endpoint as an alias', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(

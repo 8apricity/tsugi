@@ -681,6 +681,44 @@ describe('D1 Direct Timetable Change persistence', () => {
     ).get(`${rolledBackNote.sourceId}:snapshot`)).toEqual({ count: 0 })
   })
 
+  it('does not misreport an unrelated D1 batch failure as a conflict', async () => {
+    const database = createTestDatabase()
+    const d1 = new SqliteD1Database(database)
+    const adapters = createD1PersistenceAdapters(
+      d1 as unknown as D1Database,
+    )
+    await adapters.seed.saveStudentAccount({
+      studentAccountId: 'batch-failure-student',
+      schoolEmail: 'batch-failure@example.invalid',
+      displayName: 'Batch Failure Student',
+    })
+    d1.batch = async () => {
+      throw new Error('missing Note schema')
+    }
+    const noteId = '33499999-9999-4999-8999-999999999999'
+    const note = {
+      kind: 'note',
+      changeKind: 'add',
+      sourceId: noteId,
+      sharedInformationItemId: noteId,
+      latestChangeId: `${noteId}:change`,
+      targetScope: {
+        type: 'student',
+        schoolYear: 2026,
+        studentAccountId: 'batch-failure-student',
+      },
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+      body: 'schema 未適用時のノート',
+      changedByStudentAccountId: 'batch-failure-student',
+      changedAt: Date.parse('2026-07-09T04:00:00.000Z'),
+      createdAt: Date.parse('2026-07-09T04:00:00.000Z'),
+    } satisfies DirectChangeOperation
+
+    await expect(adapters.directChange.commitDirectChanges([note]))
+      .rejects.toThrow('missing Note schema')
+  })
+
   it('atomically stores dependent Task Notes and cascades them inside Task removal', async () => {
     const database = createTestDatabase()
     const adapters = createD1PersistenceAdapters(

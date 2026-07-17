@@ -1469,6 +1469,51 @@ describe('Shared Information editor client', () => {
     })).toMatchObject({ status: 'saved' })
   })
 
+  it('unlocks and retries drafts after a non-conflict server failure', async () => {
+    let transportCalls = 0
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      submitDirectTimetableChanges: async () => {
+        transportCalls += 1
+        return transportCalls === 1
+          ? { status: 'rejected' as const }
+          : { status: 'applied' as const }
+      },
+    })
+    editor.reconcileLayerState(layerState())
+    editor.saveDailyLessonDialogDraft({
+      targetScopeType: 'track',
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+      noteBody: '時間割と同時に追加するノート',
+    })
+    const options = {
+      confirmSubmission: () => true,
+      applyFreshness: async () => 'refreshed' as const,
+    }
+
+    await expect(editor.submitCurrentBatch(options)).resolves.toEqual({
+      status: 'rejected',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      submitting: false,
+      draftCount: 2,
+      conflictCount: 0,
+      lastCommitFailed: true,
+    })
+    await expect(editor.submitCurrentBatch(options)).resolves.toEqual({
+      status: 'applied',
+      freshness: 'refreshed',
+    })
+    expect(transportCalls).toBe(2)
+    expect(editor.getSnapshot()).toMatchObject({
+      submitting: false,
+      draftCount: 0,
+      conflictCount: 0,
+    })
+  })
+
   it('does not apply freshness when reset runs after the server result is published', async () => {
     let freshnessCalls = 0
     const editor = createTimetableEditorClient({

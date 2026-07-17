@@ -3094,7 +3094,7 @@ export class D1PersistenceAdapters
 
     try {
       await this.db.batch(statements)
-    } catch {
+    } catch (error) {
       const [retriedTimetable, retriedTasks, retriedNotes] = await Promise.all([
         this.findDirectChangesBySourceIds(changes.map((change) => change.sourceId)),
         this.findDirectTaskOperationsBySourceIds(changes.map((change) => change.sourceId)),
@@ -3122,12 +3122,160 @@ export class D1PersistenceAdapters
           changes: changes.map((change) => retried.get(change.sourceId)!),
         }
       }
-      return {
-        status: 'conflict' as const,
-        conflictingSourceIds: pending.map((change) => change.sourceId),
+      const retryIdempotencyConflicts = changes
+        .filter((change) => {
+          const previous = retried.get(change.sourceId)
+          return previous && !sameDirectChangeOperationPayload(previous, change)
+        })
+        .map((change) => change.sourceId)
+      if (retryIdempotencyConflicts.length > 0) {
+        return {
+          status: 'idempotency-conflict' as const,
+          conflictingSourceIds: retryIdempotencyConflicts,
+        }
       }
+      const retryPending = pending.filter(
+        (change) => !retried.has(change.sourceId),
+      )
+      const currentConflicts = await this.findCurrentMixedConflictSourceIds(
+        retryPending,
+      )
+      if (currentConflicts.length > 0) {
+        return {
+          status: 'conflict' as const,
+          conflictingSourceIds: currentConflicts,
+        }
+      }
+      throw error
     }
     return { status: 'applied' as const, changes }
+  }
+
+  private async findCurrentMixedConflictSourceIds(
+    pending: DirectChangeOperation[],
+  ) {
+    const timetableChanges = pending.filter(
+      (change): change is Extract<DirectChangeOperation, { kind: 'timetable_change' }> =>
+        change.kind === 'timetable_change',
+    )
+    const timetableItemChanges = timetableChanges.filter(
+      (change) => change.changeKind !== 'add',
+    )
+    const taskChanges = pending.filter(
+      (change): change is Extract<DirectChangeOperation, { kind: 'task' }> =>
+        change.kind === 'task',
+    )
+    const taskItemChanges = taskChanges.filter(
+      (change) => change.changeKind !== 'add',
+    )
+    const noteChanges = pending.filter(
+      (change): change is Extract<DirectChangeOperation, { kind: 'note' }> =>
+        change.kind === 'note',
+    )
+    const noteItemChanges = noteChanges.filter(
+      (change) => change.changeKind !== 'add',
+    )
+    const relatedTaskNoteAdds = noteChanges.filter(
+      (change): change is Extract<
+        DirectChangeOperation,
+        { kind: 'note'; changeKind: 'add' }
+      > => change.changeKind === 'add' && !!change.relatedTaskItemId,
+    )
+    const relatedTaskItemIds = relatedTaskNoteAdds.map(
+      (change) => change.relatedTaskItemId!,
+    )
+    const [activeTimetable, activeTasks, activeNotes] = await Promise.all([
+      this.findActiveTimetableChangesByItemIds(
+        timetableItemChanges.map((change) => change.sharedInformationItemId),
+      ),
+      this.findActiveTasksByItemIds([
+        ...new Set([
+          ...taskItemChanges.map((change) => change.sharedInformationItemId),
+          ...relatedTaskItemIds,
+        ]),
+      ]),
+      this.findActiveNotesByItemIds(
+        noteItemChanges.map((change) => change.sharedInformationItemId),
+      ),
+    ])
+    const activeTimetableByItem = new Map(
+      activeTimetable.map((change) => [change.sharedInformationItemId, change]),
+    )
+    const activeTaskByItem = new Map(
+      activeTasks.map((change) => [change.sharedInformationItemId, change]),
+    )
+    const activeNoteByItem = new Map(
+      activeNotes.map((change) => [change.sharedInformationItemId, change]),
+    )
+    const taskAddsByItem = new Map(
+      taskChanges
+        .filter((change) => change.changeKind === 'add')
+        .map((change) => [change.sharedInformationItemId, change]),
+    )
+    const taskRemovalIds = new Set(
+      taskChanges
+        .filter((change) => change.changeKind === 'remove')
+        .map((change) => change.sharedInformationItemId),
+    )
+    const addSlotKeys = timetableChanges
+      .filter((change) => change.changeKind === 'add')
+      .map(activeTimetableChangeSlotKey)
+    const occupiedSlotKeys = new Set<string>()
+    if (addSlotKeys.length > 0) {
+      const placeholders = addSlotKeys.map(() => '?').join(', ')
+      const { results } = await this.db
+        .prepare(
+          `select timetable_change_slot_key from active_timetable_change_slots
+           where timetable_change_slot_key in (${placeholders})`,
+        )
+        .bind(...addSlotKeys)
+        .all<{ timetable_change_slot_key: string }>()
+      results.forEach((row) => {
+        occupiedSlotKeys.add(row.timetable_change_slot_key)
+      })
+    }
+
+    return [
+      ...timetableChanges
+        .filter((change) => {
+          if (change.changeKind === 'add') {
+            return occupiedSlotKeys.has(activeTimetableChangeSlotKey(change))
+          }
+          const active = activeTimetableByItem.get(
+            change.sharedInformationItemId,
+          )
+          return !active ||
+            active.latestChangeId !== change.expectedLatestChangeId ||
+            activeTimetableChangeSlotKey(active) !==
+              activeTimetableChangeSlotKey(change)
+        })
+        .map((change) => change.sourceId),
+      ...taskItemChanges
+        .filter((change) => {
+          const active = activeTaskByItem.get(change.sharedInformationItemId)
+          return !active ||
+            active.latestChangeId !== change.expectedLatestChangeId ||
+            !targetScopesEqual(active.targetScope, change.targetScope)
+        })
+        .map((change) => change.sourceId),
+      ...noteItemChanges
+        .filter((change) => {
+          const active = activeNoteByItem.get(change.sharedInformationItemId)
+          return !active ||
+            active.latestChangeId !== change.expectedLatestChangeId ||
+            !targetScopesEqual(active.targetScope, change.targetScope)
+        })
+        .map((change) => change.sourceId),
+      ...relatedTaskNoteAdds
+        .filter((change) => {
+          const relatedTaskItemId = change.relatedTaskItemId!
+          if (taskRemovalIds.has(relatedTaskItemId)) return true
+          const task = taskAddsByItem.get(relatedTaskItemId) ??
+            activeTaskByItem.get(relatedTaskItemId)
+          return !task || !targetScopesEqual(task.targetScope, change.targetScope)
+        })
+        .map((change) => change.sourceId),
+    ]
   }
 
   async commitDirectTimetableChanges(changes: DirectTimetableChangeOperation[]) {

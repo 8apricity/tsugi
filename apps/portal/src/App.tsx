@@ -281,6 +281,27 @@ function useLessonNameOptionsDismissal(
   return comboboxRef;
 }
 
+function ClearDateIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h16" />
+      <path d="M9 7V4h6v3" />
+      <path d="m6 7 1 13h10l1-13" />
+      <path d="M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
 function LessonNameOptionsPopover({
   listboxId,
   optionIdPrefix,
@@ -2071,6 +2092,10 @@ function App() {
     const targetScopeContext = dailyPlanState.status === "ready"
       ? dailyPlanState.dailyPlan.studentAffiliation
       : undefined;
+    const noteContextImmutable = Boolean(
+      noteEditorForm?.editingNote ||
+      noteEditorForm?.editingDraft?.changeKind === "update",
+    );
     const referenceBasePeriods =
       dailyPlanState.status === "ready" &&
       dailyPlanState.dailyPlan.schoolDate === selectedSchoolDate
@@ -2679,7 +2704,9 @@ function App() {
           {noteEditorForm ? (
             <div className="editor-dialog-backdrop" role="presentation">
               <section
-                className="timetable-editor-dialog note-editor-dialog"
+                className={`timetable-editor-dialog note-editor-dialog${
+                  noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
+                }`}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="note-editor-title"
@@ -2728,103 +2755,132 @@ function App() {
                     </p>
                   ) : noteEditorForm.periodNumber != null ? (
                     <div className="note-fixed-context">
-                      <div className="readonly-field">
+                      <label className="immutable-field">
                         <span>日付</span>
-                        <strong>
-                          {formatUiSchoolDate(noteEditorForm.schoolDate!, {
-                            referenceSchoolDate: selectedSchoolDate,
-                          })}
-                        </strong>
-                      </div>
-                      <div className="readonly-field">
+                        <input
+                          type="date"
+                          value={noteEditorForm.schoolDate!}
+                          disabled
+                        />
+                      </label>
+                      <label className="immutable-field">
                         <span>時限</span>
-                        <strong>{noteEditorForm.periodNumber}限</strong>
-                      </div>
-                      <div className="readonly-field">
+                        <input
+                          type="text"
+                          value={`${noteEditorForm.periodNumber}限`}
+                          disabled
+                        />
+                      </label>
+                      <label className="immutable-field">
                         <span>変更適用範囲</span>
-                        <strong>
-                          {scopeLabel(
-                            noteEditorForm.targetScopeType!,
-                            targetScopeContext,
-                          )}
-                        </strong>
-                        <small>日付・時限・変更適用範囲は変更できません。</small>
-                      </div>
+                        <select value={noteEditorForm.targetScopeType!} disabled>
+                          <option value={noteEditorForm.targetScopeType!}>
+                            {scopeLabel(
+                              noteEditorForm.targetScopeType!,
+                              targetScopeContext,
+                            )}
+                          </option>
+                        </select>
+                      </label>
                     </div>
                   ) : (
                     <>
-                  <label>
-                    <span>日付</span>
-                    <input
-                      type="date"
-                      required={noteEditorForm.schoolDate !== null}
-                      disabled={
-                        noteEditorForm.editingNote !== null ||
-                        noteEditorForm.editingDraft?.changeKind === "update"
-                      }
-                      min={schoolYearRange?.startsOn}
-                      max={schoolYearRange?.endsOn}
-                      value={noteEditorForm.schoolDate ?? ""}
-                      onChange={(event) =>
-                        setNoteEditorForm((current) =>
-                          current
-                            ? { ...current, schoolDate: event.target.value }
-                            : current,
-                        )
-                      }
-                    />
-                    {noteEditorForm.schoolDate === null ? (
-                      <small>日付なし</small>
-                    ) : null}
-                    {!noteEditorForm.editingNote &&
-                    noteEditorForm.editingDraft?.changeKind !== "update" ? (
-                      <button
-                        className="button-link note-clear-date"
-                        type="button"
-                        onClick={() =>
-                          setNoteEditorForm((current) =>
-                            current ? { ...current, schoolDate: null } : current
-                          )
+                      <label
+                        className={
+                          noteContextImmutable ? "immutable-field" : undefined
                         }
                       >
-                        日付をクリア
-                      </button>
-                    ) : null}
-                  </label>
-                  <label>
-                    <span>変更適用範囲</span>
-                    <select
-                      required
-                      disabled={
-                        noteEditorForm.editingNote !== null ||
-                        noteEditorForm.editingDraft?.changeKind === "update"
-                      }
-                      value={noteEditorForm.targetScopeType ?? ""}
-                      onChange={(event) =>
-                        setNoteEditorForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                targetScopeType:
-                                  (event.target.value || null) as
-                                    TargetScopeType | null,
+                        <span>日付</span>
+                        <div className="optional-date-row">
+                          <input
+                            type="date"
+                            required={noteEditorForm.schoolDate !== null}
+                            disabled={noteContextImmutable}
+                            min={schoolYearRange?.startsOn}
+                            max={schoolYearRange?.endsOn}
+                            value={noteEditorForm.schoolDate ?? ""}
+                            onChange={(event) =>
+                              setNoteEditorForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      schoolDate: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                          {!noteContextImmutable ? (
+                            <button
+                              className="optional-date-clear"
+                              type="button"
+                              aria-label="日付をクリア"
+                              title="日付をクリア"
+                              disabled={!noteEditorForm.schoolDate}
+                              onClick={() =>
+                                setNoteEditorForm((current) =>
+                                  current
+                                    ? { ...current, schoolDate: null }
+                                    : current,
+                                )
                               }
-                            : current,
-                        )
-                      }
-                    >
-                      <option value="" disabled hidden>
-                        選択してください
-                      </option>
-                      {(["grade", "class", "track", "student"] as const).map(
-                        (scope) => (
-                          <option key={scope} value={scope}>
-                            {scopeLabel(scope, targetScopeContext)}
-                          </option>
-                        ),
-                      )}
-                    </select>
-                  </label>
+                            >
+                              <ClearDateIcon />
+                            </button>
+                          ) : null}
+                        </div>
+                      </label>
+                      <label
+                        className={
+                          noteContextImmutable ? "immutable-field" : undefined
+                        }
+                      >
+                        <span>変更適用範囲</span>
+                        <select
+                          required
+                          disabled={noteContextImmutable}
+                          value={noteEditorForm.targetScopeType ?? ""}
+                          onChange={(event) =>
+                            setNoteEditorForm((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    targetScopeType:
+                                      (event.target.value || null) as
+                                        TargetScopeType | null,
+                                  }
+                                : current,
+                            )
+                          }
+                        >
+                          {noteContextImmutable ? (
+                            <option value={noteEditorForm.targetScopeType!}>
+                              {scopeLabel(
+                                noteEditorForm.targetScopeType!,
+                                targetScopeContext,
+                              )}
+                            </option>
+                          ) : (
+                            <>
+                              <option value="" disabled hidden>
+                                選択してください
+                              </option>
+                              {(
+                                [
+                                  "grade",
+                                  "class",
+                                  "track",
+                                  "student",
+                                ] as const
+                              ).map((scope) => (
+                                <option key={scope} value={scope}>
+                                  {scopeLabel(scope, targetScopeContext)}
+                                </option>
+                              ))}
+                            </>
+                          )}
+                        </select>
+                      </label>
                     </>
                   )}
                   <div className="editor-dialog-actions">
@@ -2888,7 +2944,7 @@ function App() {
                   </label>
                   <div className="task-form-field">
                     <label htmlFor="task-due-date">期限</label>
-                    <div className="task-due-date-row">
+                    <div className="optional-date-row">
                       <input
                         id="task-due-date"
                         type="date"
@@ -2907,7 +2963,7 @@ function App() {
                         }
                       />
                       <button
-                        className="task-due-date-clear"
+                        className="optional-date-clear"
                         type="button"
                         aria-label="期限をクリア"
                         title="期限をクリア"
@@ -2918,22 +2974,7 @@ function App() {
                           )
                         }
                       >
-                        <svg
-                          aria-hidden="true"
-                          viewBox="0 0 24 24"
-                          width="20"
-                          height="20"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M4 7h16" />
-                          <path d="M9 7V4h6v3" />
-                          <path d="m6 7 1 13h10l1-13" />
-                          <path d="M10 11v5M14 11v5" />
-                        </svg>
+                        <ClearDateIcon />
                       </button>
                     </div>
                   </div>
@@ -3061,16 +3102,20 @@ function App() {
                     </p>
                   ) : null}
                   {taskEditorForm.editingTask ? (
-                    <div className="readonly-field">
+                    <label className="immutable-field">
                       <span>変更適用範囲</span>
-                      <strong>
-                        {scopeLabel(
-                          taskEditorForm.editingTask.targetScopeType,
-                          targetScopeContext,
-                        )}
-                      </strong>
-                      <small>変更適用範囲は変更できません。</small>
-                    </div>
+                      <select
+                        value={taskEditorForm.editingTask.targetScopeType}
+                        disabled
+                      >
+                        <option value={taskEditorForm.editingTask.targetScopeType}>
+                          {scopeLabel(
+                            taskEditorForm.editingTask.targetScopeType,
+                            targetScopeContext,
+                          )}
+                        </option>
+                      </select>
+                    </label>
                   ) : (
                     <label>
                       <span>変更適用範囲</span>
@@ -3622,25 +3667,35 @@ function App() {
                     </button>
                   </header>
                   <div className="editor-fields">
-                    <label>
+                    <label className="immutable-field">
                       変更対象日
-                      <output>{formatUiSchoolDate(
-                        timetableEditorForm.changeDate,
-                        { referenceSchoolDate: selectedSchoolDate },
-                      )}</output>
+                      <input
+                        type="date"
+                        value={timetableEditorForm.changeDate}
+                        disabled
+                      />
                     </label>
-                    <label>
+                    <label className="immutable-field">
                       時限
-                      <output>{timetableEditorForm.periodNumber}限</output>
+                      <input
+                        type="text"
+                        value={`${timetableEditorForm.periodNumber}限`}
+                        disabled
+                      />
                     </label>
-                    <label className="editor-field-wide">
+                    <label className="editor-field-wide immutable-field">
                       変更適用範囲
-                      <output>
-                        {scopeLabel(
-                          timetableEditorForm.targetScopeType,
-                          targetScopeContext,
-                        )}
-                      </output>
+                      <select
+                        value={timetableEditorForm.targetScopeType}
+                        disabled
+                      >
+                        <option value={timetableEditorForm.targetScopeType}>
+                          {scopeLabel(
+                            timetableEditorForm.targetScopeType,
+                            targetScopeContext,
+                          )}
+                        </option>
+                      </select>
                     </label>
                   </div>
 

@@ -36,6 +36,7 @@ import { readNoteEditHistory } from "./noteEditHistory";
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
 const setupSessionCookieName = "tsugi_setup";
+const interactiveTestLoginTicketPathPrefix = "/api/test/login-tickets/";
 
 class EmailDeliveryError extends Error {
   constructor() {
@@ -233,16 +234,111 @@ function sessionResponseBody(studentAccount: {
   };
 }
 
+function interactiveTestLoginHeaders() {
+  return {
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+  };
+}
+
+function interactiveTestLoginNotFound() {
+  return new Response(null, {
+    status: 404,
+    headers: interactiveTestLoginHeaders(),
+  });
+}
+
+function acceptsTestLoginSecret(request: Request, env: Env) {
+  return (
+    env.TEST_LOGIN_ENABLED === "true" &&
+    Boolean(env.TEST_LOGIN_SECRET) &&
+    request.headers.get("x-test-login-secret") === env.TEST_LOGIN_SECRET
+  );
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (
+      url.pathname === "/api/test/login-tickets" &&
+      request.method === "POST"
+    ) {
+      if (!acceptsTestLoginSecret(request, env)) {
+        return interactiveTestLoginNotFound();
+      }
+
+      const body = await request
+        .json<{ studentAccountId?: unknown }>()
+        .catch(() => null);
+
+      if (!body) {
+        return interactiveTestLoginNotFound();
+      }
+
+      const result = await (
+        await getStudentAccountAccess(env)
+      ).issueInteractiveTestLoginTicket({
+        studentAccountId: body.studentAccountId,
+        now: Date.now(),
+      });
+
+      if (result.status === "not-found") {
+        return interactiveTestLoginNotFound();
+      }
+
+      return Response.json(
+        {
+          ticket: result.ticket,
+          expiresAt: result.expiresAt,
+          exchangeUrl: new URL(
+            `${interactiveTestLoginTicketPathPrefix}${result.ticket}`,
+            url,
+          ).toString(),
+        },
+        {
+          status: 201,
+          headers: interactiveTestLoginHeaders(),
+        },
+      );
+    }
+
+    if (
+      url.pathname.startsWith(interactiveTestLoginTicketPathPrefix) &&
+      request.method === "GET"
+    ) {
+      if (env.TEST_LOGIN_ENABLED !== "true") {
+        return interactiveTestLoginNotFound();
+      }
+
+      const result = await (
+        await getStudentAccountAccess(env)
+      ).exchangeInteractiveTestLoginTicket({
+        ticket: url.pathname.slice(interactiveTestLoginTicketPathPrefix.length),
+        enabled: env.TEST_LOGIN_ENABLED === "true",
+        now: Date.now(),
+      });
+
+      if (result.status === "not-found") {
+        return interactiveTestLoginNotFound();
+      }
+
+      return new Response(null, {
+        status: 303,
+        headers: {
+          ...interactiveTestLoginHeaders(),
+          location: new URL("/", url).toString(),
+          "set-cookie": sessionCookie(
+            result.sessionToken,
+            30 * 24 * 60 * 60,
+            url.protocol === "https:",
+          ),
+        },
+      });
+    }
+
     if (url.pathname === "/api/test/login" && request.method === "POST") {
-      if (
-        env.TEST_LOGIN_ENABLED !== "true" ||
-        !env.TEST_LOGIN_SECRET ||
-        request.headers.get("x-test-login-secret") !== env.TEST_LOGIN_SECRET
-      ) {
+      if (!acceptsTestLoginSecret(request, env)) {
         return new Response(null, { status: 404 });
       }
 

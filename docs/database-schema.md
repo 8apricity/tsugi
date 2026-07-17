@@ -56,6 +56,36 @@ create index email_verification_codes_school_email_requested_at_idx
 
 Verification code values are never stored directly. `code_hash` stores only a hash of the code sent by email. `invalidated_at is null` means the code request may still be used if it is also within the application-enforced expiry window. When a new code is issued for the same school email, older unused codes are invalidated. Request history is retained so resend cooldowns and hourly send limits can be enforced.
 
+## Student Sessions and Interactive QA Login Tickets
+
+Student Sessions use opaque tokens whose hashes are stored in
+`student_sessions`. Production Student Sessions are created only after School
+Email verification and required initial setup.
+
+Local and staging interactive QA may additionally issue a short-lived ticket
+for one allow-listed seeded test Student. The long-lived test-login secret stays
+outside Browser automation. Only the ticket hash and lifecycle metadata are
+stored:
+
+```sql
+create table interactive_test_login_tickets (
+  interactive_test_login_ticket_id text primary key,
+  ticket_token_hash text not null unique,
+  student_account_id text not null references student_accounts(student_account_id),
+  created_at integer not null,
+  expires_at integer not null,
+  consumed_at integer,
+  consumption_nonce text unique
+);
+```
+
+Tickets expire after at most two minutes. Exchange atomically records
+`consumed_at` plus a unique consumption nonce and inserts one ordinary Student
+Session. Invalid, expired, consumed, disabled-environment, non-allow-listed,
+and production-like requests expose only generic not-found behavior. Expired
+and consumed rows are removed opportunistically during later issuance; no
+scheduled cleanup infrastructure is required.
+
 ## School Structure
 
 ```sql

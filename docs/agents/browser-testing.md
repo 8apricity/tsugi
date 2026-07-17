@@ -99,3 +99,102 @@ fresh dummy-only probe on every required interactive Browser surface. Until
 then, issue the long-lived secret outside Browser automation and give the
 Browser only the short-lived, fixed-Student, one-time login ticket defined by
 the secure browser QA specification.
+
+## Interactive test Student login
+
+This workflow implements the fallback selected by issue #45 above. Never put
+`TEST_LOGIN_SECRET` in Browser JavaScript, a URL, DOM, storage, console, trace,
+screenshot, or Browser tool input/output.
+
+### Choose the target and Student
+
+- Prefer local for ordinary UI work. Use staging only when deployed Worker,
+  binding, or staging data behavior matters. Production has no QA login path.
+- Choose exactly one `test-student-*` Student Account ID from
+  [`test-students.sql`](../../apps/portal/db/seeds/test-students.sql). Arbitrary
+  or non-seeded Student Account IDs return the same not-found response.
+- Cloudflare Access remains a separate outer staging boundary. The ticket
+  issuer and exchange neither create nor bypass an Access session. If Access
+  rejects the Node-side issuer request, run it from an already Access-authorized
+  environment; never move the long-lived secret into Browser to work around it.
+
+For local work, apply migrations, seed the dedicated local D1 database, build,
+and start the Worker from `apps/portal`:
+
+```powershell
+pnpm exec wrangler d1 migrations apply jikanwari-d1 --local
+pnpm exec wrangler d1 execute jikanwari-d1 --local --file db/seeds/test-students.sql
+pnpm run build
+pnpm exec wrangler dev
+```
+
+Keep `TEST_LOGIN_ENABLED=true` and `TEST_LOGIN_SECRET=<local secret>` in the
+ignored `apps/portal/.dev.vars`. Never enable either in production.
+
+### Issue outside Browser, exchange inside Browser
+
+From the repository root, give the long-lived secret only to the Node process:
+
+```powershell
+$env:TEST_LOGIN_SECRET = '<local-or-staging-secret>'
+pnpm issue:interactive-test-login-ticket -- `
+  http://127.0.0.1:8787 `
+  test-student-2026-2-3-humanities-1
+Remove-Item Env:TEST_LOGIN_SECRET
+```
+
+The issuer accepts HTTPS targets plus loopback HTTP, authenticates through the
+existing secret header, and prints one exchange URL. The ticket expires after
+two minutes, is restricted to the selected fixed Student, is stored only as a
+hash, and can create one normal Student Session.
+
+Open the exchange URL in the selected interactive Browser. A successful
+exchange atomically consumes the ticket, sets the normal `tsugi_session`
+HttpOnly cookie, and redirects to `/` with `Cache-Control: no-store` and
+`Referrer-Policy: no-referrer`. It does not run School Email verification.
+
+Browser sessions are independent. Issue a new ticket for every fresh in-app
+Browser or Chrome session; never reuse a ticket or assume a cookie crosses
+Browser surfaces. Invalid, expired, used, disabled-environment, and production
+requests all return the same not-found response.
+
+### Viewport, artifacts, and verification
+
+- Keep the Browser's default viewport unless the requested check names a
+  device or breakpoint. For mobile/PWA checks, record the exact override; use
+  `390 x 844` when no product-specific mobile size is supplied.
+- Treat the exchange URL as a disposable credential. Do not post or retain it.
+  Capture screenshots, console output, or traces only after the redirect has
+  removed the ticket from the current URL. Delete failure artifacts that retain
+  a ticket URL.
+- Confirm the redirected Portal reaches the authenticated Daily Plan and does
+  not show School Email verification. The Student Session must continue to work
+  through `/api/auth/session` like any normal session.
+
+Every final Browser report must state:
+
+1. target environment and URL;
+2. actual Browser surface/version;
+3. viewport or device override;
+4. selected fixed test Student Account ID;
+5. whether ticket issuance, exchange, redirect, and authenticated Daily Plan
+   succeeded;
+6. artifacts retained or deleted; and
+7. for staging, that Cloudflare Access was independently satisfied and not
+   bypassed.
+
+### Recorded local verification for issue #47
+
+On 2026-07-17, a fresh Codex In-app Browser session (`iab`, reported
+`Chrome/150.0.0.0` on Windows) used its default viewport with no override
+against `http://127.0.0.1:8787/`. The Node issuer selected
+`test-student-2026-2-3-humanities-1` and received `201`; Browser navigation to
+the disposable exchange URL received `303`, ended at `/`, and rendered the
+authenticated Daily Plan without School Email verification. The Daily Plan
+showed the seeded Saturday lesson and produced no captured console errors.
+
+No screenshot, trace, ticket URL, or other Browser artifact was retained.
+Cloudflare Access was not applicable to this local target. An initial run also
+proved that SPA asset fallback intercepted API navigation until
+`assets.run_worker_first` included `/api/*`; the successful run used that
+committed routing configuration.

@@ -16,6 +16,10 @@ import {
   type TargetScope,
   type TimetableChangeReplacement,
 } from './persistence'
+import {
+  exchangeInteractiveTestLoginTicket,
+  issueInteractiveTestLoginTicket,
+} from './studentAccountAccess'
 
 class SqliteD1Statement {
   private readonly database: DatabaseSync
@@ -105,6 +109,96 @@ function createTestDatabase(maximumMigration?: string) {
   }
   return database
 }
+
+describe('D1 interactive test login ticket persistence', () => {
+  it('stores only the ticket hash and atomically creates one Student Session', async () => {
+    const database = createTestDatabase()
+    const adapters = createD1PersistenceAdapters(
+      new SqliteD1Database(database) as unknown as D1Database,
+    )
+    await adapters.studentAccount.saveStudentAccount({
+      studentAccountId: 'test-student-2026-2-3-humanities-1',
+      schoolEmail: 'test-student-2026-2-3-humanities-1@example.invalid',
+      displayName: 'Test Humanities 1',
+    })
+    const ticket = 'b'.repeat(64)
+
+    await expect(issueInteractiveTestLoginTicket({
+      studentAccountId: 'test-student-2026-2-3-humanities-1',
+      now: 1_000,
+      ticket,
+      store: adapters.studentAccount,
+    })).resolves.toEqual({
+      status: 'issued',
+      ticket,
+      expiresAt: 121_000,
+    })
+
+    const ticketRow = database.prepare(`
+      select ticket_token_hash, student_account_id, created_at, expires_at,
+             consumed_at, consumption_nonce
+      from interactive_test_login_tickets
+    `).get()
+    expect(ticketRow).toEqual({
+      ticket_token_hash:
+        'a0fab1377f49a759b57f63318262ebe89fabfc990e8e93ceac2984561482b9d4',
+      student_account_id: 'test-student-2026-2-3-humanities-1',
+      created_at: 1_000,
+      expires_at: 121_000,
+      consumed_at: null,
+      consumption_nonce: null,
+    })
+    expect(JSON.stringify(ticketRow)).not.toContain(ticket)
+
+    const ticketTokenHash =
+      'a0fab1377f49a759b57f63318262ebe89fabfc990e8e93ceac2984561482b9d4'
+    await expect(adapters.studentAccount.consumeInteractiveTestLoginTicket({
+      ticketTokenHash,
+      consumptionNonce: 'disabled-attempt',
+      sessionTokenHash: 'disabled-session',
+      enabled: false,
+      allowedStudentAccountIds: ['test-student-2026-2-3-humanities-1'],
+      now: 1_500,
+      sessionExpiresAt: 10_000,
+    })).resolves.toBe(false)
+    await expect(adapters.studentAccount.consumeInteractiveTestLoginTicket({
+      ticketTokenHash,
+      consumptionNonce: 'not-allowed-attempt',
+      sessionTokenHash: 'not-allowed-session',
+      enabled: true,
+      allowedStudentAccountIds: [],
+      now: 1_500,
+      sessionExpiresAt: 10_000,
+    })).resolves.toBe(false)
+
+    const results = await Promise.all([
+      exchangeInteractiveTestLoginTicket({
+        ticket,
+        enabled: true,
+        now: 2_000,
+        consumptionNonce: 'nonce-1',
+        sessionToken: 'session-token-1',
+        store: adapters.studentAccount,
+      }),
+      exchangeInteractiveTestLoginTicket({
+        ticket,
+        enabled: true,
+        now: 2_000,
+        consumptionNonce: 'nonce-2',
+        sessionToken: 'session-token-2',
+        store: adapters.studentAccount,
+      }),
+    ])
+
+    expect(results.map(({ status }) => status).sort()).toEqual([
+      'authenticated',
+      'not-found',
+    ])
+    expect(database.prepare(
+      'select count(*) as count from student_sessions',
+    ).get()).toEqual({ count: 1 })
+  })
+})
 
 describe('D1 Direct Timetable Change persistence', () => {
   it('migrates Standard Timetable values to the approved Registered Lesson Names', () => {

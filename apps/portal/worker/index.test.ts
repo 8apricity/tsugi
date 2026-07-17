@@ -439,6 +439,36 @@ function readReferenceTasks(
   )
 }
 
+function issueInteractiveTestLoginTicket(
+  env: Env,
+  studentAccountId: string,
+  secret: string | null = 'test-secret',
+) {
+  const headers = new Headers({ 'content-type': 'application/json' })
+
+  if (secret !== null) {
+    headers.set('x-test-login-secret', secret)
+  }
+
+  return worker.fetch(
+    new Request('https://tsugi.test/api/test/login-tickets', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ studentAccountId }),
+    }),
+    env,
+  )
+}
+
+function exchangeInteractiveTestLoginTicket(env: Env, ticket: string) {
+  return worker.fetch(
+    new Request(
+      `https://tsugi.test/api/test/login-tickets/${encodeURIComponent(ticket)}`,
+    ),
+    env,
+  )
+}
+
 function readReferenceDailyPlan(
   env: Env,
   cookie = '',
@@ -3926,6 +3956,173 @@ describe('test login', () => {
         schoolEmail: 'test-student-2026-2-3-humanities-1@example.invalid',
       },
     })
+  })
+})
+
+describe('interactive test login tickets', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('issues one short-lived ticket for an allow-listed fixed test Student', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-17T00:00:00.000Z'))
+
+    const response = await issueInteractiveTestLoginTicket(
+      createTestLoginEnv(),
+      'test-student-2026-2-3-humanities-1',
+    )
+
+    expect(response.status).toBe(201)
+    expect(response.headers.get('set-cookie')).toBeNull()
+    await expect(response.json()).resolves.toEqual({
+      ticket: expect.stringMatching(/^[a-f0-9]{64}$/),
+      expiresAt: Date.parse('2026-07-17T00:02:00.000Z'),
+      exchangeUrl: expect.stringMatching(
+        /^https:\/\/tsugi\.test\/api\/test\/login-tickets\/[a-f0-9]{64}$/,
+      ),
+    })
+  })
+
+  it('exchanges a ticket for one normal Student Session and redirects without referrer or caching', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-17T00:00:00.000Z'))
+    const env = createTestLoginEnv()
+    const issueResponse = await issueInteractiveTestLoginTicket(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const { ticket } = await issueResponse.json<{ ticket: string }>()
+
+    const exchangeResponse = await exchangeInteractiveTestLoginTicket(env, ticket)
+
+    expect(exchangeResponse.status).toBe(303)
+    expect(exchangeResponse.headers.get('location')).toBe('https://tsugi.test/')
+    expect(exchangeResponse.headers.get('cache-control')).toBe('no-store')
+    expect(exchangeResponse.headers.get('referrer-policy')).toBe('no-referrer')
+    const cookie = exchangeResponse.headers.get('set-cookie') ?? ''
+    expect(cookie).toContain('tsugi_session=')
+    expect(cookie).toContain('HttpOnly')
+    expect(cookie).toContain('Secure')
+    expect(cookie).toContain('SameSite=Lax')
+
+    const sessionResponse = await worker.fetch(
+      new Request('https://tsugi.test/api/auth/session', {
+        headers: { cookie },
+      }),
+      env,
+    )
+    await expect(sessionResponse.json()).resolves.toMatchObject({
+      status: 'authenticated',
+      studentAccount: {
+        schoolEmail: 'test-student-2026-2-3-humanities-1@example.invalid',
+      },
+    })
+  })
+
+  it('returns generic not found for disabled, unauthorized, missing, and non-allow-listed issuance', async () => {
+    const responses = await Promise.all([
+      issueInteractiveTestLoginTicket(
+        createTestEnv(),
+        'test-student-2026-2-3-humanities-1',
+      ),
+      issueInteractiveTestLoginTicket(
+        createTestLoginEnv(),
+        'test-student-2026-2-3-humanities-1',
+        null,
+      ),
+      issueInteractiveTestLoginTicket(
+        createTestLoginEnv(),
+        'test-student-2026-2-3-humanities-1',
+        'wrong-secret',
+      ),
+      issueInteractiveTestLoginTicket(createTestLoginEnv(), 'student-account-1'),
+      issueInteractiveTestLoginTicket(
+        createTestLoginEnv(),
+        'test-student-2026-2-3-science-1',
+      ),
+    ])
+
+    for (const response of responses) {
+      expect(response.status).toBe(404)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(await response.text()).toBe('')
+    }
+  })
+
+  it('makes invalid, expired, consumed, and disabled exchanges indistinguishable', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-17T00:00:00.000Z'))
+    const env = createTestLoginEnv()
+    const issuedTickets: string[] = []
+    for (let index = 0; index < 3; index += 1) {
+      const response = await issueInteractiveTestLoginTicket(
+        env,
+        'test-student-2026-2-3-humanities-1',
+      )
+      issuedTickets.push((await response.json<{ ticket: string }>()).ticket)
+    }
+    expect((await exchangeInteractiveTestLoginTicket(env, issuedTickets[0])).status)
+      .toBe(303)
+
+    vi.advanceTimersByTime(2 * 60_000)
+    const invalidResponse = await exchangeInteractiveTestLoginTicket(
+      env,
+      'a'.repeat(64),
+    )
+    const expiredResponse = await exchangeInteractiveTestLoginTicket(
+      env,
+      issuedTickets[1],
+    )
+    const consumedResponse = await exchangeInteractiveTestLoginTicket(
+      env,
+      issuedTickets[0],
+    )
+    env.TEST_LOGIN_ENABLED = 'false'
+    const disabledResponse = await exchangeInteractiveTestLoginTicket(
+      env,
+      issuedTickets[2],
+    )
+
+    const signatures = await Promise.all(
+      [invalidResponse, expiredResponse, consumedResponse, disabledResponse].map(
+        async (response) => ({
+          status: response.status,
+          cacheControl: response.headers.get('cache-control'),
+          referrerPolicy: response.headers.get('referrer-policy'),
+          location: response.headers.get('location'),
+          setCookie: response.headers.get('set-cookie'),
+          body: await response.text(),
+        }),
+      ),
+    )
+    expect(new Set(signatures.map((signature) => JSON.stringify(signature))).size)
+      .toBe(1)
+    expect(signatures[0]).toEqual({
+      status: 404,
+      cacheControl: 'no-store',
+      referrerPolicy: 'no-referrer',
+      location: null,
+      setCookie: null,
+      body: '',
+    })
+  })
+
+  it('allows exactly one concurrent exchange of the same ticket', async () => {
+    const env = createTestLoginEnv()
+    const issueResponse = await issueInteractiveTestLoginTicket(
+      env,
+      'test-student-2026-2-3-humanities-1',
+    )
+    const { ticket } = await issueResponse.json<{ ticket: string }>()
+
+    const responses = await Promise.all([
+      exchangeInteractiveTestLoginTicket(env, ticket),
+      exchangeInteractiveTestLoginTicket(env, ticket),
+    ])
+
+    expect(responses.map((response) => response.status).sort()).toEqual([303, 404])
   })
 })
 

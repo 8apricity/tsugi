@@ -49,6 +49,25 @@ export type SetupSession = {
   invalidatedAt: number | null
 }
 
+export type InteractiveTestLoginTicket = {
+  ticketTokenHash: string
+  studentAccountId: string
+  createdAt: number
+  expiresAt: number
+  consumedAt: number | null
+  consumptionNonce: string | null
+}
+
+export type ConsumeInteractiveTestLoginTicketInput = {
+  ticketTokenHash: string
+  consumptionNonce: string
+  sessionTokenHash: string
+  enabled: boolean
+  allowedStudentAccountIds: readonly string[]
+  now: number
+  sessionExpiresAt: number
+}
+
 export type SchoolYearRecord = {
   schoolYear: number
   startsOn: string
@@ -372,6 +391,13 @@ export type StudentAccountAccessStore = {
     schoolEmail: string,
     invalidatedAt: number,
   ): Promise<void>
+  cleanupInteractiveTestLoginTickets(now: number): Promise<void>
+  saveInteractiveTestLoginTicket(
+    record: InteractiveTestLoginTicket,
+  ): Promise<boolean>
+  consumeInteractiveTestLoginTicket(
+    input: ConsumeInteractiveTestLoginTicketInput,
+  ): Promise<boolean>
 }
 
 export type StudentAffiliationSetupStore = {
@@ -546,6 +572,7 @@ export class InMemoryPersistenceAdapters
   private studentAccounts: StudentAccount[] = []
   private studentSessions: StudentSession[] = []
   private setupSessions: SetupSession[] = []
+  private interactiveTestLoginTickets: InteractiveTestLoginTicket[] = []
   private schoolYears: SchoolYearRecord[] = []
   private schoolYearClasses: SchoolYearClassRecord[] = []
   private tracks: TrackRecord[] = []
@@ -685,6 +712,50 @@ export class InMemoryPersistenceAdapters
         invalidatedAt,
       }
     })
+  }
+
+  async cleanupInteractiveTestLoginTickets(now: number) {
+    this.interactiveTestLoginTickets = this.interactiveTestLoginTickets.filter(
+      (ticket) => ticket.expiresAt > now && ticket.consumedAt === null,
+    )
+  }
+
+  async saveInteractiveTestLoginTicket(record: InteractiveTestLoginTicket) {
+    const studentExists = this.studentAccounts.some(
+      (studentAccount) =>
+        studentAccount.studentAccountId === record.studentAccountId,
+    )
+
+    if (!studentExists) return false
+
+    this.interactiveTestLoginTickets.push(record)
+    return true
+  }
+
+  async consumeInteractiveTestLoginTicket(
+    input: ConsumeInteractiveTestLoginTicketInput,
+  ) {
+    const ticket = this.interactiveTestLoginTickets.find(
+      (candidate) =>
+        input.enabled &&
+        input.allowedStudentAccountIds.includes(candidate.studentAccountId) &&
+        candidate.ticketTokenHash === input.ticketTokenHash &&
+        candidate.consumedAt === null &&
+        candidate.expiresAt > input.now,
+    )
+
+    if (!ticket) return false
+
+    ticket.consumedAt = input.now
+    ticket.consumptionNonce = input.consumptionNonce
+    this.studentSessions.push({
+      sessionTokenHash: input.sessionTokenHash,
+      studentAccountId: ticket.studentAccountId,
+      createdAt: input.now,
+      expiresAt: input.sessionExpiresAt,
+      invalidatedAt: null,
+    })
+    return true
   }
 
   async saveSchoolYear(record: SchoolYearRecord) {
@@ -1939,6 +2010,116 @@ export class D1PersistenceAdapters
       )
       .bind(invalidatedAt, sessionTokenHash)
       .run()
+  }
+
+  async cleanupInteractiveTestLoginTickets(now: number) {
+    await this.db
+      .prepare(
+        `delete from interactive_test_login_tickets
+         where expires_at <= ? or consumed_at is not null`,
+      )
+      .bind(now)
+      .run()
+  }
+
+  async saveInteractiveTestLoginTicket(record: InteractiveTestLoginTicket) {
+    await this.db
+      .prepare(
+        `insert into interactive_test_login_tickets (
+          interactive_test_login_ticket_id,
+          ticket_token_hash,
+          student_account_id,
+          created_at,
+          expires_at,
+          consumed_at,
+          consumption_nonce
+        )
+        select ?, ?, student_account_id, ?, ?, ?, ?
+        from student_accounts
+        where student_account_id = ? and disabled_at is null`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        record.ticketTokenHash,
+        record.createdAt,
+        record.expiresAt,
+        record.consumedAt,
+        record.consumptionNonce,
+        record.studentAccountId,
+      )
+      .run()
+
+    const saved = await this.db
+      .prepare(
+        `select ticket_token_hash
+         from interactive_test_login_tickets
+         where ticket_token_hash = ?`,
+      )
+      .bind(record.ticketTokenHash)
+      .first<{ ticket_token_hash: string }>()
+
+    return saved !== null
+  }
+
+  async consumeInteractiveTestLoginTicket(
+    input: ConsumeInteractiveTestLoginTicketInput,
+  ) {
+    const allowListPlaceholders = input.allowedStudentAccountIds
+      .map(() => '?')
+      .join(', ')
+
+    if (!allowListPlaceholders) return false
+
+    await this.db.batch([
+      this.db
+        .prepare(
+          `update interactive_test_login_tickets
+           set consumed_at = ?, consumption_nonce = ?
+           where ticket_token_hash = ?
+             and consumed_at is null
+             and expires_at > ?
+             and ? = 1
+             and student_account_id in (${allowListPlaceholders})`,
+        )
+        .bind(
+          input.now,
+          input.consumptionNonce,
+          input.ticketTokenHash,
+          input.now,
+          input.enabled ? 1 : 0,
+          ...input.allowedStudentAccountIds,
+        ),
+      this.db
+        .prepare(
+          `insert into student_sessions (
+            student_session_id,
+            session_token_hash,
+            student_account_id,
+            created_at,
+            expires_at,
+            invalidated_at
+          )
+          select ?, ?, student_account_id, ?, ?, null
+          from interactive_test_login_tickets
+          where ticket_token_hash = ?
+            and consumption_nonce = ?
+            and consumed_at = ?`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          input.sessionTokenHash,
+          input.now,
+          input.sessionExpiresAt,
+          input.ticketTokenHash,
+          input.consumptionNonce,
+          input.now,
+        ),
+    ])
+
+    const session = await this.findStudentSessionByTokenHash(
+      input.sessionTokenHash,
+    )
+    return session !== null
   }
 
   async saveSetupSession(record: SetupSession) {

@@ -15,10 +15,11 @@ const verificationCodeLifetimeMs = 10 * 60_000
 const maxFailedVerificationAttempts = 5
 const studentSessionLifetimeMs = 30 * 24 * 60 * 60_000
 const setupSessionLifetimeMs = 30 * 60_000
+const interactiveTestLoginTicketLifetimeMs = 2 * 60_000
 const verificationCodeRateLimitExemptSchoolEmails = new Set([
   '110-00802117mkn@e.osakamanabi.jp',
 ])
-const seededTestStudentAccountIds = new Set([
+const seededTestStudentAccountIds = [
   'test-student-2026-2-3-humanities-1',
   'test-student-2026-2-3-humanities-2',
   'test-student-2026-2-3-humanities-3',
@@ -28,7 +29,8 @@ const seededTestStudentAccountIds = new Set([
   'test-student-2026-2-4-humanities-1',
   'test-student-2026-2-4-humanities-2',
   'test-student-2025-2-3-humanities-1',
-])
+]
+const seededTestStudentAccountIdSet = new Set(seededTestStudentAccountIds)
 
 
 export type SendVerificationCodeEmail = (message: {
@@ -119,6 +121,22 @@ export type CreateTestLoginSessionResult =
   | {
       status: 'authenticated'
       studentAccount: StudentAccount
+      sessionToken: string
+      expiresAt: number
+    }
+  | { status: 'not-found' }
+
+export type IssueInteractiveTestLoginTicketResult =
+  | {
+      status: 'issued'
+      ticket: string
+      expiresAt: number
+    }
+  | { status: 'not-found' }
+
+export type ExchangeInteractiveTestLoginTicketResult =
+  | {
+      status: 'authenticated'
       sessionToken: string
       expiresAt: number
     }
@@ -269,6 +287,40 @@ export function createStudentAccountAccess({
       return createTestLoginSession({
         studentAccountId,
         now,
+        sessionToken: generateSessionToken(),
+        store: studentAccountStore,
+      })
+    },
+
+    issueInteractiveTestLoginTicket({
+      studentAccountId,
+      now,
+    }: {
+      studentAccountId: unknown
+      now: number
+    }) {
+      return issueInteractiveTestLoginTicket({
+        studentAccountId,
+        now,
+        ticket: generateSessionToken(),
+        store: studentAccountStore,
+      })
+    },
+
+    exchangeInteractiveTestLoginTicket({
+      ticket,
+      enabled,
+      now,
+    }: {
+      ticket: unknown
+      enabled: boolean
+      now: number
+    }) {
+      return exchangeInteractiveTestLoginTicket({
+        ticket,
+        enabled,
+        now,
+        consumptionNonce: generateSessionToken(),
         sessionToken: generateSessionToken(),
         store: studentAccountStore,
       })
@@ -704,7 +756,7 @@ export async function createTestLoginSession({
 }): Promise<CreateTestLoginSessionResult> {
   if (
     typeof studentAccountId !== 'string' ||
-    !seededTestStudentAccountIds.has(studentAccountId)
+    !seededTestStudentAccountIdSet.has(studentAccountId)
   ) {
     return { status: 'not-found' }
   }
@@ -730,6 +782,75 @@ export async function createTestLoginSession({
     sessionToken,
     expiresAt,
   }
+}
+
+export async function issueInteractiveTestLoginTicket({
+  studentAccountId,
+  now,
+  ticket,
+  store,
+}: {
+  studentAccountId: unknown
+  now: number
+  ticket: string
+  store: StudentAccountAccessStore
+}): Promise<IssueInteractiveTestLoginTicketResult> {
+  if (
+    typeof studentAccountId !== 'string' ||
+    !seededTestStudentAccountIdSet.has(studentAccountId)
+  ) {
+    return { status: 'not-found' }
+  }
+
+  await store.cleanupInteractiveTestLoginTickets(now)
+  const expiresAt = now + interactiveTestLoginTicketLifetimeMs
+  const saved = await store.saveInteractiveTestLoginTicket({
+    ticketTokenHash: await hashToken(ticket),
+    studentAccountId,
+    createdAt: now,
+    expiresAt,
+    consumedAt: null,
+    consumptionNonce: null,
+  })
+
+  return saved
+    ? { status: 'issued', ticket, expiresAt }
+    : { status: 'not-found' }
+}
+
+export async function exchangeInteractiveTestLoginTicket({
+  ticket,
+  enabled,
+  now,
+  consumptionNonce,
+  sessionToken,
+  store,
+}: {
+  ticket: unknown
+  enabled: boolean
+  now: number
+  consumptionNonce: string
+  sessionToken: string
+  store: StudentAccountAccessStore
+}): Promise<ExchangeInteractiveTestLoginTicketResult> {
+  if (typeof ticket !== 'string' || !/^[a-f0-9]{64}$/.test(ticket)) {
+    return { status: 'not-found' }
+  }
+
+  const expiresAt = now + studentSessionLifetimeMs
+  const consumed = await store.consumeInteractiveTestLoginTicket({
+    ticketTokenHash: await hashToken(ticket),
+    consumptionNonce,
+    sessionTokenHash: await hashToken(sessionToken),
+    enabled,
+    allowedStudentAccountIds: seededTestStudentAccountIds,
+    now,
+    sessionExpiresAt: expiresAt,
+  })
+
+  return consumed
+    ? { status: 'authenticated', sessionToken, expiresAt }
+    : { status: 'not-found' }
 }
 
 function trimName(value: unknown) {

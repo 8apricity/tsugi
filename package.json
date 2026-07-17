@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "pnpm --dir apps/portal build",
+    "issue:interactive-test-login-ticket": "node scripts/issue-interactive-test-login-ticket.mjs",
     "lint": "pnpm --dir apps/portal lint",
     "test": "pnpm --dir apps/portal test"
   },

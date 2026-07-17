@@ -1742,6 +1742,12 @@ button.timetable-layer-row {
   box-sizing: border-box;
 }
 
+.editor-fields input,
+.editor-fields select {
+  width: 100%;
+  min-width: 0;
+}
+
 .note-fixed-context {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

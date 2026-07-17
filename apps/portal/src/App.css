@@ -779,7 +779,8 @@ body.page-scroll-locked {
   min-width: 0;
 }
 
-.optional-date-row > input[type="date"] {
+.optional-date-row > input[type="date"],
+.editor-fields input[type="date"] {
   /* iOS WebKit miscalculates padded date inputs at width: 100%. */
   width: auto;
   min-width: 0;

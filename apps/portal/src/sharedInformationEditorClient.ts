@@ -616,6 +616,200 @@ export function createSharedInformationEditorClient({
     }
   }
 
+  function normalizeTaskNoteBodies(noteBodies: readonly string[]) {
+    const normalized: string[] = []
+    for (const noteBody of noteBodies) {
+      if (noteBody.trim().length === 0) continue
+      const body = normalizeNoteBody(noteBody)
+      if (body === null) return null
+      normalized.push(body)
+    }
+    return normalized
+  }
+
+  function appendTaskNoteDrafts(
+    taskId: string,
+    targetScopeType: TargetScopeType,
+    noteBodies: readonly string[],
+  ) {
+    const sourceIds: string[] = []
+    for (const body of noteBodies) {
+      const sourceId = createId()
+      sourceIds.push(sourceId)
+      noteDrafts.push({
+        kind: 'note',
+        changeKind: 'add',
+        sourceId,
+        body,
+        schoolDate: null,
+        targetScopeType,
+        relatedTaskItemId: taskId,
+      })
+    }
+    return sourceIds
+  }
+
+  function removeAddedTaskNoteDrafts(taskId: string) {
+    const removed = noteDrafts.filter(
+      (draft) => draft.changeKind === 'add' && draft.relatedTaskItemId === taskId,
+    )
+    if (removed.length === 0) return 0
+    const removedSourceIds = new Set(removed.map((draft) => draft.sourceId))
+    noteDrafts = noteDrafts.filter(
+      (draft) => !removedSourceIds.has(draft.sourceId),
+    )
+    removedSourceIds.forEach((sourceId) => noteConflictSourceIds.delete(sourceId))
+    return removed.length
+  }
+
+  function saveTaskDraftWithNotes(
+    input: NewTaskDraftForm,
+    requestedNoteBodies: readonly string[],
+  ) {
+    if (submitting) return { status: 'submission-in-progress' as const }
+    const snapshot = normalizeTaskSnapshot(input)
+    const noteBodies = normalizeTaskNoteBodies(requestedNoteBodies)
+    if (!input.targetScopeType || !snapshot) {
+      return { status: 'invalid-task' as const }
+    }
+    if (noteBodies === null) return { status: 'invalid-note' as const }
+    if (totalDraftCount() + 1 + noteBodies.length > maximumDraftKeys) {
+      return { status: 'limit-reached' as const }
+    }
+
+    const sourceId = createId()
+    taskDrafts.push({
+      sourceId,
+      changeKind: 'add',
+      ...snapshot,
+      targetScopeType: input.targetScopeType,
+    })
+    const noteSourceIds = appendTaskNoteDrafts(
+      sourceId,
+      input.targetScopeType,
+      noteBodies,
+    )
+    lastTargetScopeType = input.targetScopeType
+    editing = true
+    lastCommitFailed = false
+    publish()
+    return { status: 'saved' as const, sourceId, noteSourceIds }
+  }
+
+  function saveTaskUpdateDraftWithNotes(
+    activeTask: ActiveTaskForEditing,
+    input: TaskSnapshotDraft,
+    requestedNoteBodies: readonly string[],
+  ) {
+    if (submitting) return { status: 'submission-in-progress' as const }
+    const snapshot = normalizeTaskSnapshot(input)
+    const noteBodies = normalizeTaskNoteBodies(requestedNoteBodies)
+    if (!snapshot) return { status: 'invalid-task' as const }
+    if (noteBodies === null) return { status: 'invalid-note' as const }
+
+    const existing = taskDrafts.find(
+      (draft) =>
+        draft.changeKind !== 'add' &&
+        draft.sharedInformationItemId === activeTask.taskId,
+    )
+    const existingAddedNoteCount = noteDrafts.filter(
+      (draft) =>
+        draft.changeKind === 'add' &&
+        draft.relatedTaskItemId === activeTask.taskId,
+    ).length
+    const taskChanged = !taskSnapshotsEqual(snapshot, activeTask)
+    if (
+      !taskChanged &&
+      !existing &&
+      existingAddedNoteCount === 0 &&
+      noteBodies.length === 0
+    ) {
+      return { status: 'removed-noop' as const }
+    }
+    if (
+      totalDraftCount() - (existing ? 1 : 0) +
+        (taskChanged ? 1 : 0) - existingAddedNoteCount +
+        noteBodies.length > maximumDraftKeys
+    ) {
+      return { status: 'limit-reached' as const }
+    }
+
+    const sourceId = existing?.sourceId ?? (taskChanged ? createId() : undefined)
+    if (existing) {
+      taskDrafts = taskDrafts.filter((draft) => draft.sourceId !== existing.sourceId)
+      taskConflictSourceIds.delete(existing.sourceId)
+      if (existing.changeKind === 'remove') restoreDependentNoteDrafts(existing)
+    }
+    removeAddedTaskNoteDrafts(activeTask.taskId)
+    if (taskChanged && sourceId) {
+      taskDrafts.push({
+        sourceId,
+        changeKind: 'update',
+        sharedInformationItemId: activeTask.taskId,
+        expectedLatestChangeId: activeTask.latestChangeId,
+        baseTask: taskBaseSnapshot(activeTask),
+        targetScopeType: activeTask.targetScopeType,
+        ...snapshot,
+      })
+      taskConflictSourceIds.delete(sourceId)
+    }
+    const noteSourceIds = appendTaskNoteDrafts(
+      activeTask.taskId,
+      activeTask.targetScopeType,
+      noteBodies,
+    )
+    editing = true
+    lastCommitFailed = false
+    publish()
+    return {
+      status: 'saved' as const,
+      ...(sourceId ? { sourceId } : {}),
+      noteSourceIds,
+    }
+  }
+
+  function updateTaskDraftWithNotes(
+    sourceId: string,
+    input: NewTaskDraftForm,
+    requestedNoteBodies: readonly string[],
+  ) {
+    if (submitting) return { status: 'submission-in-progress' as const }
+    const snapshot = normalizeTaskSnapshot(input)
+    const noteBodies = normalizeTaskNoteBodies(requestedNoteBodies)
+    const existing = taskDrafts.find((draft) => draft.sourceId === sourceId)
+    if (
+      !existing ||
+      existing.changeKind !== 'add' ||
+      !input.targetScopeType ||
+      !snapshot
+    ) return { status: 'invalid-task' as const }
+    if (noteBodies === null) return { status: 'invalid-note' as const }
+    const existingAddedNoteCount = noteDrafts.filter(
+      (draft) =>
+        draft.changeKind === 'add' && draft.relatedTaskItemId === sourceId,
+    ).length
+    if (totalDraftCount() - existingAddedNoteCount + noteBodies.length > maximumDraftKeys) {
+      return { status: 'limit-reached' as const }
+    }
+
+    removeAddedTaskNoteDrafts(sourceId)
+    taskDrafts = taskDrafts.map((draft) =>
+      draft.sourceId === sourceId
+        ? { ...draft, ...snapshot, targetScopeType: input.targetScopeType! }
+        : draft,
+    )
+    const noteSourceIds = appendTaskNoteDrafts(
+      sourceId,
+      input.targetScopeType,
+      noteBodies,
+    )
+    lastTargetScopeType = input.targetScopeType
+    editing = true
+    lastCommitFailed = false
+    publish()
+    return { status: 'saved' as const, sourceId, noteSourceIds }
+  }
+
   return {
     subscribe(listener: () => void) {
       listeners.add(listener)
@@ -853,6 +1047,7 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
+    saveTaskDraftWithNotes,
     saveNoteDraft(input: NewNoteDraftForm) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const body = normalizeNoteBody(input.body)
@@ -1128,6 +1323,7 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
+    saveTaskUpdateDraftWithNotes,
     updateTaskDraft(sourceId: string, input: NewTaskDraftForm) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const snapshot = normalizeTaskSnapshot(input)
@@ -1155,6 +1351,7 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
+    updateTaskDraftWithNotes,
     saveTaskRemoveDraft(activeTask: ActiveTaskForEditing) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const existing = taskDrafts.find(

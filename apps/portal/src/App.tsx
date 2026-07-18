@@ -78,7 +78,7 @@ import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
 } from "./taskEditHistoryView";
-import { TaskDetailDialog } from "./taskDetailView";
+import { TaskDetailDialog, TaskNoteFields } from "./taskDetailView";
 import {
   NoteEditHistoryDialog,
   type NoteEditHistoryState,
@@ -171,6 +171,7 @@ type TimetableEditorForm = TimetableLayerKey & {
 
 type TaskEditorForm = Omit<NewTaskDraftForm, "relatedLessonName"> & {
   relatedLessonInput: string;
+  noteBodies: string[];
   editingTask: ActiveTaskForEditing | null;
   editingDraft: TaskDraft | null;
 };
@@ -543,6 +544,16 @@ function App() {
   const [noteDetail, setNoteDetail] = useState<NoteDetailState | null>(null);
   const [taskHistoryDialog, setTaskHistoryDialog] =
     useState<TaskHistoryDialog | null>(null);
+  const taskDetailEditReturnRef = useRef<{
+    task: VisibleTaskListItem;
+    form: TaskEditorForm;
+    initialForm: TaskEditorForm | null;
+  } | null>(null);
+  const taskHistoryEditReturnRef = useRef<{
+    task: VisibleTaskListItem;
+    form: TaskEditorForm;
+    initialForm: TaskEditorForm | null;
+  } | null>(null);
   const [noteHistoryDialog, setNoteHistoryDialog] =
     useState<NoteHistoryDialog | null>(null);
   const [taskLessonNamesExpanded, setTaskLessonNamesExpanded] =
@@ -1374,6 +1385,8 @@ function App() {
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
     setTaskDetail(null);
+    taskDetailEditReturnRef.current = null;
+    taskHistoryEditReturnRef.current = null;
     setNoteDetail(null);
     setTaskHistoryDialog(null);
     setNoteHistoryDialog(null);
@@ -1404,6 +1417,8 @@ function App() {
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setNoteEditorForm(null);
+    taskDetailEditReturnRef.current = null;
+    taskHistoryEditReturnRef.current = null;
     setNoteDetail(null);
     setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
@@ -1512,6 +1527,12 @@ function App() {
   function restoreNoteDetailParent(parent: NoteDetailParent) {
     if (parent.type === "task") {
       setTaskDetail(parent.task);
+      const taskEditReturn = taskDetailEditReturnRef.current;
+      if (taskEditReturn) {
+        taskDetailEditReturnRef.current = null;
+        setTaskEditorForm(taskEditReturn.form);
+        editorInitialFormsRef.current.task = taskEditReturn.initialForm;
+      }
     } else if (parent.type === "timetable") {
       setTimetableLayerDialog(parent.dialog);
     }
@@ -1875,6 +1896,7 @@ function App() {
       dueDate: initial.dueDate,
       targetScopeType: initial.targetScopeType,
       relatedLessonInput: "",
+      noteBodies: [],
       editingTask: null,
       editingDraft: null,
     });
@@ -1983,7 +2005,18 @@ function App() {
     parent: NoteDetailParent,
     draft?: NoteDraft,
   ) {
-    if (parent.type === "task") setTaskDetail(null);
+    if (parent.type === "task") {
+      if (taskEditorForm && taskDetail) {
+        taskDetailEditReturnRef.current = {
+          task: taskDetail,
+          form: taskEditorForm,
+          initialForm: editorInitialFormsRef.current.task,
+        };
+        setTaskEditorForm(null);
+        editorInitialFormsRef.current.task = null;
+      }
+      setTaskDetail(null);
+    }
     if (parent.type === "timetable") setTimetableLayerDialog(null);
     if (timetableEditor.editing) {
       openNoteEditorForm({
@@ -2023,7 +2056,21 @@ function App() {
     task: { taskId: string; title: string; targetScopeType: TargetScopeType },
     note?: DailyPlanNoteForCache,
     draft?: NoteDraft,
+    detailParent?: NoteDetailParent,
   ) {
+    if (
+      detailParent?.type === "task" &&
+      taskEditorForm &&
+      taskDetail
+    ) {
+      taskDetailEditReturnRef.current = {
+        task: taskDetail,
+        form: taskEditorForm,
+        initialForm: editorInitialFormsRef.current.task,
+      };
+      setTaskEditorForm(null);
+      editorInitialFormsRef.current.task = null;
+    }
     if (taskDetail?.task.taskId === task.taskId) setTaskDetail(null);
     openNoteEditorForm({
       body: note?.body ?? draft?.body ?? "",
@@ -2033,6 +2080,7 @@ function App() {
       editingNote: note ?? null,
       editingDraft: draft ?? null,
       relatedTask: task,
+      detailParent,
     });
   }
 
@@ -2132,10 +2180,16 @@ function App() {
       targetScopeType: task.targetScopeType,
       relatedLessonInput: projectedTask?.relatedLessonName ??
         task.relatedLessonName?.lessonName ?? "",
+      noteBodies: timetableEditor.noteDrafts
+        .filter(
+          (note) =>
+            note.changeKind === "add" &&
+            note.relatedTaskItemId === task.taskId,
+        )
+        .map((note) => note.body),
       editingTask: task,
       editingDraft: null,
     });
-    setTaskDetail(null);
   }
 
   function openTaskDraftEditor(draft: TaskDraft) {
@@ -2148,6 +2202,13 @@ function App() {
       dueDate: draft.dueDate,
       targetScopeType: draft.targetScopeType,
       relatedLessonInput: draft.relatedLessonName?.lessonName ?? "",
+      noteBodies: timetableEditor.noteDrafts
+        .filter(
+          (note) =>
+            note.changeKind === "add" &&
+            note.relatedTaskItemId === draft.sourceId,
+        )
+        .map((note) => note.body),
       editingTask: null,
       editingDraft: draft,
     });
@@ -2157,6 +2218,7 @@ function App() {
   function saveTaskDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskEditorForm || timetableEditor.submitting) return;
+    const wasTaskDetailOpen = taskDetail !== null;
     const lessonInput = taskEditorForm.relatedLessonInput.trim();
     const resolvedLesson = lessonInput
       ? createLessonNameComboboxClient({
@@ -2188,7 +2250,7 @@ function App() {
             ? { lessonName: lessonInput }
             : null;
     const result = taskEditorForm.editingDraft
-      ? timetableEditorClient.updateTaskDraft(
+      ? timetableEditorClient.updateTaskDraftWithNotes(
           taskEditorForm.editingDraft.sourceId,
           {
             title: taskEditorForm.title,
@@ -2196,23 +2258,25 @@ function App() {
             targetScopeType: taskEditorForm.targetScopeType,
             relatedLessonName,
           },
+          taskEditorForm.noteBodies,
         )
       : taskEditorForm.editingTask
-      ? timetableEditorClient.saveTaskUpdateDraft(
+      ? timetableEditorClient.saveTaskUpdateDraftWithNotes(
           taskEditorForm.editingTask,
           {
             title: taskEditorForm.title,
             dueDate: taskEditorForm.dueDate,
             relatedLessonName,
           },
+          taskEditorForm.noteBodies,
         )
-      : timetableEditorClient.saveTaskDraft({
+      : timetableEditorClient.saveTaskDraftWithNotes({
           title: taskEditorForm.title,
           dueDate: taskEditorForm.dueDate,
           targetScopeType: taskEditorForm.targetScopeType,
           relatedLessonName,
-        });
-    if (result.status === "invalid-task") {
+        }, taskEditorForm.noteBodies);
+    if (result.status === "invalid-task" || result.status === "invalid-note") {
       setTimetableEditorMessage(
         "タイトル、期限、関連する授業、変更適用範囲を確認してください。",
       );
@@ -2223,6 +2287,7 @@ function App() {
       return;
     }
     closeTaskEditorFlow();
+    if (wasTaskDetailOpen) setTaskDetail(null);
     setTimetableEditorMessage(null);
   }
 
@@ -2250,13 +2315,22 @@ function App() {
           draft: true,
           changeKind: note.changeKind,
           conflicted: note.conflicted,
-          onCancelDraft: () =>
-            timetableEditorClient.removeNoteDraft(note.sourceId),
+          onCancelDraft: detailParent?.type === "task"
+            ? undefined
+            : () => timetableEditorClient.removeNoteDraft(note.sourceId),
           onEdit: undefined,
           onOpenHistory: undefined,
-          onOpenDetail: detailParent && item.activeNote
-            ? () => openNoteDetail(item.activeNote!, detailParent, note)
-            : undefined,
+          onOpenDetail: detailParent?.type === "task"
+            ? () => openTaskNoteEditor(
+                detailParent.task.task,
+                item.activeNote,
+                note,
+                detailParent,
+              )
+            : detailParent && item.activeNote
+              ? () => openNoteDetail(item.activeNote!, detailParent, note)
+              : undefined,
+          wholeCardDetailTarget: detailParent?.type === "task",
         };
       }
       if (item.type === "cascade-removal") {
@@ -2280,6 +2354,7 @@ function App() {
         onOpenDetail: detailParent
           ? () => openNoteDetail(note, detailParent)
           : undefined,
+        wholeCardDetailTarget: detailParent?.type === "task",
       };
     });
     return <TaskNoteList notes={items} />;
@@ -2433,12 +2508,35 @@ function App() {
   }
 
   function openTaskHistory(task: DailyPlanTaskForCache) {
+    if (taskEditorForm && taskDetail) {
+      taskHistoryEditReturnRef.current = {
+        task: taskDetail,
+        form: taskEditorForm,
+        initialForm: editorInitialFormsRef.current.task,
+      };
+      setTaskEditorForm(null);
+      editorInitialFormsRef.current.task = null;
+    } else {
+      taskHistoryEditReturnRef.current = null;
+    }
     setTaskDetail(null);
     setTaskHistoryDialog({
       task,
       requestId: 0,
       state: { status: "loading" },
     });
+  }
+
+  function restoreTaskHistoryEdit() {
+    const taskEditReturn = taskHistoryEditReturnRef.current;
+    taskHistoryEditReturnRef.current = null;
+    if (taskEditReturn) {
+      setTaskDetail(taskEditReturn.task);
+      setTaskEditorForm(taskEditReturn.form);
+      editorInitialFormsRef.current.task = taskEditReturn.initialForm;
+      return true;
+    }
+    return false;
   }
 
   async function openDirectChangeDetail(sharedInformationChangeId: string) {
@@ -2564,9 +2662,10 @@ function App() {
 
     if (taskEditorForm) {
       const returnsToChangeContent = changeContentReturnRef.current;
+      const returnsToTaskDetail = Boolean(taskDetail);
       if (requestEditorDismissal("task", "back")) return true;
       closeTaskEditorFlow();
-      return returnsToChangeContent;
+      return returnsToChangeContent || returnsToTaskDetail;
     }
 
     if (timetableEditorForm) {
@@ -2582,6 +2681,10 @@ function App() {
     }
 
     if (taskHistoryDialog) {
+      if (restoreTaskHistoryEdit()) {
+        setTaskHistoryDialog(null);
+        return true;
+      }
       setTaskDetail({ type: "active", task: taskHistoryDialog.task });
       setTaskHistoryDialog(null);
       return true;
@@ -3948,7 +4051,7 @@ function App() {
             </DialogSurface>
           ) : null}
 
-          {taskEditorForm ? (
+          {taskEditorForm && !taskDetail ? (
             <DialogSurface
               className="editor-dialog-form-surface task-editor-dialog"
               labelledBy="task-editor-title"
@@ -4146,6 +4249,30 @@ function App() {
                       候補にない授業名として保存されます。
                     </p>
                   ) : null}
+                  <TaskNoteFields
+                    noteBodies={taskEditorForm.noteBodies}
+                    onBodyChange={(index, body) =>
+                      setTaskEditorForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              noteBodies: current.noteBodies.map(
+                                (value, noteIndex) =>
+                                  noteIndex === index ? body : value,
+                              ),
+                            }
+                          : current,
+                      )}
+                    onAddNote={() =>
+                      setTaskEditorForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              noteBodies: [...current.noteBodies, ""],
+                            }
+                          : current,
+                      )}
+                  />
                   {taskEditorForm.editingTask ? (
                     <ImmutableFieldNotice
                       kind="task"
@@ -4234,6 +4361,8 @@ function App() {
                 targetScopeContext,
               )}
               referenceSchoolDate={selectedSchoolDate}
+              dueDateMin={schoolYearRange?.startsOn}
+              dueDateMax={schoolYearRange?.endsOn}
               draftLifecycle={taskDetail.type === "draft"
                 ? {
                     kind: taskDetail.draft.changeKind,
@@ -4247,21 +4376,45 @@ function App() {
                   taskDetail.draft.changeKind === "remove",
                 { type: "task", task: taskDetail },
               )}
+              mode={taskEditorForm ? "edit" : "view"}
+              editForm={taskEditorForm ?? undefined}
               addNoteDisabled={
                 timetableEditor.atLimit || timetableEditor.submitting
               }
-              onClose={() => setTaskDetail(null)}
+              onClose={taskEditorForm
+                ? requestTaskEditorClose
+                : () => setTaskDetail(null)}
+              onSave={taskEditorForm ? saveTaskDraft : undefined}
+              onTitleChange={(title) =>
+                setTaskEditorForm((current) =>
+                  current ? { ...current, title } : current,
+                )}
+              onDueDateChange={(dueDate) =>
+                setTaskEditorForm((current) =>
+                  current ? { ...current, dueDate } : current,
+                )}
+              onRelatedLessonNameChange={(relatedLessonInput) =>
+                setTaskEditorForm((current) =>
+                  current ? { ...current, relatedLessonInput } : current,
+                )}
+              onNoteBodyChange={(index, body) =>
+                setTaskEditorForm((current) =>
+                  current
+                    ? {
+                        ...current,
+                        noteBodies: current.noteBodies.map(
+                          (value, noteIndex) =>
+                            noteIndex === index ? body : value,
+                        ),
+                      }
+                    : current,
+                )}
               onOpenHistory={taskDetail.type === "active"
                 ? () => openTaskHistory(taskDetail.task)
                 : taskDetail.activeTask
                   ? () => openTaskHistory(taskDetail.activeTask!)
                   : undefined}
-              onAddNote={timetableEditor.editing &&
-                (taskDetail.type === "active" ||
-                  taskDetail.draft.changeKind === "add")
-                ? () => openTaskNoteEditor(taskDetail.task)
-                : undefined}
-              onEdit={timetableEditor.editing
+              onEdit={taskEditorForm ? undefined : timetableEditor.editing
                 ? taskDetail.type === "active"
                   ? () => openTaskUpdateEditor(editableTask(taskDetail.task))
                   : taskDetail.draft.changeKind === "add"
@@ -4274,6 +4427,21 @@ function App() {
                       )
                       : undefined
                 : undefined}
+              onAddNote={taskEditorForm
+                ? () =>
+                    setTaskEditorForm((current) =>
+                      current
+                        ? {
+                            ...current,
+                            noteBodies: [...current.noteBodies, ""],
+                          }
+                        : current,
+                    )
+                : timetableEditor.editing &&
+                    (taskDetail.type === "active" ||
+                      taskDetail.draft.changeKind === "add")
+                  ? () => openTaskNoteEditor(taskDetail.task)
+                  : undefined}
               onCancelDraft={timetableEditor.editing &&
                 taskDetail.type === "draft"
                 ? () => {
@@ -4303,6 +4471,10 @@ function App() {
               referenceSchoolDate={selectedSchoolDate}
               state={taskHistoryDialog.state}
               onBack={() => {
+                if (restoreTaskHistoryEdit()) {
+                  setTaskHistoryDialog(null);
+                  return;
+                }
                 setTaskDetail(
                   visibleTasks.find(
                     (item) => item.task.taskId === taskHistoryDialog.task.taskId,
@@ -4310,7 +4482,10 @@ function App() {
                 );
                 setTaskHistoryDialog(null);
               }}
-              onClose={() => setTaskHistoryDialog(null)}
+              onClose={() => {
+                restoreTaskHistoryEdit();
+                setTaskHistoryDialog(null);
+              }}
               onRetry={() => setTaskHistoryDialog((current) =>
                 current ? {
                   ...current,

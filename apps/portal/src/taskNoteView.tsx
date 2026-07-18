@@ -14,6 +14,7 @@ export type TaskNoteListItem = {
   onRemove?: () => void
   onOpenHistory?: () => void
   onOpenDetail?: () => void
+  wholeCardDetailTarget?: boolean
 }
 
 export function TaskNoteList({ notes }: { notes: TaskNoteListItem[] }) {

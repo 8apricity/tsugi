@@ -1884,6 +1884,96 @@ describe('Shared Information editor client', () => {
     expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
   })
 
+  it('saves zero, one, and multiple Task Notes with one atomic Task draft mutation', () => {
+    const taskInput = {
+      title: 'ノート付きTask',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+    }
+
+    const zeroNotes = createTimetableEditorClient({ storage: memoryStorage() })
+    expect(zeroNotes.saveTaskDraftWithNotes(taskInput, [])).toMatchObject({
+      status: 'saved',
+    })
+    expect(zeroNotes.getSnapshot()).toMatchObject({
+      taskDrafts: [{ title: 'ノート付きTask' }],
+      noteDrafts: [],
+      draftCount: 1,
+    })
+
+    const oneNote = createTimetableEditorClient({ storage: memoryStorage() })
+    const oneResult = oneNote.saveTaskDraftWithNotes(taskInput, ['  集合場所  '])
+    expect(oneResult).toMatchObject({ status: 'saved' })
+    expect(oneNote.getSnapshot()).toMatchObject({
+      draftCount: 2,
+      noteDrafts: [{ body: '集合場所', relatedTaskItemId: oneResult.sourceId }],
+    })
+
+    const multipleNotes = createTimetableEditorClient({ storage: memoryStorage() })
+    const multipleResult = multipleNotes.saveTaskDraftWithNotes(taskInput, [
+      '提出方法',
+      '持ち物',
+      '  ',
+    ])
+    expect(multipleResult).toMatchObject({ status: 'saved' })
+    expect(multipleNotes.getSnapshot()).toMatchObject({
+      draftCount: 3,
+      noteDrafts: [
+        { body: '提出方法', relatedTaskItemId: multipleResult.sourceId },
+        { body: '持ち物', relatedTaskItemId: multipleResult.sourceId },
+      ],
+    })
+  })
+
+  it('saves Task edits and new Task Notes together, while rejecting the whole form on validation or limit failure', () => {
+    const activeTask = {
+      taskId: 'active-task-60',
+      latestChangeId: 'active-task-change-60',
+      title: '元のTask',
+      dueDate: null,
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+      notes: [],
+    }
+    const editor = createTimetableEditorClient({ storage: memoryStorage() })
+    expect(editor.saveTaskUpdateDraftWithNotes(activeTask, {
+      title: '更新Task',
+      dueDate: '2026-07-11',
+      relatedLessonName: { lessonName: '数学' },
+    }, ['更新メモ', '補足'])).toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 3,
+      taskDrafts: [{ title: '更新Task' }],
+      noteDrafts: [
+        { body: '更新メモ', relatedTaskItemId: activeTask.taskId },
+        { body: '補足', relatedTaskItemId: activeTask.taskId },
+      ],
+    })
+
+    const invalid = createTimetableEditorClient({ storage: memoryStorage() })
+    expect(invalid.saveTaskDraftWithNotes(activeTask, ['有効', 'x'.repeat(1001)])).toEqual({
+      status: 'invalid-note',
+    })
+    expect(invalid.getSnapshot()).toMatchObject({ draftCount: 0, taskDrafts: [], noteDrafts: [] })
+
+    const atLimit = createTimetableEditorClient({ storage: memoryStorage() })
+    for (let index = 0; index < 49; index += 1) {
+      expect(atLimit.saveNoteDraft({
+        body: `既存ノート${index}`,
+        schoolDate: null,
+        targetScopeType: 'track',
+      }).status).toBe('saved')
+    }
+    expect(atLimit.saveTaskDraftWithNotes(activeTask, ['追加ノート'])).toEqual({
+      status: 'limit-reached',
+    })
+    expect(atLimit.getSnapshot()).toMatchObject({ draftCount: 49, taskDrafts: [] })
+    expect(atLimit.getSnapshot().noteDrafts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ body: '既存ノート0' })]),
+    )
+  })
+
   it('limits new draft keys to 50 while allowing replacement and cancellation', () => {
     const editor = createTimetableEditorClient({ storage: memoryStorage() })
     for (let index = 0; index < 50; index += 1) {

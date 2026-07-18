@@ -57,6 +57,7 @@ export function NoteCard({
   onRemove,
   onOpenHistory,
   onOpenDetail,
+  wholeCardDetailTarget = false,
 }: {
   noteId: string
   body: string
@@ -70,6 +71,7 @@ export function NoteCard({
   onRemove?: () => void
   onOpenHistory?: () => void
   onOpenDetail?: () => void
+  wholeCardDetailTarget?: boolean
 }) {
   const generatedId = useId()
   const bodyId = `note-body-${generatedId.replace(/:/g, '')}`
@@ -91,6 +93,23 @@ export function NoteCard({
 
   const removalSurface = draft && changeKind === 'remove' &&
     removalReason !== 'task-cascade'
+
+  const canUseWholeCardDetailTarget = wholeCardDetailTarget && onOpenDetail &&
+    !onCancelDraft && !onEdit && !onRemove && !onOpenHistory
+
+  if (canUseWholeCardDetailTarget && !onCancelDraft && !onEdit && !onRemove && !onOpenHistory) {
+    return (
+      <button
+        className="note-item note-detail-card note-detail-card-whole"
+        type="button"
+        aria-label="ノートの詳細を開く"
+        data-note-id={noteId}
+        onClick={onOpenDetail}
+      >
+        <span className="note-detail-card-body">{body}</span>
+      </button>
+    )
+  }
 
   return (
     <article

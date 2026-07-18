@@ -55,6 +55,7 @@ describe('Task detail dialog', () => {
           dueDate: null,
           relatedLessonInput: '数学',
           noteBodies: ['', '補足'],
+          removalPlanned: false,
         }}
         notes={
           <TaskNoteList
@@ -87,5 +88,44 @@ describe('Task detail dialog', () => {
     expect(markup).toContain('note-detail-card-whole')
     expect(markup).toContain('編集履歴')
     expect(markup).not.toContain('>編集</button>')
+    expect(markup).not.toContain('削除予定にする')
+  })
+
+  it('shows the removal checkbox only for reflected Tasks and disables every editable field while checked', () => {
+    const markup = renderToStaticMarkup(
+      <TaskDetailDialog
+        mode="edit"
+        task={{
+          taskId: 'task-3',
+          title: '削除するタスク',
+          dueDate: '2026-07-10',
+          relatedLessonName: '数学',
+          targetScopeType: 'track',
+          notes: [],
+        }}
+        taskScopeLabel="文科"
+        referenceSchoolDate="2026-07-10"
+        editForm={{
+          title: '削除するタスク',
+          dueDate: '2026-07-10',
+          relatedLessonInput: '数学',
+          noteBodies: ['新規ノート'],
+          removalPlanned: true,
+        }}
+        notes={<TaskNoteList notes={[{ noteId: 'note-3', body: '既存ノート' }]} />}
+        onClose={() => undefined}
+        onSave={() => undefined}
+        onTitleChange={() => undefined}
+        onDueDateChange={() => undefined}
+        onRelatedLessonNameChange={() => undefined}
+        onNoteBodyChange={() => undefined}
+        onAddNote={() => undefined}
+        onRemovalChange={() => undefined}
+      />,
+    )
+
+    expect(markup).toContain('削除予定にする')
+    expect(markup.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(5)
+    expect(markup).toContain('既存ノート')
   })
 })

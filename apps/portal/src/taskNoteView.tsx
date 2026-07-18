@@ -58,7 +58,7 @@ export function TaskRemovalConfirmationDialog({
         <DialogBody>
           <div className="task-removal-confirmation-content">
             <p className="task-removal-confirmation-title">{taskTitle}</p>
-            <p>{details.consequence}</p>
+            {details.consequence ? <p>{details.consequence}</p> : null}
             {details.previews.length > 0 ? (
               <ul className="task-removal-confirmation-notes" aria-label="削除予定のノート">
                 {details.previews.map((preview, index) => (

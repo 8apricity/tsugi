@@ -12,6 +12,7 @@ export type DailyLessonNoteListItem = {
   onRemove?: () => void
   onOpenHistory?: () => void
   onOpenDetail?: () => void
+  wholeCardDetailTarget?: boolean
 }
 
 export function DailyLessonNoteList({

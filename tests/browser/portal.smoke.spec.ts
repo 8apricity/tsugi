@@ -47,6 +47,101 @@ test('a fixed test Student reaches authenticated Daily Plan', async ({
   ).toHaveCount(0)
 })
 
+test('Daily Lesson Notes use the Timetable Change dialog and detail lifecycle', async ({
+  page,
+}) => {
+  const firstBody = `Issue 62 first ${Date.now()}`
+  const secondBody = `Issue 62 second ${Date.now()}`
+  const updatedBody = `${firstBody}・更新`
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: /^1限/ }).click()
+
+  const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+  await layerDialog
+    .getByRole('button', { name: /の時間割を編集/ })
+    .first()
+    .click()
+
+  const timetableDialog = page.getByRole('dialog', { name: '時間割変更' })
+  await expect(
+    timetableDialog.getByRole('checkbox', { name: '時間割も変更する' }),
+  ).not.toBeChecked()
+  await expect(timetableDialog.getByLabel('ノートの適用先')).toContainText('日付')
+  await expect(timetableDialog.getByLabel('ノートの適用先')).toContainText('時限')
+  await expect(timetableDialog.getByLabel('ノートの適用先')).toContainText('変更適用範囲')
+
+  await timetableDialog.getByRole('textbox', { name: 'ノート本文 1' }).fill(firstBody)
+  await timetableDialog.getByRole('button', { name: 'ノート欄を追加' }).click()
+  await timetableDialog.getByRole('textbox', { name: 'ノート本文 2' }).fill(secondBody)
+  await timetableDialog.getByRole('button', { name: 'ノート欄を追加' }).click()
+  await timetableDialog.getByRole('button', { name: '下書きを保存' }).click()
+
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+  await page.getByRole('button', { name: '変更内容（2）' }).click()
+  const changeContent = page.getByRole('dialog', { name: '変更内容' })
+  await changeContent.getByRole('button', { name: '反映を確認' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映' }).click()
+
+  await expect(page.locator('.daily-lesson-note-list .note-item').filter({ hasText: firstBody })).toHaveCount(1)
+  await expect(page.locator('.daily-lesson-note-list .note-item').filter({ hasText: secondBody })).toHaveCount(1)
+
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: /^1限/ }).click()
+  const activeLayerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+  await activeLayerDialog
+    .getByRole('button', { name: 'ノートの詳細を開く' })
+    .filter({ hasText: firstBody })
+    .click()
+
+  const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await noteDetail.getByRole('textbox', { name: '本文' }).fill(updatedBody)
+  await noteDetail.getByRole('button', { name: '下書きを更新' }).click()
+  await expect(
+    activeLayerDialog.getByRole('button', { name: 'ノートの詳細を開く' }).filter({ hasText: updatedBody }),
+  ).toHaveCount(1)
+
+  await activeLayerDialog
+    .getByRole('button', { name: 'ノートの詳細を開く' })
+    .filter({ hasText: updatedBody })
+    .click()
+  const removalDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await removalDetail.getByRole('checkbox', { name: '削除予定にする' }).check()
+  await expect(removalDetail.getByRole('textbox', { name: '本文' })).toBeDisabled()
+  await removalDetail.getByRole('button', { name: '下書きを更新' }).click()
+  await expect(
+    activeLayerDialog.getByRole('img', { name: '削除対象のノート' }),
+  ).toHaveCount(1)
+
+  await activeLayerDialog
+    .getByRole('button', { name: 'ノートの詳細を開く' })
+    .filter({ hasText: secondBody })
+    .click()
+  const secondRemovalDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await secondRemovalDetail
+    .getByRole('checkbox', { name: '削除予定にする' })
+    .check()
+  await secondRemovalDetail.getByRole('button', { name: '下書きを更新' }).click()
+  await expect(
+    activeLayerDialog.getByRole('img', { name: '削除対象のノート' }),
+  ).toHaveCount(2)
+
+  await activeLayerDialog.getByRole('button', { name: '閉じる' }).click()
+  await page.getByRole('button', { name: '変更内容（2）' }).click()
+  const removalReview = page.getByRole('dialog', { name: '変更内容' })
+  await removalReview.getByRole('button', { name: '反映を確認' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映' }).click()
+  await expect(
+    page.locator('.daily-lesson-note-list .note-item').filter({ hasText: firstBody }),
+  ).toHaveCount(0)
+  await expect(
+    page.locator('.daily-lesson-note-list .note-item').filter({ hasText: secondBody }),
+  ).toHaveCount(0)
+})
+
 test('independent Note uses one detail flow for viewing, editing, removal, and history', async ({
   page,
 }) => {

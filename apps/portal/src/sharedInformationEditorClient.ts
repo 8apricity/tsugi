@@ -616,17 +616,6 @@ export function createSharedInformationEditorClient({
     }
   }
 
-  function normalizeTaskNoteBodies(noteBodies: readonly string[]) {
-    const normalized: string[] = []
-    for (const noteBody of noteBodies) {
-      if (noteBody.trim().length === 0) continue
-      const body = normalizeNoteBody(noteBody)
-      if (body === null) return null
-      normalized.push(body)
-    }
-    return normalized
-  }
-
   function appendTaskNoteDrafts(
     taskId: string,
     targetScopeType: TargetScopeType,
@@ -668,7 +657,7 @@ export function createSharedInformationEditorClient({
   ) {
     if (submitting) return { status: 'submission-in-progress' as const }
     const snapshot = normalizeTaskSnapshot(input)
-    const noteBodies = normalizeTaskNoteBodies(requestedNoteBodies)
+    const noteBodies = normalizeNoteBodies(requestedNoteBodies)
     if (!input.targetScopeType || !snapshot) {
       return { status: 'invalid-task' as const }
     }
@@ -703,7 +692,7 @@ export function createSharedInformationEditorClient({
   ) {
     if (submitting) return { status: 'submission-in-progress' as const }
     const snapshot = normalizeTaskSnapshot(input)
-    const noteBodies = normalizeTaskNoteBodies(requestedNoteBodies)
+    const noteBodies = normalizeNoteBodies(requestedNoteBodies)
     if (!snapshot) return { status: 'invalid-task' as const }
     if (noteBodies === null) return { status: 'invalid-note' as const }
 
@@ -775,7 +764,7 @@ export function createSharedInformationEditorClient({
   ) {
     if (submitting) return { status: 'submission-in-progress' as const }
     const snapshot = normalizeTaskSnapshot(input)
-    const noteBodies = normalizeTaskNoteBodies(requestedNoteBodies)
+    const noteBodies = normalizeNoteBodies(requestedNoteBodies)
     const existing = taskDrafts.find((draft) => draft.sourceId === sourceId)
     if (
       !existing ||
@@ -920,13 +909,15 @@ export function createSharedInformationEditorClient({
       schoolDate,
       periodNumber,
       replacement,
-      noteBody,
+      noteBodies,
+      removeTimetableChange = false,
     }: {
       targetScopeType: TargetScopeType
       schoolDate: string
       periodNumber: number
       replacement: TimetableReplacement | null
-      noteBody: string
+      noteBodies?: readonly string[]
+      removeTimetableChange?: boolean
     }) {
       if (submitting) return { status: 'submission-in-progress' as const }
       if (
@@ -936,14 +927,15 @@ export function createSharedInformationEditorClient({
         periodNumber > 7
       ) return { status: 'invalid-note' as const }
 
-      const trimmedNoteBody = noteBody.trim()
-      const noteBodyValue = trimmedNoteBody.length === 0
-        ? null
-        : normalizeNoteBody(noteBody)
-      if (trimmedNoteBody.length > 0 && noteBodyValue === null) {
+      const normalizedNoteBodies = normalizeNoteBodies(noteBodies ?? [])
+      if (normalizedNoteBodies === null) {
         return { status: 'invalid-note' as const }
       }
-      if (replacement === null && noteBodyValue === null) {
+      if (
+        replacement === null &&
+        !removeTimetableChange &&
+        normalizedNoteBodies.length === 0
+      ) {
         return { status: 'empty' as const }
       }
 
@@ -957,19 +949,49 @@ export function createSharedInformationEditorClient({
       const serverLayer = loadedServerLayers.get(key)
       const serverReplacement = existing?.serverReplacement ??
         (serverLayer?.state === 'active' ? serverLayer.replacement : undefined)
+      if (
+        removeTimetableChange &&
+        serverLayer?.state !== 'active' &&
+        existing?.changeKind !== 'remove'
+      ) {
+        return { status: 'not-active' as const }
+      }
       const timetableNoop = replacement !== null && serverReplacement !== undefined &&
         timetableReplacementsEqual(replacement, serverReplacement)
-      const willWriteTimetable = replacement !== null && !timetableNoop
+      const willWriteTimetable = removeTimetableChange ||
+        (replacement !== null && !timetableNoop)
+      const existingTimetableDraftAdjustment = Boolean(
+        existing &&
+        (removeTimetableChange || (replacement !== null && timetableNoop)),
+      )
       const nextCount = totalDraftCount() -
-        (timetableNoop && existing ? 1 : 0) +
+        (existingTimetableDraftAdjustment ? 1 : 0) +
         (!existing && willWriteTimetable ? 1 : 0) +
-        (noteBodyValue === null ? 0 : 1)
+        normalizedNoteBodies.length
       if (nextCount > maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
 
       let timetableSourceId: string | undefined
-      if (replacement !== null) {
+      if (removeTimetableChange) {
+        if (existing?.changeKind === 'remove') {
+          timetableSourceId = existing.sourceId
+        } else {
+          timetableSourceId = existing?.sourceId ?? createId()
+          const operation = serverLayer?.state === 'active'
+            ? {
+                changeKind: 'remove' as const,
+                sharedInformationItemId: serverLayer.sharedInformationItemId,
+                expectedLatestChangeId: serverLayer.latestChangeId,
+                serverReplacement: serverLayer.replacement,
+              }
+            : null
+          if (!operation) return { status: 'not-active' as const }
+          drafts = drafts.filter((draft) => draftKey(draft) !== key)
+          drafts.push({ ...keyInput, ...operation, sourceId: timetableSourceId })
+          reconciledKeys.add(key)
+        }
+      } else if (replacement !== null) {
         if (timetableNoop) {
           if (removeDraftByKey(key)) {
             conflictKeys.delete(key)
@@ -1000,14 +1022,15 @@ export function createSharedInformationEditorClient({
         }
       }
 
-      let noteSourceId: string | undefined
-      if (noteBodyValue !== null) {
-        noteSourceId = createId()
+      const noteSourceIds: string[] = []
+      for (const normalizedNoteBody of normalizedNoteBodies) {
+        const noteSourceId = createId()
+        noteSourceIds.push(noteSourceId)
         noteDrafts.push({
           kind: 'note',
           changeKind: 'add',
           sourceId: noteSourceId,
-          body: noteBodyValue,
+          body: normalizedNoteBody,
           schoolDate,
           periodNumber,
           targetScopeType,
@@ -1020,9 +1043,10 @@ export function createSharedInformationEditorClient({
       return {
         status: 'saved' as const,
         savedTimetable: willWriteTimetable,
-        savedNote: noteBodyValue !== null,
+        savedNote: normalizedNoteBodies.length > 0,
+        savedNotes: normalizedNoteBodies.length,
         ...(timetableSourceId ? { timetableSourceId } : {}),
-        ...(noteSourceId ? { noteSourceId } : {}),
+        ...(noteSourceIds.length > 0 ? { noteSourceIds } : {}),
       }
     },
     saveTaskDraft(input: NewTaskDraftForm) {
@@ -2131,6 +2155,17 @@ function restoreTaskNoteSnapshot(value: unknown): TaskNoteSnapshot | null {
 function normalizeNoteBody(body: string) {
   const trimmed = body.trim()
   return trimmed.length >= 1 && trimmed.length <= 1000 ? trimmed : null
+}
+
+function normalizeNoteBodies(noteBodies: readonly string[]) {
+  const normalized: string[] = []
+  for (const noteBody of noteBodies) {
+    if (noteBody.trim().length === 0) continue
+    const body = normalizeNoteBody(noteBody)
+    if (body === null) return null
+    normalized.push(body)
+  }
+  return normalized
 }
 
 function isTaskRelatedLessonName(value: unknown): value is TaskRelatedLessonName {

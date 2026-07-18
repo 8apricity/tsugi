@@ -230,6 +230,10 @@
 }
 
 .period-row {
+  --period-column-width: 56px;
+  display: grid;
+  grid-template-columns: var(--period-column-width) minmax(0, 1fr);
+  min-width: 0;
   min-height: 48px;
   border-bottom: 1px solid var(--color-border);
 }
@@ -244,8 +248,10 @@
 
 .period-inspect-button {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: var(--period-column-width) minmax(0, 1fr);
   width: 100%;
+  min-width: 0;
   min-height: 48px;
   padding: 0;
   border: 0;
@@ -394,13 +400,20 @@ button.period-inspect-button:active {
 }
 
 .daily-lesson-note-list {
-  padding: 0 12px 12px 68px;
+  min-width: 0;
+  padding: 0;
 }
 
 .daily-lesson-note-list .note-item,
 .layer-note-list .note-item {
   border-left: 3px solid #c8d9dc;
   background: #fff;
+}
+
+.period-row > .daily-lesson-note-list {
+  grid-column: 2;
+  min-width: 0;
+  padding: 0 12px 12px 0;
 }
 
 .daily-section {
@@ -585,6 +598,40 @@ button.period-inspect-button:active {
 .task-note-list .note-item {
   border-left: 3px solid #c8d9dc;
   background: #fff;
+}
+
+.task-note-list .note-item-related,
+.daily-lesson-note-list .note-item-related {
+  min-width: 0;
+  gap: 4px;
+  padding: 4px 0 4px 10px;
+  border: 0;
+  border-left: 2px solid #c8d9dc;
+  border-radius: 0;
+  background: transparent;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.task-note-list .note-item-related.note-draft,
+.daily-lesson-note-list .note-item-related.note-draft {
+  border-left-color: #c8d9dc;
+  background: transparent;
+}
+
+.note-item-related .note-related-scope {
+  color: inherit;
+  font-size: inherit;
+}
+
+.note-item-related .note-meta {
+  color: inherit;
+  font-size: 12px;
+}
+
+.note-item-related .note-expand-button {
+  color: inherit;
+  font-size: 12px;
 }
 
 .task-detail-dialog .task-note-list .note-detail-card-whole {
@@ -778,7 +825,7 @@ button.period-inspect-button:active {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
+  -webkit-line-clamp: 3;
 }
 
 .note-body-expanded {
@@ -2884,7 +2931,7 @@ button.timetable-layer-row {
   }
 
   .period-row {
-    grid-template-columns: 48px minmax(0, 1fr);
+    --period-column-width: 48px;
   }
 
   .daily-section {

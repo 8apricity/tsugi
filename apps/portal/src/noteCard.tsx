@@ -58,6 +58,7 @@ export function NoteCard({
   onOpenHistory,
   onOpenDetail,
   wholeCardDetailTarget = false,
+  related = false,
 }: {
   noteId: string
   body: string
@@ -72,6 +73,7 @@ export function NoteCard({
   onOpenHistory?: () => void
   onOpenDetail?: () => void
   wholeCardDetailTarget?: boolean
+  related?: boolean
 }) {
   const generatedId = useId()
   const bodyId = `note-body-${generatedId.replace(/:/g, '')}`
@@ -113,7 +115,7 @@ export function NoteCard({
 
   return (
     <article
-      className={`note-item${draft ? ' note-draft' : ''}${removalSurface ? ' note-removal-draft' : ''}`}
+      className={`note-item${related ? ' note-item-related' : ''}${draft ? ' note-draft' : ''}${removalSurface ? ' note-removal-draft' : ''}`}
       data-note-id={noteId}
     >
       {onOpenDetail ? (
@@ -138,10 +140,12 @@ export function NoteCard({
       {removalSurface ? <RemovalGlyph /> : null}
       <div className="note-meta">
         {targetScopeLabel ? (
-          <span className="task-scope-badge">{targetScopeLabel}</span>
+          <span className={related ? 'note-related-scope' : 'task-scope-badge'}>
+            {targetScopeLabel}
+          </span>
         ) : null}
         {draft && !removalSurface ? (
-          <span className="lifecycle-summary">
+          <span className={`lifecycle-summary${related ? ' sr-only' : ''}`}>
             <LifecycleIcon kind={changeKind} conflicted={conflicted} />
             <small>{lifecycleLabel(changeKind, conflicted)}</small>
           </span>

@@ -50,6 +50,7 @@ export function ReferenceDailyPlanNotes({
                     noteId: note.noteId,
                     body: note.body,
                     targetScopeLabel,
+                    related: true,
                   }))}
                 />
               </article>
@@ -84,6 +85,7 @@ export function ReferenceDailyPlanNotes({
                     notes={task.notes.map((note) => ({
                       noteId: note.noteId,
                       body: note.body,
+                      related: true,
                     }))}
                   />
                 </article>

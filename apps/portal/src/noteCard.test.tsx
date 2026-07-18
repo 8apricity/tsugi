@@ -99,6 +99,24 @@ describe('School Date Note body', () => {
     expect(html).not.toContain('ノートの続きを読む')
   })
 
+  it('renders related Notes without a card treatment or visible lifecycle words', () => {
+    const html = renderToStaticMarkup(
+      <NoteCard
+        noteId="related-note"
+        body="親情報に添えるノート"
+        targetScopeLabel="文科"
+        draft
+        changeKind="update"
+        related
+      />,
+    )
+
+    expect(html).toContain('note-item-related')
+    expect(html).toContain('note-related-scope')
+    expect(html).toContain('lifecycle-summary sr-only')
+    expect(html).toContain('aria-label="更新予定"')
+  })
+
   it('measures NoteCard overflow and expands through its native button', async () => {
     const scrollHeight = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,

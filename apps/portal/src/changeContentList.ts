@@ -12,7 +12,7 @@ import type {
 
 type DraftConflict = { conflicted?: boolean }
 
-export type ChangeContentNoteItem = {
+type ChangeContentNoteItemBase = {
   kind: 'note'
   id: string
   sourceId: string
@@ -22,11 +22,19 @@ export type ChangeContentNoteItem = {
   periodNumber?: number | null
   targetScopeType: TargetScopeType
   conflicted: boolean
-  draft: NoteDraft & DraftConflict
   beforeBody: string | null
   afterBody: string | null
   relatedTask: ChangeContentTaskValue | null
 }
+
+export type ChangeContentNoteItem =
+  | (ChangeContentNoteItemBase & {
+      source: 'draft'
+      draft: NoteDraft & DraftConflict
+    })
+  | (ChangeContentNoteItemBase & {
+      source: 'task-cascade'
+    })
 
 export type ChangeContentTaskValue = {
   taskId: string
@@ -196,6 +204,27 @@ export function buildChangeContentList({
     topLevelNotes.push(note)
   }
 
+  for (const task of taskById.values()) {
+    if (task.draft?.changeKind !== 'remove') continue
+    for (const note of task.draft.baseTask?.notes ?? []) {
+      if (task.children.some((child) => child.sourceId === note.noteId)) continue
+      task.children.push({
+        kind: 'note',
+        source: 'task-cascade',
+        id: `note:${note.noteId}`,
+        sourceId: note.noteId,
+        changeKind: 'remove',
+        body: note.body,
+        schoolDate: null,
+        targetScopeType: note.targetScopeType,
+        conflicted: false,
+        beforeBody: note.body,
+        afterBody: null,
+        relatedTask: task.task,
+      })
+    }
+  }
+
   const timetableItems: ChangeContentTimetableItem[] = timetableDrafts.map(
     (draft) => ({
       kind: 'timetable',
@@ -286,6 +315,7 @@ function noteValueFromDraft(
 ): ChangeContentNoteItem {
   return {
     kind: 'note',
+    source: 'draft',
     id: `note:${draft.sourceId}`,
     sourceId: draft.sourceId,
     changeKind: draft.changeKind,

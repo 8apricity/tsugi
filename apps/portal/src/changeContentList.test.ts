@@ -142,6 +142,57 @@ describe('change-content list projection', () => {
     }])
   })
 
+  it('nests Task-cascade Note removal projections under their parent Task', () => {
+    const items = buildChangeContentList({
+      selectedSchoolDate: '2026-07-10',
+      timetableDrafts: [],
+      noteDrafts: [],
+      taskDrafts: [{
+        sourceId: 'task-remove',
+        targetScopeType: 'track',
+        changeKind: 'remove',
+        sharedInformationItemId: 'task-1',
+        expectedLatestChangeId: 'task-change',
+        title: '数学ワーク',
+        dueDate: '2026-07-10',
+        relatedLessonName: null,
+        baseTask: {
+          taskId: 'task-1',
+          latestChangeId: 'task-change',
+          title: '数学ワーク',
+          dueDate: '2026-07-10',
+          relatedLessonName: null,
+          targetScopeType: 'track',
+          notes: [{
+            noteId: 'task-note-1',
+            latestChangeId: 'task-note-1:change',
+            body: '解答用紙も必要',
+            targetScopeType: 'track',
+            relatedContext: { type: 'task', taskId: 'task-1' },
+          }],
+        },
+      }],
+    })
+
+    expect(items).toMatchObject([{
+      kind: 'task',
+      changeKind: 'remove',
+      children: [{
+        sourceId: 'task-note-1',
+        changeKind: 'remove',
+        source: 'task-cascade',
+        beforeBody: '解答用紙も必要',
+        afterBody: null,
+      }],
+    }])
+    expect(countChangeContentDrafts({
+      timetableDrafts: [],
+      taskDrafts: items.filter((item) => item.kind === 'task')
+        .flatMap((item) => item.draft ? [item.draft] : []),
+      noteDrafts: [],
+    })).toBe(1)
+  })
+
   it('exposes review visibility and pencil badge state independently', () => {
     expect(changeContentControlState({ editing: false, draftCount: 2 })).toEqual({
       reviewVisible: false,

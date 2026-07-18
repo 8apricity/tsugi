@@ -3,6 +3,7 @@ import type { NoteDraft } from './sharedInformationEditorClient'
 
 export type VisibleNoteListItem =
   | { type: 'active'; note: DailyPlanNoteForCache }
+  | { type: 'cascade-removal'; note: DailyPlanNoteForCache }
   | {
       type: 'draft'
       draft: NoteDraft & { conflicted?: boolean }
@@ -70,7 +71,11 @@ export function buildVisibleTaskNoteList(
   activeNotes: readonly DailyPlanNoteForCache[],
   noteDrafts: readonly (NoteDraft & { conflicted?: boolean })[],
   taskId: string,
+  { taskRemovalPlanned = false }: { taskRemovalPlanned?: boolean } = {},
 ): VisibleNoteListItem[] {
+  if (taskRemovalPlanned) {
+    return activeNotes.map((note) => ({ type: 'cascade-removal', note }))
+  }
   const relatedDrafts = noteDrafts.filter(
     (draft) => draft.relatedTaskItemId === taskId,
   )

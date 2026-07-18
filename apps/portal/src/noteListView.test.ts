@@ -4,6 +4,7 @@ import type { NoteDraft } from './sharedInformationEditorClient'
 import {
   buildVisibleDailyLessonNoteList,
   buildVisibleNoteList,
+  buildVisibleTaskNoteList,
 } from './noteListView'
 
 describe('Daily Plan Note list projection', () => {
@@ -32,7 +33,7 @@ describe('Daily Plan Note list projection', () => {
     ] satisfies NoteDraft[]
 
     expect(buildVisibleNoteList(active, drafts, '2026-07-10').map((item) =>
-      item.type === 'active' ? item.note.noteId : item.draft.sourceId,
+      item.type === 'draft' ? item.draft.sourceId : item.note.noteId,
     )).toEqual([
       'draft-dated',
       'orphan-update',
@@ -71,9 +72,9 @@ describe('Daily Plan Note list projection', () => {
       drafts,
       '2026-07-10',
       2,
-    ).map((item) => item.type === 'active'
-      ? item.note.noteId
-      : item.draft.sourceId)).toEqual([
+    ).map((item) => item.type === 'draft'
+      ? item.draft.sourceId
+      : item.note.noteId)).toEqual([
       'grade',
       'track-new-draft',
       'track-old-draft',
@@ -93,6 +94,28 @@ describe('Daily Plan Note list projection', () => {
       [dailyLessonDraft],
       '2026-07-10',
     )).toEqual([])
+  })
+
+  it('projects related Notes as Task-owned removals, then restores them on cancellation', () => {
+    const relatedNote: DailyPlanNoteForCache = {
+      noteId: 'task-note',
+      latestChangeId: 'task-note:change',
+      body: '関連ノート',
+      targetScopeType: 'track',
+      relatedContext: { type: 'task', taskId: 'task-1' },
+    }
+
+    expect(buildVisibleTaskNoteList(
+      [relatedNote],
+      [],
+      'task-1',
+      { taskRemovalPlanned: true },
+    )).toEqual([{ type: 'cascade-removal', note: relatedNote }])
+    expect(buildVisibleTaskNoteList(
+      [relatedNote],
+      [],
+      'task-1',
+    )).toEqual([{ type: 'active', note: relatedNote }])
   })
 })
 

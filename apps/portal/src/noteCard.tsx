@@ -51,6 +51,7 @@ export function NoteCard({
   draft = false,
   changeKind = 'add',
   conflicted = false,
+  removalReason,
   onCancelDraft,
   onEdit,
   onRemove,
@@ -62,6 +63,7 @@ export function NoteCard({
   draft?: boolean
   changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean
+  removalReason?: 'task-cascade'
   onCancelDraft?: () => void
   onEdit?: () => void
   onRemove?: () => void
@@ -107,6 +109,11 @@ export function NoteCard({
             <LifecycleIcon kind={changeKind} conflicted={conflicted} />
             <small>{lifecycleLabel(changeKind, conflicted)}</small>
           </span>
+        ) : null}
+        {removalReason === 'task-cascade' ? (
+          <small className="note-cascade-removal">
+            タスクの削除に伴い削除予定
+          </small>
         ) : null}
         {draft && onCancelDraft ? (
           <button

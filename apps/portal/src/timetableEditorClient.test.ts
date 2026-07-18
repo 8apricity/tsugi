@@ -318,6 +318,13 @@ describe('Shared Information editor client', () => {
       noteDrafts: [{ sourceId: noteId, conflicted: true }],
       conflictCount: 2,
     })
+    expect(editor.removeTaskDraft(taskId)).toEqual({ status: 'removed' })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 0,
+      taskDrafts: [],
+      noteDrafts: [],
+      conflictCount: 0,
+    })
 
     const cancellable = createTimetableEditorClient({
       storage: memoryStorage(),
@@ -358,6 +365,77 @@ describe('Shared Information editor client', () => {
       taskId: '33000000-0000-4000-8000-000000000120',
       targetScopeType: 'track',
     }, '追加してはいけない')).toEqual({ status: 'invalid-note' })
+  })
+
+  it('restores related Note drafts and conflicts when active Task removal is cancelled', async () => {
+    const taskId = '33000000-0000-4000-8000-000000000141'
+    const noteSourceId = '33000000-0000-4000-8000-000000000142'
+    const taskRemovalSourceId = '33000000-0000-4000-8000-000000000143'
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({
+      storage,
+      createId: (() => {
+        const ids = [noteSourceId, taskRemovalSourceId]
+        return () => ids.shift()!
+      })(),
+      submitDirectTimetableChanges: async () => ({
+        status: 'remote-conflict',
+        conflictingKeys: [],
+        conflictingSourceIds: [noteSourceId],
+      }),
+    })
+    const activeTask = {
+      taskId,
+      latestChangeId: `${taskId}:change`,
+      title: '数学ワーク',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+    }
+    const activeNote = {
+      noteId: '33000000-0000-4000-8000-000000000144',
+      latestChangeId: '33000000-0000-4000-8000-000000000144:change',
+      body: '元のノート',
+      schoolDate: null,
+      targetScopeType: 'track' as const,
+      relatedTaskItemId: taskId,
+    }
+
+    expect(editor.saveNoteUpdateDraft(activeNote, '下書きの変更')).toEqual({
+      status: 'saved', sourceId: noteSourceId,
+    })
+    await editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      noteDrafts: [{ sourceId: noteSourceId, conflicted: true }],
+      conflictCount: 1,
+    })
+
+    expect(editor.saveTaskRemoveDraft(activeTask)).toEqual({
+      status: 'saved', sourceId: taskRemovalSourceId,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      taskDrafts: [{ sourceId: taskRemovalSourceId, changeKind: 'remove' }],
+      noteDrafts: [],
+      conflictCount: 0,
+    })
+
+    const restored = createTimetableEditorClient({ storage })
+    expect(restored.removeTaskDraft(taskRemovalSourceId)).toEqual({
+      status: 'removed',
+    })
+    expect(restored.getSnapshot()).toMatchObject({
+      taskDrafts: [],
+      noteDrafts: [{
+        sourceId: noteSourceId,
+        changeKind: 'update',
+        body: '下書きの変更',
+        conflicted: true,
+      }],
+      conflictCount: 1,
+    })
   })
 
   it('keeps dependent active Note drafts conflicted after Task conflict refresh', async () => {

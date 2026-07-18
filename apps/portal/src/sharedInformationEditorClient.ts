@@ -103,10 +103,18 @@ export type TaskDraft = TaskDraftBase & (
       expectedLatestChangeId?: never
     }
   | {
-      changeKind: 'update' | 'remove'
+      changeKind: 'update'
       sharedInformationItemId: string
       expectedLatestChangeId: string
       baseTask?: TaskBaseSnapshot
+    }
+  | {
+      changeKind: 'remove'
+      sharedInformationItemId: string
+      expectedLatestChangeId: string
+      baseTask?: TaskBaseSnapshot
+      suspendedDependentNoteDrafts?: NoteDraft[]
+      suspendedDependentNoteConflictSourceIds?: string[]
     }
 )
 
@@ -464,15 +472,33 @@ export function createSharedInformationEditorClient({
   }
 
   function removeDependentNoteDrafts(taskId: string) {
-    const dependentSourceIds = new Set(
-      noteDrafts
-        .filter((draft) => draft.relatedTaskItemId === taskId)
-        .map((draft) => draft.sourceId),
+    const dependentDrafts = noteDrafts.filter(
+      (draft) => draft.relatedTaskItemId === taskId,
     )
+    const dependentSourceIds = new Set(dependentDrafts.map((draft) => draft.sourceId))
+    const dependentConflictSourceIds = dependentDrafts
+      .filter((draft) => noteConflictSourceIds.has(draft.sourceId))
+      .map((draft) => draft.sourceId)
     noteDrafts = noteDrafts.filter(
       (draft) => !dependentSourceIds.has(draft.sourceId),
     )
     dependentSourceIds.forEach((id) => noteConflictSourceIds.delete(id))
+    return { dependentDrafts, dependentConflictSourceIds }
+  }
+
+  function restoreDependentNoteDrafts(
+    draft: Extract<TaskDraft, { changeKind: 'remove' }>,
+  ) {
+    const restoredDrafts = draft.suspendedDependentNoteDrafts ?? []
+    const existingSourceIds = new Set(noteDrafts.map((note) => note.sourceId))
+    const draftsToRestore = restoredDrafts.filter(
+      (note) => !existingSourceIds.has(note.sourceId),
+    )
+    noteDrafts.push(...draftsToRestore)
+    const restoredSourceIds = new Set(draftsToRestore.map((note) => note.sourceId))
+    for (const sourceId of draft.suspendedDependentNoteConflictSourceIds ?? []) {
+      if (restoredSourceIds.has(sourceId)) noteConflictSourceIds.add(sourceId)
+    }
   }
 
   function commitPayload(
@@ -1025,6 +1051,9 @@ export function createSharedInformationEditorClient({
             (draft) => draft.sourceId !== existing.sourceId,
           )
           taskConflictSourceIds.delete(existing.sourceId)
+          if (existing.changeKind === 'remove') {
+            restoreDependentNoteDrafts(existing)
+          }
           publish()
         }
         return { status: 'removed-noop' as const }
@@ -1034,6 +1063,9 @@ export function createSharedInformationEditorClient({
       }
       const sourceId = existing?.sourceId ?? createId()
       taskDrafts = taskDrafts.filter((draft) => draft.sourceId !== sourceId)
+      if (existing?.changeKind === 'remove') {
+        restoreDependentNoteDrafts(existing)
+      }
       taskDrafts.push({
         sourceId,
         changeKind: 'update',
@@ -1086,6 +1118,13 @@ export function createSharedInformationEditorClient({
       if (!existing && totalDraftCount() >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
+      const suspendedNotes = existing?.changeKind === 'remove'
+        ? {
+            dependentDrafts: existing.suspendedDependentNoteDrafts ?? [],
+            dependentConflictSourceIds:
+              existing.suspendedDependentNoteConflictSourceIds ?? [],
+          }
+        : removeDependentNoteDrafts(activeTask.taskId)
       const sourceId = existing?.sourceId ?? createId()
       taskDrafts = taskDrafts.filter((draft) => draft.sourceId !== sourceId)
       taskDrafts.push({
@@ -1098,8 +1137,16 @@ export function createSharedInformationEditorClient({
         title: activeTask.title,
         dueDate: activeTask.dueDate,
         relatedLessonName: activeTask.relatedLessonName,
+        ...(suspendedNotes.dependentDrafts.length > 0
+          ? { suspendedDependentNoteDrafts: suspendedNotes.dependentDrafts }
+          : {}),
+        ...(suspendedNotes.dependentConflictSourceIds.length > 0
+          ? {
+              suspendedDependentNoteConflictSourceIds:
+                suspendedNotes.dependentConflictSourceIds,
+            }
+          : {}),
       })
-      removeDependentNoteDrafts(activeTask.taskId)
       taskConflictSourceIds.delete(sourceId)
       editing = true
       lastCommitFailed = false
@@ -1117,6 +1164,8 @@ export function createSharedInformationEditorClient({
       taskConflictSourceIds.delete(sourceId)
       if (removedDraft?.changeKind === 'add') {
         removeDependentNoteDrafts(sourceId)
+      } else if (removedDraft?.changeKind === 'remove') {
+        restoreDependentNoteDrafts(removedDraft)
       }
       publish()
       return { status: 'removed' as const }
@@ -1666,6 +1715,17 @@ function restoreTaskDraft(value: unknown): TaskDraft | null {
   }
   if (draft.changeKind === 'update' || draft.changeKind === 'remove') {
     const baseTask = restoreTaskBaseSnapshot(draft.baseTask)
+    const suspendedDependentNoteDrafts = draft.changeKind === 'remove'
+      ? restoreSuspendedNoteDrafts(draft.suspendedDependentNoteDrafts)
+      : []
+    if (suspendedDependentNoteDrafts === null) return null
+    const suspendedDependentNoteConflictSourceIds = draft.changeKind === 'remove'
+      ? restoreSuspendedNoteConflictSourceIds(
+          draft.suspendedDependentNoteConflictSourceIds,
+          suspendedDependentNoteDrafts,
+        )
+      : []
+    if (suspendedDependentNoteConflictSourceIds === null) return null
     return typeof draft.sharedInformationItemId === 'string' &&
       typeof draft.expectedLatestChangeId === 'string'
       ? {
@@ -1674,6 +1734,14 @@ function restoreTaskDraft(value: unknown): TaskDraft | null {
           sharedInformationItemId: draft.sharedInformationItemId,
           expectedLatestChangeId: draft.expectedLatestChangeId,
           ...(baseTask ? { baseTask } : {}),
+          ...(draft.changeKind === 'remove' &&
+            suspendedDependentNoteDrafts.length > 0
+            ? { suspendedDependentNoteDrafts }
+            : {}),
+          ...(draft.changeKind === 'remove' &&
+            suspendedDependentNoteConflictSourceIds.length > 0
+            ? { suspendedDependentNoteConflictSourceIds }
+            : {}),
         }
       : null
   }
@@ -1681,6 +1749,28 @@ function restoreTaskDraft(value: unknown): TaskDraft | null {
       draft.expectedLatestChangeId === undefined
     ? { ...base, changeKind: 'add' }
     : null
+}
+
+function restoreSuspendedNoteDrafts(value: unknown): NoteDraft[] | null {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) return null
+  const drafts = value.map(restoreNoteDraft)
+  return drafts.some((draft) => draft === null)
+    ? null
+    : drafts as NoteDraft[]
+}
+
+function restoreSuspendedNoteConflictSourceIds(
+  value: unknown,
+  drafts: readonly NoteDraft[],
+) {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.some((id) => typeof id !== 'string')) {
+    return null
+  }
+  const draftSourceIds = new Set(drafts.map((draft) => draft.sourceId))
+  return value.filter((id): id is string =>
+    typeof id === 'string' && draftSourceIds.has(id))
 }
 
 function normalizeTaskSnapshot(

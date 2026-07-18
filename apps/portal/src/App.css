@@ -858,6 +858,13 @@ body.page-scroll-locked {
   background: #fff8e6;
 }
 
+.change-content-item.cascade-projection {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  border-color: #e3b4b4;
+  background: #fff8f8;
+  cursor: default;
+}
+
 .change-content-icon {
   width: 25px;
   height: 25px;
@@ -1060,6 +1067,51 @@ body.page-scroll-locked {
 
 .task-detail-dialog > .editor-dialog-actions {
   padding: 0 22px 22px;
+}
+
+.task-removal-confirmation-dialog {
+  width: min(520px, 100%);
+}
+
+.task-removal-confirmation-dialog .editor-dialog-header,
+.task-removal-confirmation-content,
+.task-removal-confirmation-actions {
+  padding: 18px 22px;
+}
+
+.task-removal-confirmation-dialog .editor-dialog-header {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.task-removal-confirmation-content {
+  display: grid;
+  gap: 10px;
+}
+
+.task-removal-confirmation-content p {
+  margin: 0;
+}
+
+.task-removal-confirmation-title {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.task-removal-confirmation-notes {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--color-muted);
+}
+
+.task-removal-confirmation-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--color-border);
+}
+
+.note-cascade-removal {
+  color: #9b2c2c;
 }
 
 .button-danger {

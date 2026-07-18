@@ -62,8 +62,10 @@ import {
   type ChangeContentTaskItem,
   type ChangeContentTimetableItem,
 } from "./changeContentList";
-import { taskRemovalConfirmation } from "./taskNoteCopy";
-import { TaskNoteList } from "./taskNoteView";
+import {
+  TaskNoteList,
+  TaskRemovalConfirmationDialog,
+} from "./taskNoteView";
 import { DailyLessonNoteList } from "./dailyLessonNoteView";
 import { ReferenceDailyPlanNotes } from "./referenceDailyPlanNoteView";
 import type {
@@ -486,6 +488,8 @@ function App() {
     useState<TaskEditorForm | null>(null);
   const [noteEditorForm, setNoteEditorForm] =
     useState<NoteEditorForm | null>(null);
+  const [taskRemovalConfirmation, setTaskRemovalConfirmation] =
+    useState<DailyPlanTaskForCache | null>(null);
   const editorInitialFormsRef = useRef<EditorInitialForms>({
     timetable: null,
     task: null,
@@ -537,7 +541,7 @@ function App() {
   >(null);
   const timetableDialogOpen = Boolean(
     timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
-      taskEditorForm || noteEditorForm || taskDetail || taskHistoryDialog ||
+      taskEditorForm || noteEditorForm || taskRemovalConfirmation || taskDetail || taskHistoryDialog ||
       noteHistoryDialog || referencePickerOpen || changeContentOpen,
   );
 
@@ -1253,6 +1257,7 @@ function App() {
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setNoteEditorForm(null);
+    setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
     setTaskDetail(null);
@@ -1282,6 +1287,7 @@ function App() {
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setNoteEditorForm(null);
+    setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
     setChangeContentOpen(false);
@@ -1420,6 +1426,7 @@ function App() {
   }
 
   function openChangeContentNote(item: ChangeContentNoteItem) {
+    if (item.source !== "draft") return;
     setChangeContentOpen(false);
     changeContentReturnRef.current = true;
     if (item.relatedTask) {
@@ -1600,6 +1607,30 @@ function App() {
             <ul className="change-content-children" aria-label={`${item.task.title}のノート`}>
               {item.children.map((child) => (
                 <li key={child.id}>
+                  {child.source === "task-cascade" ? (
+                    <div
+                      className="change-content-item change-content-note change-content-remove nested cascade-projection"
+                      data-change-content-kind="note"
+                      data-change-kind="remove"
+                      data-change-content-projection="task-cascade"
+                    >
+                      <LifecycleIcon
+                        className="change-content-icon"
+                        kind="remove"
+                        conflicted={false}
+                      />
+                      <span className="change-content-main">
+                        <strong>ノート</strong>
+                        <span className="change-content-diff">
+                          <small>変更前: {child.beforeBody ?? child.body}</small>
+                          <small>変更後: 削除予定</small>
+                        </span>
+                      </span>
+                      <span className="change-content-status">
+                        タスクに伴い削除予定
+                      </span>
+                    </div>
+                  ) : (
                   <button
                     className={`change-content-item change-content-note change-content-${child.changeKind} nested${child.conflicted ? " conflicted" : ""}`}
                     type="button"
@@ -1633,6 +1664,7 @@ function App() {
                     </span>
                     <span aria-hidden="true">›</span>
                   </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -1994,11 +2026,13 @@ function App() {
       targetScopeType: TargetScopeType;
     },
     activeNotes: DailyPlanNoteForCache[],
+    taskRemovalPlanned = false,
   ) {
     const items = buildVisibleTaskNoteList(
       activeNotes,
       timetableEditor.noteDrafts,
       task.taskId,
+      { taskRemovalPlanned },
     ).map((item) => {
       if (item.type === "draft") {
         const note = item.draft;
@@ -2015,7 +2049,18 @@ function App() {
             : () => openTaskNoteEditor(task, undefined, note),
           onOpenHistory: item.activeNote
             ? () => openNoteHistory(item.activeNote!)
-            : undefined,
+          : undefined,
+        };
+      }
+      if (item.type === "cascade-removal") {
+        const note = item.note;
+        return {
+          noteId: note.noteId,
+          body: note.body,
+          draft: true,
+          changeKind: "remove" as const,
+          removalReason: "task-cascade" as const,
+          onOpenHistory: () => openNoteHistory(note),
         };
       }
       const note = item.note;
@@ -2086,9 +2131,28 @@ function App() {
   }
 
   function planTaskRemoval(task: DailyPlanTaskForCache) {
-    if (!window.confirm(taskRemovalConfirmation(task.notes))) return;
-    timetableEditorClient.saveTaskRemoveDraft(editableTask(task));
+    if (timetableEditor.submitting) return;
+    setTaskRemovalConfirmation(task);
     setTaskDetail(null);
+  }
+
+  function cancelTaskRemovalConfirmation() {
+    const task = taskRemovalConfirmation;
+    setTaskRemovalConfirmation(null);
+    if (task) setTaskDetail({ type: "active", task });
+  }
+
+  function confirmTaskRemoval() {
+    if (!taskRemovalConfirmation) return;
+    const result = timetableEditorClient.saveTaskRemoveDraft(
+      editableTask(taskRemovalConfirmation),
+    );
+    if (result.status === "limit-reached") {
+      setTimetableEditorMessage("下書きは合計50件までです。");
+      return;
+    }
+    if (result.status === "submission-in-progress") return;
+    setTaskRemovalConfirmation(null);
   }
 
   function openTimetableEditor(periodNumber: number) {
@@ -2998,7 +3062,12 @@ function App() {
                           </span>
                           <span aria-hidden="true">›</span>
                         </button>
-                        {taskNoteList(task, task.notes)}
+                        {taskNoteList(
+                          task,
+                          task.notes,
+                          item.type === "draft" &&
+                            item.draft.changeKind === "remove",
+                        )}
                       </article>
                       );
                     })}
@@ -3824,7 +3893,12 @@ function App() {
                     conflicted: Boolean(taskDetail.draft.conflicted),
                   }
                 : undefined}
-              notes={taskNoteList(taskDetail.task, taskDetail.task.notes)}
+              notes={taskNoteList(
+                taskDetail.task,
+                taskDetail.task.notes,
+                taskDetail.type === "draft" &&
+                  taskDetail.draft.changeKind === "remove",
+              )}
               addNoteDisabled={
                 timetableEditor.atLimit || timetableEditor.submitting
               }
@@ -3862,6 +3936,15 @@ function App() {
               onRemove={timetableEditor.editing && taskDetail.type === "active"
                 ? () => planTaskRemoval(taskDetail.task)
                 : undefined}
+            />
+          ) : null}
+
+          {taskRemovalConfirmation ? (
+            <TaskRemovalConfirmationDialog
+              taskTitle={taskRemovalConfirmation.title}
+              notes={taskRemovalConfirmation.notes}
+              onCancel={cancelTaskRemovalConfirmation}
+              onConfirm={confirmTaskRemoval}
             />
           ) : null}
 

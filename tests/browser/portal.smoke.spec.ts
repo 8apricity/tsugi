@@ -47,6 +47,80 @@ test('a fixed test Student reaches authenticated Daily Plan', async ({
   ).toHaveCount(0)
 })
 
+test.describe('pointer state separation', () => {
+  test('keeps hover styling and keyboard focus visible on desktop', async ({
+    page,
+    browserName,
+    isMobile,
+  }) => {
+    test.skip(
+      browserName !== 'chromium' || isMobile,
+      'Chromium desktop pointer-state journey',
+    )
+
+    await page.goto('/')
+
+    const menuButton = page.getByRole('button', { name: 'メニュー' })
+    await menuButton.hover()
+    await expect(menuButton).toHaveCSS(
+      'background-color',
+      'rgb(248, 250, 251)',
+    )
+
+    await menuButton.focus()
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Shift+Tab')
+    await expect(menuButton).toBeFocused()
+    await expect(menuButton).toHaveCSS('outline-style', 'solid')
+    await expect(menuButton).toHaveCSS('outline-width', '2px')
+
+    await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+    const taskAddButton = page.getByRole('button', { name: 'タスクを追加' })
+    await taskAddButton.scrollIntoViewIfNeeded()
+    const taskAddBox = await taskAddButton.boundingBox()
+    expect(taskAddBox).not.toBeNull()
+    if (!taskAddBox) throw new Error('Task add button is not measurable')
+
+    await page.mouse.move(
+      taskAddBox.x + taskAddBox.width / 2,
+      taskAddBox.y + taskAddBox.height / 2,
+    )
+    await page.mouse.down()
+    await expect(taskAddButton).toHaveCSS(
+      'background-color',
+      'rgb(232, 245, 246)',
+    )
+    await page.mouse.up()
+    await expect(
+      page.getByRole('dialog', { name: 'タスクを追加' }),
+    ).toBeVisible()
+  })
+
+  test('does not keep desktop hover styling after a touch tap', async ({
+    page,
+    browserName,
+    isMobile,
+  }) => {
+    test.skip(
+      browserName !== 'webkit' || !isMobile,
+      'WebKit iPhone pointer-state journey',
+    )
+
+    await page.goto('/')
+
+    const menuButton = page.getByRole('button', { name: 'メニュー' })
+    await menuButton.tap()
+    await expect(
+      page.getByRole('button', { name: 'ほかの範囲を参照' }),
+    ).toBeVisible()
+
+    await expect(menuButton).toHaveCSS(
+      'background-color',
+      'rgba(0, 0, 0, 0)',
+    )
+  })
+})
+
 test.describe('WebKit mobile editors', () => {
   test.skip(
     ({ browserName, isMobile }) => browserName !== 'webkit' || !isMobile,

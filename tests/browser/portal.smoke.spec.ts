@@ -296,11 +296,19 @@ test('Task add/edit supports zero, one, and multiple Notes and returns from Task
   const detail = page.getByRole('dialog', { name: 'タスクの詳細' })
   const relatedNotes = detail.getByRole('button', { name: 'ノートの詳細を開く' })
   await expect(relatedNotes).toHaveCount(2)
-  await relatedNotes.first().click()
-  const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
-  await expect(noteDetail.getByText('複数Noteの1件目', { exact: true })).toBeVisible()
-  await noteDetail.getByRole('button', { name: 'タスクの詳細に戻る' }).click()
-  await expect(detail).toBeVisible()
+  const openedNoteBodies = []
+  for (const index of [0, 1]) {
+    await relatedNotes.nth(index).click()
+    const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+    const body = noteDetail.locator('.note-detail-body')
+    await expect(body).toHaveText(/複数Noteの[12]件目/)
+    openedNoteBodies.push((await body.textContent())?.trim())
+    await noteDetail.getByRole('button', { name: 'タスクの詳細に戻る' }).click()
+    await expect(detail).toBeVisible()
+  }
+  expect(new Set(openedNoteBodies)).toEqual(
+    new Set(['複数Noteの1件目', '複数Noteの2件目']),
+  )
 
   await detail.getByRole('button', { name: '閉じる' }).click()
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()

@@ -10,7 +10,10 @@
     "lint": "pnpm --dir apps/portal lint && pnpm lint:browser",
     "lint:browser": "eslint playwright.config.ts tests/browser scripts/serve-browser-tests.mjs",
     "test": "pnpm --dir apps/portal test",
+    "test:browser": "playwright test --project=chromium --project=webkit-iphone",
+    "test:browser:chrome": "playwright test --project=chrome",
     "test:browser:chromium": "playwright test --project=chromium",
+    "test:browser:webkit": "playwright test --project=webkit-iphone",
     "typecheck:browser": "tsc --project tsconfig.browser.json"
   },
   "keywords": [],

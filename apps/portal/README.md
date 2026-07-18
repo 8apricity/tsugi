@@ -1,13 +1,17 @@
 # Tsugi Portal
 
-## Automated Chromium Smoke Test
+## Automated Browser Smoke Tests
 
-From repository root, run `pnpm test:browser:chromium`. It recreates an
-isolated local D1 location, seeds only fixed `test-student-*` QA identities,
-serves current Portal code, authenticates from Node, and opens Chromium with
-disposable authenticated state. These fixed identities are not real Students.
-See [`docs/agents/browser-testing.md`](../../docs/agents/browser-testing.md) for
-the server-only command, isolation boundary, secret handling, and artifacts.
+From repository root, run `pnpm test:browser` for required Chromium desktop and
+WebKit/iPhone smoke coverage. Focused commands are
+`pnpm test:browser:chromium` and `pnpm test:browser:webkit`; optional
+`pnpm test:browser:chrome` checks an installed branded Google Chrome binary.
+Each project authenticates from Node with its own disposable state. WebKit is
+not Safari certification. The command recreates an isolated local D1 location,
+seeds only fixed `test-student-*` QA identities, and serves current Portal code.
+These fixed identities are not real Students. See
+[`docs/agents/browser-testing.md`](../../docs/agents/browser-testing.md) for
+the server-only command, matrix boundaries, secret handling, and artifacts.
 
 ## Test Login For Local/Staging QA
 

@@ -4,6 +4,10 @@ import { defineConfig, devices } from '@playwright/test'
 const baseURL = 'http://127.0.0.1:8790'
 const chromiumStorageState =
   'test-results/playwright/auth/chromium.json'
+const webkitIphoneStorageState =
+  'test-results/playwright/auth/webkit-iphone.json'
+const chromeStorageState =
+  'test-results/playwright/auth/chrome.json'
 const testLoginSecret = randomBytes(32).toString('hex')
 
 process.env.TSUGI_BROWSER_TEST_LOGIN_SECRET = testLoginSecret
@@ -16,7 +20,6 @@ export default defineConfig({
     ['list'],
     ['html', { open: 'never', outputFolder: 'playwright-report' }],
   ],
-  outputDir: 'test-results/playwright/chromium',
   globalSetup: './tests/browser/global-setup.ts',
   globalTeardown: './tests/browser/global-teardown.ts',
   use: {
@@ -38,9 +41,27 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      outputDir: 'test-results/playwright/chromium',
       use: {
         ...devices['Desktop Chrome'],
         storageState: chromiumStorageState,
+      },
+    },
+    {
+      name: 'webkit-iphone',
+      outputDir: 'test-results/playwright/webkit-iphone',
+      use: {
+        ...devices['iPhone 13'],
+        storageState: webkitIphoneStorageState,
+      },
+    },
+    {
+      name: 'chrome',
+      outputDir: 'test-results/playwright/chrome',
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: 'chrome',
+        storageState: chromeStorageState,
       },
     },
   ],

@@ -1,12 +1,33 @@
 # Browser testing
 
-## Local automated Chromium smoke test
+## Local automated browser smoke tests
 
 Run from repository root:
 
 ```powershell
+pnpm test:browser
 pnpm test:browser:chromium
+pnpm test:browser:webkit
 ```
+
+`test:browser` is the required matrix: Playwright Chromium with a desktop
+configuration plus Playwright WebKit with the `iPhone 13` device descriptor
+(390 x 664 viewport, 390 x 844 screen, mobile and touch enabled). The engine
+commands run one required project for focused diagnosis. WebKit results show
+WebKit compatibility; they are not Safari certification. Real Safari remains
+a separate manual verification surface.
+
+For an explicit check against an installed branded Google Chrome binary, run:
+
+```powershell
+pnpm test:browser:chrome
+```
+
+The `chrome` project uses Playwright's `chrome` channel. It is optional, is not
+part of `test:browser`, and does not make branded Google Chrome a required local
+dependency. Playwright Chromium, branded Google Chrome, Playwright WebKit, real
+Safari, and Codex In-app Browser are distinct verification surfaces; report
+the one actually used.
 
 Playwright owns server startup for this command. Its configured server command
 is also available directly when only local preparation and serving are needed:
@@ -28,27 +49,38 @@ start with `test-student-`. They are not real Students and the dedicated local
 database must not contain real school or personal data. Never apply the fixed
 test Student seed to production.
 
-Before Chromium starts, Playwright generates an ephemeral test-login secret in
-Node. A global setup creates a Node-side `APIRequestContext`, calls the existing
-`POST /api/test/login` endpoint for
-`test-student-2026-2-3-humanities-1`, and writes the resulting cookies to
-`test-results/playwright/auth/chromium.json`. The Chromium project passes that
-state into its `BrowserContext`; no UI login step runs. The secret is not
-written to the state file or supplied to a page, URL, DOM, application-managed
-storage, screenshot, trace, or committed file.
+Before a selected project starts, Playwright generates an ephemeral test-login
+secret in Node. Global setup creates a separate Node-side `APIRequestContext`
+for every selected project, calls the existing `POST /api/test/login` endpoint
+for `test-student-2026-2-3-humanities-1`, and writes resulting cookies to that
+project's own disposable state file:
 
-Both the Chromium auth state and browser-test D1 state are disposable and
-ignored by Git. Passing runs retain no screenshots or traces. Failures retain
-an automatic screenshot and trace below `test-results/playwright/chromium`;
+- Chromium: `test-results/playwright/auth/chromium.json`
+- WebKit/iPhone: `test-results/playwright/auth/webkit-iphone.json`
+- optional branded Chrome: `test-results/playwright/auth/chrome.json`
+
+Each project's `BrowserContext` starts from only its corresponding state; WebKit
+never uses Chromium state. No UI login step runs. The secret is not written to
+a state file or supplied to a page, URL, DOM, application-managed storage,
+screenshot, trace, or committed file.
+
+Auth state and browser-test D1 state are disposable and ignored by Git. Passing
+runs retain no screenshots or traces. Failures retain an automatic screenshot
+and trace below the selected project's directory in `test-results/playwright`;
 the HTML report is written to `playwright-report`. Delete these local artifacts
 when no longer needed because auth state and failure diagnostics can contain a
 test Student session.
 
-The smoke suite verifies the unauthenticated School Email login and an
-authenticated Daily Plan. If Chromium is not installed locally, run:
+Required coverage contains four journeys: Chromium desktop verifies the
+unauthenticated School Email entry and authenticated Daily Plan; WebKit/iPhone
+verifies the authenticated Daily Plan plus primary/task editor open/close and
+mobile field/date-control geometry. Assertions use accessible roles, labels,
+and visible Japanese UI behavior. No visual snapshot baseline is used.
+
+If required browser binaries are not installed locally, run:
 
 ```powershell
-pnpm exec playwright install chromium
+pnpm exec playwright install chromium webkit
 ```
 
 ## Interactive Browser secret-header decision

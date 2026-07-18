@@ -1982,6 +1982,41 @@ button.timetable-layer-row {
   text-align: right;
 }
 
+.timetable-layer-lesson-name {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.timetable-layer-source {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.timetable-layer-lesson-name.removal {
+  position: relative;
+  min-height: 42px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #e2abab;
+  border-radius: var(--radius-sm);
+  background: #fff1f1;
+}
+
+.timetable-layer-lesson-name.removal > .note-removal-glyph {
+  width: 52px;
+  height: 52px;
+  color: rgba(143, 29, 20, 0.22);
+}
+
+.layer-row-shell.removal,
+.timetable-layer-row.removal {
+  background: #fff;
+}
+
 .layer-lifecycle-state {
   grid-column: 1;
   justify-self: start;
@@ -2041,11 +2076,18 @@ button.timetable-layer-row {
 }
 
 .layer-flow-arrow {
-  height: 22px;
-  color: var(--color-accent);
-  font-weight: 800;
-  line-height: 22px;
-  text-align: center;
+  display: grid;
+  height: 18px;
+  place-items: center;
+}
+
+.layer-flow-arrow::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 10px solid #111827;
+  border-right: 7px solid transparent;
+  border-left: 7px solid transparent;
 }
 
 .layer-result-row {
@@ -2055,6 +2097,12 @@ button.timetable-layer-row {
 
 .layer-result-row strong {
   grid-column: 2 / -1;
+}
+
+.layer-result-lesson-name {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
 }
 
 .layer-dialog-actions {

@@ -1315,10 +1315,40 @@ describe('Shared Information editor client', () => {
       ),
     ).toMatchObject({
       layers: [
-        { targetScopeType: 'grade', desired: false, replacement: { lessonName: '体育' } },
-        { targetScopeType: 'class', desired: false },
-        { targetScopeType: 'track', desired: true, replacement: { weekday: 1 } },
-        { targetScopeType: 'student', desired: false },
+        {
+          targetScopeType: 'grade',
+          desired: false,
+          replacement: { lessonName: '体育' },
+          effectiveLessonName: '体育',
+          effectiveLessonSource: null,
+        },
+        {
+          targetScopeType: 'class',
+          desired: false,
+          effectiveLessonName: '体育',
+          effectiveLessonSource: null,
+        },
+        {
+          targetScopeType: 'track',
+          desired: true,
+          replacement: { weekday: 1 },
+          effectiveLessonName: '化学',
+          effectiveLessonSource: {
+            type: 'period_reference',
+            weekday: 1,
+            periodNumber: 3,
+          },
+        },
+        {
+          targetScopeType: 'student',
+          desired: false,
+          effectiveLessonName: '化学',
+          effectiveLessonSource: {
+            type: 'period_reference',
+            weekday: 1,
+            periodNumber: 3,
+          },
+        },
       ],
       finalDailyLesson: { lessonName: '化学', timetableChangeState: 'resolved' },
     })

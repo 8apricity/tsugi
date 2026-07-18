@@ -34,6 +34,7 @@ import {
   type TargetScopeType,
   type TimetableLayerState,
   type TimetableLayerKey,
+  type TimetableLessonSource,
   type TimetableReference,
   type TimetableReplacement,
 } from "./sharedInformationEditorClient";
@@ -1682,7 +1683,7 @@ function App() {
     if (item.kind === "timetable") {
       const replacement = item.replacement ?? item.serverReplacement;
       const value = item.changeKind === "remove"
-        ? "削除予定"
+        ? "変更後: なし"
         : replacement
           ? replacementLabel(replacement)
           : "変更内容";
@@ -1715,7 +1716,7 @@ function App() {
                 <span>{value}</span>
               )}
             </span>
-            <span className="change-content-status">
+            <span className="change-content-status sr-only">
               {changeContentStatus(item.changeKind, item.conflicted)}
             </span>
             <span aria-hidden="true">›</span>
@@ -4837,13 +4838,24 @@ function App() {
                   <div className="timetable-layer-stack">
                     <LayerRow
                       label="通常の時間割"
-                      value={`${
-                        buildDateHeader(
-                          timetableLayerDialog.schoolDate,
-                          currentSchoolDate,
-                        ).weekdayLabel
-                      }${timetableLayerDialog.periodNumber}`}
+                      value={timetableEditor.editing
+                        ? layerPreview.standardTimetable?.lessonName ?? "空欄"
+                        : `${
+                            buildDateHeader(
+                              timetableLayerDialog.schoolDate,
+                              currentSchoolDate,
+                            ).weekdayLabel
+                          }${timetableLayerDialog.periodNumber}`}
+                      source={timetableEditor.editing
+                        ? layerPreview.standardTimetable
+                          ? lessonSourceLabel({
+                              type: "period_reference",
+                              ...layerPreview.standardTimetable.periodReference,
+                            })
+                          : undefined
+                        : undefined}
                     />
+                    <LayerFlowArrow />
                     {layerPreview.layers.map((layer) => {
                       const existingDraft = timetableEditorClient.findDraft(
                         layer.targetScopeType,
@@ -4859,6 +4871,8 @@ function App() {
                         !timetableEditor.submitting &&
                         (!!existingDraft ||
                           (!!serverLayer && !timetableEditor.atLimit));
+                      const removalPlanned =
+                        "removalPlanned" in layer && layer.removalPlanned;
                       return (
                       <div
                         className="layer-with-notes"
@@ -4869,20 +4883,20 @@ function App() {
                           layer.targetScopeType,
                           targetScopeContext,
                         )}
-                        value={
-                          "removalPlanned" in layer && layer.removalPlanned
-                            ? "削除予定"
-                            : layer.state === "active"
+                        value={timetableEditor.editing
+                          ? layer.effectiveLessonName ?? ""
+                          : layer.state === "active"
                             ? replacementLabel(layer.replacement)
-                            : "変更無し"
-                        }
+                            : "変更無し"}
+                        source={timetableEditor.editing
+                          ? lessonSourceLabel(layer.effectiveLessonSource)
+                          : undefined}
+                        removalPlanned={removalPlanned}
                         detail={
                           layer.desired
                             ? layer.conflicted
                               ? "ほかの変更と重なっています"
-                              : "removalPlanned" in layer && layer.removalPlanned
-                                ? "削除予定"
-                                : "下書きの内容"
+                              : "下書きの内容"
                             : layer.state === "active" && "changedAt" in layer
                             ? `最終更新 ${formatRelativeTime(layer.changedAt)}`
                             : undefined
@@ -4931,13 +4945,24 @@ function App() {
                         "layer-note-list",
                         { type: "timetable", dialog: timetableLayerDialog },
                       )}
+                      <LayerFlowArrow />
                       </div>
                       );
                     })}
                     <div className="layer-result-row">
                       <span>表示される授業名</span>
-                      <strong>
+                      <strong className="layer-result-lesson-name">
                         {layerPreview.finalDailyLesson.lessonName}
+                        {timetableEditor.editing &&
+                        lessonSourceLabel(
+                          layerPreview.layers.at(-1)?.effectiveLessonSource,
+                        ) ? (
+                          <small className="timetable-layer-source">
+                            （{lessonSourceLabel(
+                              layerPreview.layers.at(-1)?.effectiveLessonSource,
+                            )}）
+                          </small>
+                        ) : null}
                       </strong>
                     </div>
                   </div>
@@ -5631,6 +5656,8 @@ function App() {
 function LayerRow({
   label,
   value,
+  source,
+  removalPlanned = false,
   detail,
   desired = false,
   conflicted = false,
@@ -5640,6 +5667,8 @@ function LayerRow({
 }: {
   label: string;
   value: string;
+  source?: string;
+  removalPlanned?: boolean;
   detail?: string;
   desired?: boolean;
   conflicted?: boolean;
@@ -5655,12 +5684,28 @@ function LayerRow({
   const content = (
     <>
       <span className="timetable-layer-label">{label}</span>
-      <strong>{value}</strong>
+      <span
+        className={`timetable-layer-lesson-name${removalPlanned ? " removal" : ""}`}
+        aria-label={removalPlanned ? "削除対象の時間割変更" : undefined}
+      >
+        {removalPlanned ? (
+          <RemovalGlyph label="削除対象の時間割変更" />
+        ) : (
+          <>
+            <strong>{value}</strong>
+            {source && source !== value ? (
+              <small className="timetable-layer-source">（{source}）</small>
+            ) : null}
+          </>
+        )}
+      </span>
       <small>{detail}</small>
       {desired && lifecycleKind ? (
         <span className="layer-lifecycle-state">
           <LifecycleIcon kind={lifecycleKind} conflicted={conflicted} />
-          <small>{lifecycleLabel(lifecycleKind, conflicted)}</small>
+          <small className="sr-only">
+            {lifecycleLabel(lifecycleKind, conflicted)}
+          </small>
         </span>
       ) : null}
     </>
@@ -5668,11 +5713,11 @@ function LayerRow({
   return (
     <>
       <div
-        className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
+        className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${conflicted ? " conflict" : ""}${removalPlanned ? " removal" : ""}`}
       >
         {onClick ? (
           <button
-            className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
+            className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}${removalPlanned ? " removal" : ""}`}
             type="button"
             onClick={onClick}
             aria-label={`${label}の時間割を編集${
@@ -5684,7 +5729,7 @@ function LayerRow({
             {content}
           </button>
         ) : (
-          <div className={`timetable-layer-row${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}>
+          <div className={`timetable-layer-row${desired ? " desired" : ""}${conflicted ? " conflict" : ""}${removalPlanned ? " removal" : ""}`}>
             {content}
           </div>
         )}
@@ -5720,11 +5765,12 @@ function LayerRow({
           </div>
         ) : null}
       </div>
-      <div className="layer-flow-arrow" aria-hidden="true">
-        ↓
-      </div>
     </>
   );
+}
+
+function LayerFlowArrow() {
+  return <div className="layer-flow-arrow" aria-hidden="true" />;
 }
 
 function PeriodWheelPicker({
@@ -6296,6 +6342,14 @@ function replacementLabel(replacement: TimetableReplacement) {
     return replacement.referenceLabel;
   }
   return "休講";
+}
+
+function lessonSourceLabel(source?: TimetableLessonSource | null) {
+  if (!source) return undefined;
+  if (source.type === "period_reference") {
+    return `${"月火水木金土"[source.weekday - 1]}${source.periodNumber}`;
+  }
+  return source.referenceLabel ?? undefined;
 }
 
 function resolveReplacementLessonName(

@@ -3,6 +3,7 @@ import {
   timetableReplacementsEqual,
   type DesiredTimetableLayer,
   type TargetScopeType as ProjectionTargetScopeType,
+  type TimetableLessonSource as ProjectionTimetableLessonSource,
   type TimetableReference as ProjectionTimetableReference,
   type TimetableReplacement as ProjectionTimetableReplacement,
 } from '../shared/timetableProjection'
@@ -10,6 +11,7 @@ import { isTargetScopeType } from '../shared/targetScope'
 
 export type TargetScopeType = ProjectionTargetScopeType
 export type TimetableReference = ProjectionTimetableReference
+export type TimetableLessonSource = ProjectionTimetableLessonSource
 export type TimetableReplacement =
   | Exclude<
       ProjectionTimetableReplacement,
@@ -170,6 +172,8 @@ export type TimetableLayerState = {
     | {
         targetScopeType: TargetScopeType
         state: 'unchanged'
+        effectiveLessonName?: string
+        effectiveLessonSource?: TimetableLessonSource | null
         notes?: Array<{
           noteId: string
           latestChangeId: string
@@ -185,6 +189,8 @@ export type TimetableLayerState = {
     | {
         targetScopeType: TargetScopeType
         state: 'active'
+        effectiveLessonName?: string
+        effectiveLessonSource?: TimetableLessonSource | null
         sharedInformationItemId: string
         latestChangeId: string
         replacement: TimetableReplacement
@@ -1537,7 +1543,14 @@ export function createSharedInformationEditorClient({
       )
       const projection = projectTimetableSlot({
         standardTimetable: state.standardTimetable
-          ? { type: 'selected', lessonName: state.standardTimetable.lessonName }
+          ? {
+              type: 'selected',
+              lessonName: state.standardTimetable.lessonName,
+              source: {
+                type: 'period_reference',
+                ...state.standardTimetable.periodReference,
+              },
+            }
           : null,
         activeLayers: state.layers.flatMap((layer) =>
           layer.state === 'active'
@@ -1567,6 +1580,8 @@ export function createSharedInformationEditorClient({
           return {
             targetScopeType: layer.targetScopeType,
             state: 'unchanged' as const,
+            effectiveLessonName: projectedLayer.effectiveLessonName,
+            effectiveLessonSource: projectedLayer.effectiveLessonSource,
             notes: layer.notes,
             desired: true,
             removalPlanned: true,
@@ -1580,17 +1595,31 @@ export function createSharedInformationEditorClient({
               ? layer.replacement
               : undefined
           if (!replacement) {
-            return { ...layer, desired: false, conflicted: false }
+            return {
+              ...layer,
+              effectiveLessonName: projectedLayer.effectiveLessonName,
+              effectiveLessonSource: projectedLayer.effectiveLessonSource,
+              desired: false,
+              conflicted: false,
+            }
           }
           return {
             ...layer,
             state: 'active' as const,
             replacement,
+            effectiveLessonName: projectedLayer.effectiveLessonName,
+            effectiveLessonSource: projectedLayer.effectiveLessonSource,
             desired: !!draft,
             conflicted: draft ? conflictKeys.has(draftKey(draft)) : false,
           }
         }
-        return { ...layer, desired: false, conflicted: false }
+        return {
+          ...layer,
+          effectiveLessonName: projectedLayer?.effectiveLessonName,
+          effectiveLessonSource: projectedLayer?.effectiveLessonSource,
+          desired: false,
+          conflicted: false,
+        }
       })
       return {
         ...state,

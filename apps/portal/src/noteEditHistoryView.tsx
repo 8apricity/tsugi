@@ -4,6 +4,7 @@ import type {
   NoteHistorySnapshot,
 } from '../shared/noteEditHistory'
 import { targetScopeLabel, type TargetScopeDisplayContext } from './uiCopy'
+import { DialogBody } from './dialogFoundation'
 
 export type NoteEditHistoryState =
   | { status: 'loading' }
@@ -40,7 +41,8 @@ export function NoteEditHistoryDialog({
             ×
           </button>
         </header>
-        {state.status === 'loading' ? (
+        <DialogBody>
+          {state.status === 'loading' ? (
           <p className="layer-dialog-status" aria-live="polite">
             編集履歴を読み込んでいます…
           </p>
@@ -98,7 +100,8 @@ export function NoteEditHistoryDialog({
               ))}
             </ol>
           </>
-        )}
+          )}
+        </DialogBody>
       </section>
     </div>
   )

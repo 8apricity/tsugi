@@ -753,10 +753,13 @@ button.period-inspect-button:active {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: max(24px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
   background: rgba(31, 41, 51, 0.42);
-  /* Keep dialog scrolling available while blocking pinch zoom in the dialog. */
-  touch-action: pan-y;
+  overflow: hidden;
+  touch-action: none;
 }
 
 html.page-scroll-locked,
@@ -766,19 +769,46 @@ body.page-scroll-locked {
 }
 
 .timetable-editor-dialog {
+  display: grid;
   width: min(920px, 100%);
-  max-height: calc(100svh - 48px);
-  overflow: auto;
+  height: min(720px, calc(100dvh - 48px));
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100dvh - 48px);
+  overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-panel);
   box-shadow: 0 12px 36px rgba(31, 41, 51, 0.18);
+  touch-action: pan-y;
 }
 
 .timetable-editor-dialog form {
   display: grid;
   gap: 18px;
   padding: 22px;
+}
+
+.timetable-editor-dialog .editor-dialog-form {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+}
+
+.editor-dialog-scroll-body,
+.editor-dialog-form > .editor-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 22px;
+  touch-action: pan-y;
+}
+
+.editor-dialog-form-surface .editor-dialog-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .editor-dialog-header,
@@ -790,9 +820,22 @@ body.page-scroll-locked {
 }
 
 .editor-dialog-header h2 {
+  min-width: 0;
+  flex: 1;
   margin: 0;
   color: var(--color-primary);
   font-size: 18px;
+  text-align: center;
+}
+
+.dialog-save-button {
+  min-width: 116px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.dialog-back-button {
+  flex: 0 0 44px;
 }
 
 .editor-fields {
@@ -2369,9 +2412,24 @@ button.timetable-layer-row {
   .timetable-editor-dialog {
     width: 100%;
     height: 100svh;
+    height: 100dvh;
     max-height: none;
     border: 0;
     border-radius: 0;
+  }
+
+  .editor-dialog-form > .editor-dialog-body {
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .editor-dialog-form-surface .editor-dialog-header {
+    padding: max(12px, env(safe-area-inset-top)) 12px 10px;
+  }
+
+  .dialog-save-button {
+    min-width: 104px;
+    padding: 0 8px;
+    font-size: 13px;
   }
 
   .change-content-dialog {

@@ -569,6 +569,12 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'editing' as const }
     },
+    exitEditing() {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      editing = false
+      publish()
+      return { status: 'paused' as const }
+    },
     shouldConfirmExit() {
       return totalDraftCount() > 0
     },
@@ -1609,9 +1615,9 @@ function restore(storage: StorageLike): {
       : []
 
     return {
-      editing:
-        parsed.editing === true ||
-        drafts.length + taskDrafts.length + noteDrafts.length > 0,
+      editing: typeof parsed.editing === 'boolean'
+        ? parsed.editing
+        : drafts.length + taskDrafts.length + noteDrafts.length > 0,
       lastTargetScopeType: isTargetScopeType(parsed.lastTargetScopeType)
         ? parsed.lastTargetScopeType
         : 'track',

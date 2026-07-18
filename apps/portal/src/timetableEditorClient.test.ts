@@ -62,6 +62,30 @@ function layerState(
 }
 
 describe('Shared Information editor client', () => {
+  it('pauses editing without deleting drafts and restores the paused state', () => {
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({ storage })
+
+    editor.saveTaskDraft({
+      title: '持ち越す下書き',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track',
+    })
+    expect(editor.getSnapshot()).toMatchObject({ editing: true, draftCount: 1 })
+    expect(editor.exitEditing()).toEqual({ status: 'paused' })
+    expect(editor.getSnapshot()).toMatchObject({ editing: false, draftCount: 1 })
+
+    const restored = createTimetableEditorClient({ storage })
+    expect(restored.getSnapshot()).toMatchObject({
+      editing: false,
+      draftCount: 1,
+      taskDrafts: [{ title: '持ち越す下書き' }],
+    })
+    expect(restored.enterEditing()).toEqual({ status: 'editing' })
+    expect(restored.getSnapshot().draftCount).toBe(1)
+  })
+
   it('saves zero or one Timetable Change and zero or one Daily Lesson Note from one dialog', () => {
     const ids = [
       '33000000-0000-4000-8000-000000000001',

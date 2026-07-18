@@ -233,16 +233,89 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
   ).toBeVisible()
   await activeDetailDialog.getByRole('button', { name: '編集', exact: true }).click()
 
-  const immutableMessage =
-    'タスクの変更適用範囲は変更できません。削除予定にしてから追加し直してください。'
   const updateDialog = page.getByRole('dialog', { name: 'タスクを編集' })
   await expect(
     updateDialog.getByRole('button', { name: '下書きを更新' }),
   ).toBeVisible()
-  await updateDialog.getByRole('button', { name: immutableMessage }).click()
   await expect(
-    page.getByRole('status').filter({ hasText: immutableMessage }),
+    updateDialog.locator('dt').filter({ hasText: '変更適用範囲' }),
   ).toBeVisible()
+  await expect(
+    updateDialog.getByRole('combobox', { name: '変更適用範囲' }),
+  ).toHaveCount(0)
+})
+
+test('Task add/edit supports zero, one, and multiple Notes and returns from Task Note detail', async ({
+  page,
+  browserName,
+  isMobile,
+}) => {
+  test.skip(
+    browserName !== 'chromium' || isMobile,
+    'Chromium desktop Task Note journey',
+  )
+
+  const zeroTitle = `Issue 60 Task zero ${Date.now()}`
+  const oneTitle = `Issue 60 Task one ${Date.now()}`
+  const multipleTitle = `Issue 60 Task multiple ${Date.now()}`
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+
+  const addTask = async (title: string, noteBodies: string[]) => {
+    await page.getByRole('button', { name: 'タスクを追加' }).click()
+    const dialog = page.getByRole('dialog', { name: 'タスクを追加' })
+    await dialog.getByRole('textbox', { name: 'タイトル' }).fill(title)
+    await dialog
+      .getByRole('combobox', { name: '変更適用範囲' })
+      .selectOption('class')
+    for (const body of noteBodies) {
+      await dialog.getByRole('button', { name: '＋ノートを追加' }).click()
+      const fields = dialog.getByRole('textbox', { name: /ノート本文/ })
+      await fields.nth((await fields.count()) - 1).fill(body)
+    }
+    await dialog.getByRole('button', { name: '下書きを保存' }).click()
+  }
+
+  await addTask(zeroTitle, [])
+  await addTask(oneTitle, ['1件目のTask Note'])
+  await addTask(multipleTitle, ['複数Noteの1件目', '', '複数Noteの2件目'])
+
+  await page.getByRole('button', { name: /変更内容（/ }).click()
+  const review = page.getByRole('dialog', { name: '変更内容' })
+  await review.getByRole('button', { name: '反映を確認' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映' }).click()
+  await expect(
+    page.getByRole('button', { name: 'この日の予定を編集' }),
+  ).toBeVisible()
+  await expect(page.locator('.task-entry').filter({ hasText: multipleTitle })).toHaveCount(1)
+
+  const multipleCard = page.locator('.task-entry').filter({ hasText: multipleTitle })
+  await multipleCard.locator('.task-item').click()
+  const detail = page.getByRole('dialog', { name: 'タスクの詳細' })
+  const relatedNotes = detail.getByRole('button', { name: 'ノートの詳細を開く' })
+  await expect(relatedNotes).toHaveCount(2)
+  await relatedNotes.first().click()
+  const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await expect(noteDetail.getByText('複数Noteの1件目', { exact: true })).toBeVisible()
+  await noteDetail.getByRole('button', { name: 'タスクの詳細に戻る' }).click()
+  await expect(detail).toBeVisible()
+
+  await detail.getByRole('button', { name: '閉じる' }).click()
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await multipleCard.locator('.task-item').click()
+  await page
+    .getByRole('dialog', { name: 'タスクの詳細' })
+    .getByRole('button', { name: '編集', exact: true })
+    .click()
+
+  const editDetail = page.getByRole('dialog', { name: 'タスクを編集' })
+  await expect(editDetail.getByRole('textbox', { name: 'タイトル' })).toHaveValue(multipleTitle)
+  await expect(
+    editDetail.locator('dt').filter({ hasText: '変更適用範囲' }),
+  ).toBeVisible()
+  await expect(editDetail.getByRole('combobox', { name: '変更適用範囲' })).toHaveCount(0)
 })
 
 test('browser back uses the same dirty-input guard and preserves the page scroll position', async ({

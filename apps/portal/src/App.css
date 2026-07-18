@@ -540,6 +540,22 @@ button.period-inspect-button:active {
   background: #fff;
 }
 
+.task-detail-dialog .task-note-list .note-detail-card-whole {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d6dadd;
+  border-radius: var(--radius-sm);
+  background: #f1f3f4;
+  box-sizing: border-box;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.task-detail-dialog .task-note-list .note-detail-card-whole:hover {
+  background: #eceff1;
+}
+
 .task-item span {
   display: grid;
   gap: 4px;
@@ -1188,6 +1204,33 @@ body.page-scroll-locked {
   color: var(--color-primary);
   font-size: 13px;
   font-weight: 700;
+}
+
+.task-note-draft-fields {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.task-note-draft-fields textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+  box-sizing: border-box;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.task-note-add-button {
+  justify-self: start;
+}
+
+.task-edit-context {
+  margin-top: 18px;
 }
 
 .task-editor-dialog form input,

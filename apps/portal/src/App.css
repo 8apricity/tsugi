@@ -1760,6 +1760,23 @@ body.page-scroll-locked {
   padding: 0 48px 0 12px;
 }
 
+.layer-note-list .note-detail-card-whole {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d9dee3;
+  border-radius: var(--radius-sm);
+  background: #f5f6f7;
+  box-sizing: border-box;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.layer-note-list .note-detail-card-whole:hover {
+  border-color: #b7c1ca;
+  background: #eef1f3;
+}
+
 .layer-row-shell.has-menu {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
@@ -2426,6 +2443,10 @@ button.timetable-layer-row {
   height: 18px;
 }
 
+.timetable-removal-toggle {
+  color: #8b3a3a;
+}
+
 .daily-lesson-note-field {
   display: grid;
   gap: 7px;
@@ -2444,6 +2465,44 @@ button.timetable-layer-row {
   font: inherit;
   resize: vertical;
   box-sizing: border-box;
+}
+
+.daily-lesson-note-fields {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.daily-lesson-note-fields legend {
+  padding: 0;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.daily-lesson-note-context {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.daily-lesson-note-context span {
+  display: grid;
+  gap: 2px;
+}
+
+.daily-lesson-note-context strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.note-add-button {
+  justify-self: start;
 }
 
 .editor-fields input,

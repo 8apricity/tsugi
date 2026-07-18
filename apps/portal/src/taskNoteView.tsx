@@ -13,6 +13,7 @@ export type TaskNoteListItem = {
   onEdit?: () => void
   onRemove?: () => void
   onOpenHistory?: () => void
+  onOpenDetail?: () => void
 }
 
 export function TaskNoteList({ notes }: { notes: TaskNoteListItem[] }) {

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { DailyLessonNoteList } from './dailyLessonNoteView'
 
 describe('Daily Lesson Note view', () => {
-  it('renders scope badges and lifecycle actions without attribution or time', () => {
+  it('renders scope badges and removal presentation without attribution or time', () => {
     const html = renderToStaticMarkup(<DailyLessonNoteList notes={[
       {
         noteId: 'grade-note',
@@ -27,7 +27,8 @@ describe('Daily Lesson Note view', () => {
     )
     expect(html).toContain('2年')
     expect(html).toContain('文科')
-    expect(html).toContain('削除予定・要確認')
+    expect(html).toContain('note-removal-glyph')
+    expect(html).not.toContain('削除予定・要確認')
     expect(html).toContain('編集履歴')
     expect(html).not.toContain('<time')
     expect(html).not.toContain('投稿者')

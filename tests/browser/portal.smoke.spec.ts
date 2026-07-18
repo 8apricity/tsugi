@@ -47,6 +47,81 @@ test('a fixed test Student reaches authenticated Daily Plan', async ({
   ).toHaveCount(0)
 })
 
+test('independent Note uses one detail flow for viewing, editing, removal, and history', async ({
+  page,
+}) => {
+  const body = `Issue 59 Note ${Date.now()}`
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: 'ノートを追加' }).click()
+
+  const addDialog = page.getByRole('dialog', { name: 'ノートを追加' })
+  await addDialog.getByRole('textbox', { name: '本文' }).fill(body)
+  await addDialog
+    .getByRole('combobox', { name: '変更適用範囲' })
+    .selectOption('track')
+  await addDialog.getByRole('button', { name: '下書きを保存' }).click()
+
+  await page.getByRole('button', { name: '変更内容（1）' }).click()
+  await page.getByRole('dialog', { name: '変更内容' })
+    .getByRole('button', { name: '反映を確認' })
+    .click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映' }).click()
+  await expect(page.getByRole('article').filter({ hasText: body })).toHaveCount(1)
+
+  const noteCard = page.getByRole('article').filter({ hasText: body })
+  await noteCard.getByRole('button', { name: 'ノートの詳細を開く' }).click()
+
+  const detail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await expect(detail.getByText(body, { exact: true })).toBeVisible()
+  await expect(detail.getByRole('textbox', { name: '本文' })).toHaveCount(0)
+  await detail.getByRole('button', { name: '編集履歴' }).click()
+
+  const history = page.getByRole('dialog', { name: 'ノートの編集履歴' })
+  await expect(history).toBeVisible()
+  await history.getByRole('button', { name: 'ノートの詳細に戻る' }).click()
+  await expect(detail).toBeVisible()
+  await detail.getByRole('button', { name: '閉じる' }).click()
+
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await noteCard.getByRole('button', { name: 'ノートの詳細を開く' }).click()
+  const editDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  const bodyEditor = editDetail.getByRole('textbox', { name: '本文' })
+  await expect(bodyEditor).toBeVisible()
+  const editedBody = `${body}・直接編集`
+  await bodyEditor.fill(editedBody)
+  await expect(bodyEditor).toHaveValue(editedBody)
+  await editDetail.getByRole('button', { name: '下書きを更新' }).click()
+
+  const updatedCard = page.getByRole('article').filter({ hasText: editedBody })
+  await expect(updatedCard).toHaveCount(1)
+  await updatedCard
+    .getByRole('button', { name: 'ノートの詳細を開く' })
+    .click()
+  const removalDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  const removalBodyEditor = removalDetail.getByRole('textbox', { name: '本文' })
+  const removalCheckbox = removalDetail.getByRole('checkbox', {
+    name: '削除予定にする',
+  })
+  await removalCheckbox.check()
+  await expect(removalBodyEditor).toBeDisabled()
+
+  await removalDetail.getByRole('button', { name: '戻る' }).click()
+  const discardDialog = page.getByRole('alertdialog', {
+    name: '入力内容を破棄しますか？',
+  })
+  await expect(discardDialog).toBeVisible()
+  await discardDialog.getByRole('button', { name: '編集を続ける' }).click()
+  await expect(removalBodyEditor).toBeDisabled()
+  await removalDetail.getByRole('button', { name: '下書きを更新' }).click()
+
+  const removalCard = page.getByRole('article').filter({ hasText: body })
+  await expect(removalCard.getByRole('img', { name: '削除対象のノート' })).toBeVisible()
+  await expect(removalCard.getByText('削除予定', { exact: true })).toHaveCount(0)
+})
+
 test('draft lifecycle protects Task input and explains immutable scope', async ({
   page,
   browserName,

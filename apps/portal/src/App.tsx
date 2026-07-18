@@ -108,6 +108,7 @@ import {
 } from "./directChangeReviewView";
 import { buildDirectChangeReviewSummary } from "./directChangeReview";
 import { DialogBody, DialogHeader, DialogSurface } from "./dialogFoundation";
+import { NoteDetailDialog } from "./noteDetailView";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -234,18 +235,31 @@ type TaskHistoryDialog = {
 
 type NoteEditorForm = NewNoteDraftForm & {
   editingNote: DailyPlanNoteForCache | null;
-  editingDraft: NoteDraft | null;
+  editingDraft: (NoteDraft & { conflicted?: boolean }) | null;
+  removalPlanned: boolean;
   relatedTask: {
     taskId: string;
     title: string;
     targetScopeType: TargetScopeType;
   } | null;
+  detailParent: NoteDetailParent | null;
+};
+
+type NoteDetailParent =
+  | { type: "daily-plan" }
+  | { type: "task"; task: VisibleTaskListItem }
+  | { type: "timetable"; dialog: TimetableLayerDialog };
+
+type NoteDetailState = {
+  note: DailyPlanNoteForCache;
+  parent: NoteDetailParent;
 };
 
 type NoteHistoryDialog = {
   note: DailyPlanNoteForCache;
   requestId: number;
   state: NoteEditHistoryState;
+  fromDetail: boolean;
 };
 
 type PendingEditorDismissal = {
@@ -526,6 +540,7 @@ function App() {
   >(() => undefined);
   const [taskDetail, setTaskDetail] =
     useState<VisibleTaskListItem | null>(null);
+  const [noteDetail, setNoteDetail] = useState<NoteDetailState | null>(null);
   const [taskHistoryDialog, setTaskHistoryDialog] =
     useState<TaskHistoryDialog | null>(null);
   const [noteHistoryDialog, setNoteHistoryDialog] =
@@ -562,7 +577,7 @@ function App() {
   const timetableDialogOpen = Boolean(
     timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
       taskEditorForm || noteEditorForm || taskRemovalConfirmation || taskDetail || taskHistoryDialog ||
-      noteHistoryDialog || referencePickerOpen || changeContentOpen ||
+      noteDetail || noteHistoryDialog || referencePickerOpen || changeContentOpen ||
       directChangeReviewOpen || logoutConfirmationOpen,
   );
   const dialogOpenRef = useRef(timetableDialogOpen);
@@ -1359,6 +1374,7 @@ function App() {
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
     setTaskDetail(null);
+    setNoteDetail(null);
     setTaskHistoryDialog(null);
     setNoteHistoryDialog(null);
     setTimetableLayerDialog(null);
@@ -1388,6 +1404,7 @@ function App() {
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setNoteEditorForm(null);
+    setNoteDetail(null);
     setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
@@ -1424,9 +1441,20 @@ function App() {
     setTaskEditorForm(form);
   }
 
-  function openNoteEditorForm(form: NoteEditorForm) {
-    editorInitialFormsRef.current.note = form;
-    setNoteEditorForm(form);
+  function openNoteEditorForm(
+    form: Omit<NoteEditorForm, "detailParent" | "removalPlanned"> & {
+      detailParent?: NoteDetailParent | null;
+      removalPlanned?: boolean;
+    },
+  ) {
+    const nextForm: NoteEditorForm = {
+      ...form,
+      removalPlanned: form.removalPlanned ??
+        form.editingDraft?.changeKind === "remove",
+      detailParent: form.detailParent ?? null,
+    };
+    editorInitialFormsRef.current.note = nextForm;
+    setNoteEditorForm(nextForm);
   }
 
   function clearEditorInitialForms() {
@@ -1481,11 +1509,30 @@ function App() {
     returnToChangeContentIfNeeded();
   }
 
+  function restoreNoteDetailParent(parent: NoteDetailParent) {
+    if (parent.type === "task") {
+      setTaskDetail(parent.task);
+    } else if (parent.type === "timetable") {
+      setTimetableLayerDialog(parent.dialog);
+    }
+  }
+
+  function closeNoteDetailFlow() {
+    const parent = noteDetail?.parent;
+    setNoteDetail(null);
+    if (parent) restoreNoteDetailParent(parent);
+  }
+
   function closeNoteEditorFlow() {
+    const detailParent = noteEditorForm?.detailParent;
     setNoteEditorForm(null);
     editorInitialFormsRef.current.note = null;
     setLessonNameListOpen(false);
     setActiveLessonNameOption(-1);
+    if (detailParent) {
+      restoreNoteDetailParent(detailParent);
+      return;
+    }
     returnToChangeContentIfNeeded();
   }
 
@@ -1909,16 +1956,55 @@ function App() {
       : null;
   }
 
-  function openNoteUpdateEditor(note: DailyPlanNoteForCache) {
-    openNoteEditorForm({
-      body: note.body,
-      schoolDate: noteSchoolDate(note),
-      periodNumber: notePeriodNumber(note),
-      targetScopeType: note.targetScopeType,
-      editingNote: note,
-      editingDraft: null,
-      relatedTask: null,
-    });
+  function noteRelatedContextLabel(
+    note: DailyPlanNoteForCache,
+    parent: NoteDetailParent,
+  ) {
+    const context = note.relatedContext;
+    if (!context) return "なし";
+    if (context.type === "school-date") {
+      return formatUiSchoolDate(context.schoolDate, {
+        referenceSchoolDate: selectedSchoolDate,
+      });
+    }
+    if (context.type === "daily-lesson") {
+      return `${formatUiSchoolDate(context.schoolDate, {
+        referenceSchoolDate: selectedSchoolDate,
+      })}・${context.periodNumber}限`;
+    }
+    if (parent.type === "task") {
+      return `タスク: ${parent.task.task.title}`;
+    }
+    return "タスク内";
+  }
+
+  function openNoteDetail(
+    note: DailyPlanNoteForCache,
+    parent: NoteDetailParent,
+    draft?: NoteDraft,
+  ) {
+    if (parent.type === "task") setTaskDetail(null);
+    if (parent.type === "timetable") setTimetableLayerDialog(null);
+    if (timetableEditor.editing) {
+      openNoteEditorForm({
+        body: draft?.body ?? note.body,
+        schoolDate: noteSchoolDate(note),
+        periodNumber: notePeriodNumber(note),
+        targetScopeType: note.targetScopeType,
+        editingNote: note,
+        editingDraft: draft ?? null,
+        relatedTask: parent.type === "task"
+          ? {
+              taskId: parent.task.task.taskId,
+              title: parent.task.task.title,
+              targetScopeType: parent.task.task.targetScopeType,
+            }
+          : null,
+        detailParent: parent,
+      });
+      return;
+    }
+    setNoteDetail({ note, parent });
   }
 
   function openNoteDraftEditor(draft: NoteDraft) {
@@ -1950,35 +2036,47 @@ function App() {
     });
   }
 
-  function saveNoteRemoveDraft(note: DailyPlanNoteForCache) {
-    const result = timetableEditorClient.saveNoteRemoveDraft({
-      noteId: note.noteId,
-      latestChangeId: note.latestChangeId,
-      body: note.body,
-      schoolDate: noteSchoolDate(note),
-      periodNumber: notePeriodNumber(note),
-      targetScopeType: note.targetScopeType,
-      ...(note.relatedContext?.type === "task"
-        ? { relatedTaskItemId: note.relatedContext.taskId }
-        : {}),
-    });
-    if (result.status === "limit-reached") {
-      setTimetableEditorMessage("下書きは合計50件までです。");
-    }
-  }
-
-  function openNoteHistory(note: DailyPlanNoteForCache) {
+  function openNoteHistoryFrom(note: DailyPlanNoteForCache, fromDetail: boolean) {
     setNoteHistoryDialog({
       note,
       requestId: Date.now(),
       state: { status: "loading" },
+      fromDetail,
     });
   }
 
   function saveNoteDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!noteEditorForm || timetableEditor.submitting) return;
-    const result = noteEditorForm.editingDraft
+    const activeNote = noteEditorForm.editingNote;
+    const result = noteEditorForm.detailParent && activeNote
+      ? noteEditorForm.removalPlanned
+        ? timetableEditorClient.saveNoteRemoveDraft({
+            noteId: activeNote.noteId,
+            latestChangeId: activeNote.latestChangeId,
+            body: activeNote.body,
+            schoolDate: noteSchoolDate(activeNote),
+            periodNumber: notePeriodNumber(activeNote),
+            targetScopeType: activeNote.targetScopeType,
+            ...(activeNote.relatedContext?.type === "task"
+              ? { relatedTaskItemId: activeNote.relatedContext.taskId }
+              : {}),
+          })
+        : timetableEditorClient.saveNoteUpdateDraft(
+            {
+              noteId: activeNote.noteId,
+              latestChangeId: activeNote.latestChangeId,
+              body: activeNote.body,
+              schoolDate: noteSchoolDate(activeNote),
+              periodNumber: notePeriodNumber(activeNote),
+              targetScopeType: activeNote.targetScopeType,
+              ...(activeNote.relatedContext?.type === "task"
+                ? { relatedTaskItemId: activeNote.relatedContext.taskId }
+                : {}),
+            },
+            noteEditorForm.body,
+          )
+      : noteEditorForm.editingDraft
       ? timetableEditorClient.updateNoteDraft(
           noteEditorForm.editingDraft.sourceId,
           noteEditorForm,
@@ -2136,6 +2234,7 @@ function App() {
     },
     activeNotes: DailyPlanNoteForCache[],
     taskRemovalPlanned = false,
+    detailParent?: NoteDetailParent,
   ) {
     const items = buildVisibleTaskNoteList(
       activeNotes,
@@ -2153,12 +2252,11 @@ function App() {
           conflicted: note.conflicted,
           onCancelDraft: () =>
             timetableEditorClient.removeNoteDraft(note.sourceId),
-          onEdit: note.changeKind === "remove"
-            ? undefined
-            : () => openTaskNoteEditor(task, undefined, note),
-          onOpenHistory: item.activeNote
-            ? () => openNoteHistory(item.activeNote!)
-          : undefined,
+          onEdit: undefined,
+          onOpenHistory: undefined,
+          onOpenDetail: detailParent && item.activeNote
+            ? () => openNoteDetail(item.activeNote!, detailParent, note)
+            : undefined,
         };
       }
       if (item.type === "cascade-removal") {
@@ -2169,20 +2267,19 @@ function App() {
           draft: true,
           changeKind: "remove" as const,
           removalReason: "task-cascade" as const,
-          onOpenHistory: () => openNoteHistory(note),
+          onOpenHistory: undefined,
         };
       }
       const note = item.note;
       return {
         noteId: note.noteId,
         body: note.body,
-        onEdit: timetableEditor.editing
-          ? () => openTaskNoteEditor(task, note)
+        onEdit: undefined,
+        onRemove: undefined,
+        onOpenHistory: undefined,
+        onOpenDetail: detailParent
+          ? () => openNoteDetail(note, detailParent)
           : undefined,
-        onRemove: timetableEditor.editing
-          ? () => saveNoteRemoveDraft(note)
-          : undefined,
-        onOpenHistory: () => openNoteHistory(note),
       };
     });
     return <TaskNoteList notes={items} />;
@@ -2195,6 +2292,7 @@ function App() {
     scopeContext: TargetScopeDisplayContext | undefined,
     targetScopeType?: TargetScopeType,
     className?: string,
+    detailParent?: NoteDetailParent,
   ) {
     const items = buildVisibleDailyLessonNoteList(
       activeNotes,
@@ -2214,11 +2312,10 @@ function App() {
           conflicted: note.conflicted,
           onCancelDraft: () =>
             timetableEditorClient.removeNoteDraft(note.sourceId),
-          onEdit: note.changeKind === "remove"
-            ? undefined
-            : () => openNoteDraftEditor(note),
-          onOpenHistory: item.activeNote
-            ? () => openNoteHistory(item.activeNote!)
+          onEdit: undefined,
+          onOpenHistory: undefined,
+          onOpenDetail: detailParent && item.activeNote
+            ? () => openNoteDetail(item.activeNote!, detailParent, note)
             : undefined,
         };
       }
@@ -2227,13 +2324,12 @@ function App() {
         noteId: note.noteId,
         body: note.body,
         targetScopeLabel: scopeLabel(note.targetScopeType, scopeContext),
-        onEdit: timetableEditor.editing
-          ? () => openNoteUpdateEditor(note)
+        onEdit: undefined,
+        onRemove: undefined,
+        onOpenHistory: undefined,
+        onOpenDetail: detailParent
+          ? () => openNoteDetail(note, detailParent)
           : undefined,
-        onRemove: timetableEditor.editing
-          ? () => saveNoteRemoveDraft(note)
-          : undefined,
-        onOpenHistory: () => openNoteHistory(note),
       };
     });
     return <DailyLessonNoteList notes={items} className={className} />;
@@ -2454,11 +2550,16 @@ function App() {
   function handleBrowserBack() {
     if (pendingEditorDismissal) return true;
 
+    if (noteHistoryDialog) {
+      setNoteHistoryDialog(null);
+      return noteHistoryDialog.fromDetail;
+    }
+
     if (noteEditorForm) {
       const returnsToChangeContent = changeContentReturnRef.current;
       if (requestEditorDismissal("note", "back")) return true;
       closeNoteEditorFlow();
-      return returnsToChangeContent;
+      return Boolean(noteEditorForm.detailParent) || returnsToChangeContent;
     }
 
     if (taskEditorForm) {
@@ -2486,11 +2587,6 @@ function App() {
       return true;
     }
 
-    if (noteHistoryDialog) {
-      setNoteHistoryDialog(null);
-      return false;
-    }
-
     if (timetableHistoryDialog) {
       if (timetableHistoryDialog.detail) {
         setTimetableHistoryDialog((current) =>
@@ -2511,6 +2607,12 @@ function App() {
     if (taskDetail) {
       setTaskDetail(null);
       return false;
+    }
+
+    if (noteDetail) {
+      const hasParent = noteDetail.parent.type !== "daily-plan";
+      closeNoteDetailFlow();
+      return hasParent;
     }
 
     if (referencePickerOpen) {
@@ -3309,11 +3411,15 @@ function App() {
                           onCancelDraft={() =>
                             timetableEditorClient.removeNoteDraft(note.sourceId)
                           }
-                          onEdit={note.changeKind === "remove"
+                          onEdit={item.activeNote || note.changeKind === "remove"
                             ? undefined
                             : () => openNoteDraftEditor(note)}
-                          onOpenHistory={item.activeNote
-                            ? () => openNoteHistory(item.activeNote!)
+                          onOpenDetail={item.activeNote
+                            ? () => openNoteDetail(
+                                item.activeNote!,
+                                { type: "daily-plan" },
+                                note,
+                              )
                             : undefined}
                         />
                           );
@@ -3328,13 +3434,8 @@ function App() {
                               note.targetScopeType,
                               targetScopeContext,
                             )}
-                            onEdit={timetableEditor.editing
-                              ? () => openNoteUpdateEditor(note)
-                              : undefined}
-                            onRemove={timetableEditor.editing
-                              ? () => saveNoteRemoveDraft(note)
-                              : undefined}
-                            onOpenHistory={() => openNoteHistory(note)}
+                            onOpenDetail={() =>
+                              openNoteDetail(note, { type: "daily-plan" })}
                           />
                         );
                       });
@@ -3593,7 +3694,39 @@ function App() {
             </div>
           ) : null}
 
-          {noteEditorForm ? (
+          {noteEditorForm?.detailParent && noteEditorForm.editingNote ? (
+            <NoteDetailDialog
+              mode="edit"
+              body={noteEditorForm.body}
+              targetScopeLabel={scopeLabel(
+                noteEditorForm.editingNote.targetScopeType,
+                targetScopeContext,
+              )}
+              relatedContextLabel={noteRelatedContextLabel(
+                noteEditorForm.editingNote,
+                noteEditorForm.detailParent,
+              )}
+              draftLifecycle={noteEditorForm.editingDraft
+                ? {
+                    kind: noteEditorForm.editingDraft.changeKind,
+                    conflicted: Boolean(noteEditorForm.editingDraft.conflicted),
+                  }
+                : undefined}
+              removalPlanned={noteEditorForm.removalPlanned}
+              saveLabel={noteEditorForm.editingDraft?.changeKind === "add"
+                ? editorActionLabel("add")
+                : editorActionLabel("update")}
+              onBack={requestNoteEditorClose}
+              onBodyChange={(body) => setNoteEditorForm((current) =>
+                current ? { ...current, body } : current)}
+              onRemovalChange={(removalPlanned) =>
+                setNoteEditorForm((current) =>
+                  current ? { ...current, removalPlanned } : current)}
+              onOpenHistory={() =>
+                openNoteHistoryFrom(noteEditorForm.editingNote!, true)}
+              onSave={saveNoteDraft}
+            />
+          ) : noteEditorForm ? (
             <DialogSurface
               className={`editor-dialog-form-surface note-editor-dialog${
                 noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
@@ -4070,6 +4203,29 @@ function App() {
             </DialogSurface>
           ) : null}
 
+          {noteDetail ? (
+            <NoteDetailDialog
+              mode="view"
+              body={noteDetail.note.body}
+              targetScopeLabel={scopeLabel(
+                noteDetail.note.targetScopeType,
+                targetScopeContext,
+              )}
+              relatedContextLabel={noteRelatedContextLabel(
+                noteDetail.note,
+                noteDetail.parent,
+              )}
+              backLabel={noteDetail.parent.type === "task"
+                ? "タスクの詳細に戻る"
+                : noteDetail.parent.type === "timetable"
+                  ? "時間割の変更状況に戻る"
+                  : "戻る"}
+              onBack={closeNoteDetailFlow}
+              onOpenHistory={() =>
+                openNoteHistoryFrom(noteDetail.note, true)}
+            />
+          ) : null}
+
           {taskDetail ? (
             <TaskDetailDialog
               task={taskDetail.task}
@@ -4089,6 +4245,7 @@ function App() {
                 taskDetail.task.notes,
                 taskDetail.type === "draft" &&
                   taskDetail.draft.changeKind === "remove",
+                { type: "task", task: taskDetail },
               )}
               addNoteDisabled={
                 timetableEditor.atLimit || timetableEditor.submitting
@@ -4167,6 +4324,9 @@ function App() {
             <NoteEditHistoryDialog
               targetScopeContext={targetScopeContext}
               state={noteHistoryDialog.state}
+              onBack={noteHistoryDialog.fromDetail
+                ? () => setNoteHistoryDialog(null)
+                : undefined}
               onClose={() => setNoteHistoryDialog(null)}
               onRetry={() => setNoteHistoryDialog((current) =>
                 current ? {
@@ -4527,6 +4687,7 @@ function App() {
                         targetScopeContext,
                         layer.targetScopeType,
                         "layer-note-list",
+                        { type: "timetable", dialog: timetableLayerDialog },
                       )}
                       </div>
                       );

@@ -11,6 +11,7 @@ export type DailyLessonNoteListItem = {
   onEdit?: () => void
   onRemove?: () => void
   onOpenHistory?: () => void
+  onOpenDetail?: () => void
 }
 
 export function DailyLessonNoteList({

@@ -602,6 +602,44 @@ describe('Shared Information editor client', () => {
     })
   })
 
+  it('supports Note detail Body edits and removal-checkbox transitions', () => {
+    const activeNote = {
+      noteId: 'note-detail-1',
+      latestChangeId: 'note-detail-change-1',
+      body: '元の本文',
+      schoolDate: '2026-07-10',
+      periodNumber: null,
+      targetScopeType: 'track' as const,
+    }
+    const editor = createTimetableEditorClient({ storage: memoryStorage() })
+
+    expect(editor.saveNoteUpdateDraft(activeNote, '詳細で編集した本文'))
+      .toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot()).toMatchObject({
+      noteDrafts: [{
+        changeKind: 'update',
+        sharedInformationItemId: activeNote.noteId,
+        body: '詳細で編集した本文',
+      }],
+    })
+
+    expect(editor.saveNoteRemoveDraft(activeNote)).toMatchObject({
+      status: 'saved',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      noteDrafts: [{
+        changeKind: 'remove',
+        sharedInformationItemId: activeNote.noteId,
+        body: activeNote.body,
+      }],
+    })
+
+    expect(editor.saveNoteUpdateDraft(activeNote, activeNote.body)).toEqual({
+      status: 'removed-noop',
+    })
+    expect(editor.getSnapshot().noteDrafts).toEqual([])
+  })
+
   it('retains and marks a Task draft after an idempotency conflict', async () => {
     const sourceId = '33000000-0000-4000-8000-000000000201'
     const storage = memoryStorage()

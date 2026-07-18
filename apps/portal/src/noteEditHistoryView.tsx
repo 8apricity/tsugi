@@ -14,11 +14,13 @@ export type NoteEditHistoryState =
 export function NoteEditHistoryDialog({
   state,
   targetScopeContext,
+  onBack,
   onClose,
   onRetry,
 }: {
   state: NoteEditHistoryState
   targetScopeContext?: TargetScopeDisplayContext
+  onBack?: () => void
   onClose: () => void
   onRetry: () => void
 }) {
@@ -31,6 +33,16 @@ export function NoteEditHistoryDialog({
         aria-labelledby="note-history-title"
       >
         <header className="editor-dialog-header">
+          {onBack ? (
+            <button
+              className="icon-button dialog-back-button"
+              type="button"
+              aria-label="ノートの詳細に戻る"
+              onClick={onBack}
+            >
+              ‹
+            </button>
+          ) : null}
           <h2 id="note-history-title">ノートの編集履歴</h2>
           <button
             className="icon-button"

@@ -154,6 +154,35 @@ describe('Shared Information editor client', () => {
     })
   })
 
+  it('keeps persisted drafts inside one Student Account workspace and clears that workspace on logout', () => {
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({
+      storage,
+      draftStorageScope: null,
+    })
+    editor.setDraftStorageScope('student-a')
+    editor.saveTaskDraft({
+      title: '提出物',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track',
+    })
+
+    editor.setDraftStorageScope('student-b')
+    expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
+
+    editor.setDraftStorageScope('student-a')
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 1,
+      taskDrafts: [{ title: '提出物' }],
+    })
+
+    editor.reset()
+    editor.setDraftStorageScope('student-b')
+    editor.setDraftStorageScope('student-a')
+    expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
+  })
+
   it('coexists Note, Task, and Timetable Change drafts in one submitted batch', async () => {
     const ids = [
       '33000000-0000-4000-8000-000000000101',

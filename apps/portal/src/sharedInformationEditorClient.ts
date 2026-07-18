@@ -369,11 +369,13 @@ export function normalizeDirectLessonReplacement(
 export function createSharedInformationEditorClient({
   storage,
   createId = () => crypto.randomUUID(),
+  draftStorageScope,
   submitDirectChanges,
   submitDirectTimetableChanges,
 }: {
   storage: StorageLike
   createId?: () => string
+  draftStorageScope?: string | null
   submitDirectChanges?: SubmitDirectChanges
   /** @deprecated Use submitDirectChanges. */
   submitDirectTimetableChanges?: SubmitDirectChanges
@@ -383,7 +385,8 @@ export function createSharedInformationEditorClient({
   if (!submitDirectChangesTransport) {
     throw new Error('submitDirectChanges is required')
   }
-  const restored = restore(storage)
+  let activeDraftStorageScope = draftStorageScope
+  const restored = restore(storage, currentStorageKey())
   let editing = restored.editing
   let lastTargetScopeType = restored.lastTargetScopeType
   let drafts = restored.drafts
@@ -404,6 +407,34 @@ export function createSharedInformationEditorClient({
   const reconciledKeys = new Set<string>()
   let snapshot = buildSnapshot()
   const listeners = new Set<() => void>()
+
+  function currentStorageKey() {
+    if (activeDraftStorageScope === null) return null
+    return activeDraftStorageScope === undefined
+      ? storageKey
+      : `${storageKey}:${encodeURIComponent(activeDraftStorageScope)}`
+  }
+
+  function restoreCurrentDraftStorage() {
+    const restored = restore(storage, currentStorageKey())
+    editing = restored.editing
+    lastTargetScopeType = restored.lastTargetScopeType
+    drafts = restored.drafts
+    taskDrafts = restored.taskDrafts
+    noteDrafts = restored.noteDrafts
+    taskConflictSourceIds.clear()
+    restored.taskConflictSourceIds.forEach((sourceId) => {
+      taskConflictSourceIds.add(sourceId)
+    })
+    noteConflictSourceIds.clear()
+    restored.noteConflictSourceIds.forEach((sourceId) => {
+      noteConflictSourceIds.add(sourceId)
+    })
+    lastCommitFailed = false
+    conflictKeys.clear()
+    stickyConflictKeys.clear()
+    reconciledKeys.clear()
+  }
 
   function totalDraftCount() {
     return drafts.length + taskDrafts.length + noteDrafts.length
@@ -449,18 +480,21 @@ export function createSharedInformationEditorClient({
 
   function publish() {
     snapshot = buildSnapshot()
-    storage.setItem(
-      storageKey,
-      JSON.stringify({
-        editing,
-        lastTargetScopeType,
-        drafts,
-        taskDrafts,
-        noteDrafts,
-        taskConflictSourceIds: [...taskConflictSourceIds],
-        noteConflictSourceIds: [...noteConflictSourceIds],
-      }),
-    )
+    const currentKey = currentStorageKey()
+    if (currentKey) {
+      storage.setItem(
+        currentKey,
+        JSON.stringify({
+          editing,
+          lastTargetScopeType,
+          drafts,
+          taskDrafts,
+          noteDrafts,
+          taskConflictSourceIds: [...taskConflictSourceIds],
+          noteConflictSourceIds: [...noteConflictSourceIds],
+        }),
+      )
+    }
     listeners.forEach((listener) => listener())
   }
 
@@ -527,7 +561,8 @@ export function createSharedInformationEditorClient({
     stickyConflictKeys.clear()
     reconciledKeys.clear()
     lastTargetScopeType = 'track'
-    storage.removeItem(storageKey)
+    const currentKey = currentStorageKey()
+    if (currentKey) storage.removeItem(currentKey)
     snapshot = buildSnapshot()
     listeners.forEach((listener) => listener())
   }
@@ -616,6 +651,18 @@ export function createSharedInformationEditorClient({
       activeFreshnessController = null
       loadedServerLayers.clear()
       clearEditorState()
+    },
+    setDraftStorageScope(nextScope: string | null) {
+      if (activeDraftStorageScope === nextScope) return
+      lifecycleGeneration += 1
+      submitting = false
+      activeFreshnessController?.abort()
+      activeFreshnessController = null
+      loadedServerLayers.clear()
+      activeDraftStorageScope = nextScope
+      restoreCurrentDraftStorage()
+      snapshot = buildSnapshot()
+      listeners.forEach((listener) => listener())
     },
     reconcileLayerState(state: TimetableLayerState) {
       applyLayerState(state)
@@ -1446,7 +1493,8 @@ export function createSharedInformationEditorClient({
       noteConflictSourceIds.clear()
       stickyConflictKeys.clear()
       reconciledKeys.clear()
-      storage.removeItem(storageKey)
+      const currentKey = currentStorageKey()
+      if (currentKey) storage.removeItem(currentKey)
       snapshot = buildSnapshot()
       listeners.forEach((listener) => listener())
       if (generation !== lifecycleGeneration) {
@@ -1614,7 +1662,7 @@ function toNoteSubmissionChange(draft: NoteDraft): NoteSubmissionChange {
       }
 }
 
-function restore(storage: StorageLike): {
+function restore(storage: StorageLike, key: string | null): {
   editing: boolean
   lastTargetScopeType: TargetScopeType
   drafts: TimetableChangeDraft[]
@@ -1624,7 +1672,8 @@ function restore(storage: StorageLike): {
   noteConflictSourceIds: string[]
 } {
   try {
-    const value = storage.getItem(storageKey)
+    if (!key) throw new Error('no storage scope')
+    const value = storage.getItem(key)
     if (!value) throw new Error('empty')
     const parsed = JSON.parse(value) as Record<string, unknown>
     const drafts = Array.isArray(parsed.drafts)

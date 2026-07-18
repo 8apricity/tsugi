@@ -734,8 +734,17 @@ button.period-inspect-button:active {
   font-size: 14px;
   font-weight: 700;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
-  pointer-events: none;
   transform: translateX(-50%);
+}
+
+.timetable-editor-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.timetable-editor-toast-action {
+  color: var(--color-accent);
 }
 
 .editor-dialog-backdrop {
@@ -934,6 +943,81 @@ body.page-scroll-locked {
   margin: 24px 22px;
   color: var(--color-muted);
   text-align: center;
+}
+
+.change-content-conflict-notice {
+  margin: 16px 22px 0;
+  padding: 10px 12px;
+  border: 1px solid #c8902f;
+  border-radius: var(--radius-sm);
+  background: #fff8e6;
+  color: #7a5100;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.change-content-actions {
+  justify-content: flex-end;
+  margin: 16px 22px 0;
+}
+
+.direct-change-review-dialog,
+.draft-logout-dialog {
+  width: min(480px, 100%);
+  padding: 22px;
+  box-sizing: border-box;
+}
+
+.direct-change-review-dialog .editor-dialog-header,
+.draft-logout-dialog .editor-dialog-header {
+  align-items: start;
+}
+
+.direct-change-review-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 22px 0;
+}
+
+.direct-change-review-counts div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #f8fafb;
+}
+
+.direct-change-review-counts dt {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.direct-change-review-counts dd {
+  margin: 0;
+  color: var(--color-primary);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.direct-change-review-warning,
+.draft-logout-dialog > p {
+  margin: 0 0 22px;
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.direct-change-review-warning {
+  padding: 10px 12px;
+  border: 1px solid #c8902f;
+  border-radius: var(--radius-sm);
+  background: #fff8e6;
+  color: #7a5100;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .task-editor-dialog .editor-dialog-header,

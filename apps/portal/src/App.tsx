@@ -100,6 +100,12 @@ import {
   ImmutableFieldNotice,
   LifecycleIcon,
 } from "./editorLifecycleView";
+import {
+  DirectChangeReviewDialog,
+  DraftLogoutConfirmationDialog,
+  StaleDirectChangeRefreshAction,
+} from "./directChangeReviewView";
+import { buildDirectChangeReviewSummary } from "./directChangeReview";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -468,6 +474,7 @@ function App() {
   const [timetableEditorClient] = useState(() =>
     createSharedInformationEditorClient({
       storage: window.localStorage,
+      draftStorageScope: null,
       submitDirectChanges:
         createSharedInformationDirectChangeTransport(),
     }),
@@ -498,6 +505,10 @@ function App() {
   const [pendingEditorDismissal, setPendingEditorDismissal] =
     useState<PendingEditorDismissal | null>(null);
   const [changeContentOpen, setChangeContentOpen] = useState(false);
+  const [directChangeReviewOpen, setDirectChangeReviewOpen] = useState(false);
+  const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
+  const [timetableEditorRefreshNeeded, setTimetableEditorRefreshNeeded] =
+    useState(false);
   const changeContentReturnRef = useRef(false);
   const pendingChangeContentTimetableRef =
     useRef<PendingChangeContentTimetable | null>(null);
@@ -542,7 +553,8 @@ function App() {
   const timetableDialogOpen = Boolean(
     timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
       taskEditorForm || noteEditorForm || taskRemovalConfirmation || taskDetail || taskHistoryDialog ||
-      noteHistoryDialog || referencePickerOpen || changeContentOpen,
+      noteHistoryDialog || referencePickerOpen || changeContentOpen ||
+      directChangeReviewOpen || logoutConfirmationOpen,
   );
 
   useEffect(() => {
@@ -552,14 +564,14 @@ function App() {
   }, [timetableDialogOpen]);
 
   useEffect(() => {
-    if (!timetableEditorMessage) return;
+    if (!timetableEditorMessage || timetableEditorRefreshNeeded) return;
 
     const timeoutId = window.setTimeout(() => {
       setTimetableEditorMessage(null);
     }, 4000);
 
     return () => window.clearTimeout(timeoutId);
-  }, [timetableEditorMessage]);
+  }, [timetableEditorMessage, timetableEditorRefreshNeeded]);
 
   useEffect(() => {
     if (!lessonNameListOpen || activeLessonNameOption < 0) return;
@@ -621,6 +633,10 @@ function App() {
       }
     });
   }, [dailyPlanClient]);
+
+  useEffect(() => {
+    timetableEditorClient.setDraftStorageScope(studentAccount?.schoolEmail ?? null);
+  }, [studentAccount, timetableEditorClient]);
 
   useEffect(() => {
     if (status !== "authenticated" || !studentAccount) {
@@ -1244,8 +1260,18 @@ function App() {
     );
   }
 
+  function requestLogout() {
+    setMenuOpen(false);
+    if (timetableEditor.draftCount > 0) {
+      setLogoutConfirmationOpen(true);
+      return;
+    }
+    void logout();
+  }
+
   async function logout() {
-    await fetch("/api/auth/session", { method: "DELETE" });
+    setLogoutConfirmationOpen(false);
+    await fetch("/api/auth/session", { method: "DELETE" }).catch(() => undefined);
     setStudentAccount(null);
     setSchoolEmail(null);
     setSetupSchoolEmail(null);
@@ -1271,6 +1297,8 @@ function App() {
     setReferenceScope(null);
     setMenuOpen(false);
     setChangeContentOpen(false);
+    setDirectChangeReviewOpen(false);
+    setTimetableEditorRefreshNeeded(false);
     changeContentReturnRef.current = false;
     pendingChangeContentTimetableRef.current = null;
     setStatus("idle");
@@ -1291,6 +1319,7 @@ function App() {
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
     setChangeContentOpen(false);
+    setDirectChangeReviewOpen(false);
     changeContentReturnRef.current = false;
     pendingChangeContentTimetableRef.current = null;
     setTimetableEditorMessage(null);
@@ -2504,32 +2533,22 @@ function App() {
     });
   }
 
+  function openDirectChangeReview() {
+    if (
+      timetableEditor.submitting ||
+      timetableEditor.draftCount === 0 ||
+      timetableEditor.conflictCount > 0
+    ) return;
+    setChangeContentOpen(false);
+    setDirectChangeReviewOpen(true);
+  }
+
   async function commitTimetableDrafts() {
-    const currentDailyPlanState = dailyPlanClient.getSnapshot().dailyPlanState;
-    const targetScopeContext = currentDailyPlanState.status === "ready"
-      ? currentDailyPlanState.dailyPlan.studentAffiliation
-      : undefined;
+    setDirectChangeReviewOpen(false);
+    setTimetableEditorRefreshNeeded(false);
+    setTimetableEditorMessage("変更を反映しています…");
     const result = await timetableEditorClient.submitCurrentBatch({
-      confirmSubmission: ({ changes }) => {
-        const summary = changes
-          .map((draft) =>
-            "changeDate" in draft
-              ? `${formatUiSchoolDate(draft.changeDate, { referenceSchoolDate: selectedSchoolDate })} ${draft.periodNumber}限 / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / ${draft.changeKind === "remove" ? "削除" : replacementLabel(draft.replacement)}`
-              : draft.kind === "note"
-                ? draft.changeKind === "remove"
-                  ? `ノート / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / 削除`
-                  : `ノート / ${draft.changeKind === "add" ? draft.schoolDate ? formatUiSchoolDate(draft.schoolDate, { referenceSchoolDate: selectedSchoolDate }) : "日付なし" : "本文更新"} / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / ${draft.body}`
-              : draft.changeKind === "remove"
-                ? `タスク / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / 削除`
-                : `タスク / ${scopeLabel(draft.targetScopeType, targetScopeContext)} / ${draft.title} / ${formatTaskDueLabel(draft.dueDate, selectedSchoolDate)}`,
-          )
-          .join("\n");
-        const confirmed = window.confirm(
-          `${changes.length}件の変更を強制的に反映します。よろしいですか？\n\n${summary}`,
-        );
-        if (confirmed) setTimetableEditorMessage("変更を反映しています…");
-        return confirmed;
-      },
+      confirmSubmission: () => true,
       applyFreshness: async (effect) => {
         timetableLayerCacheRef.current.clear();
         const timetableKeys = effect.type === "applied"
@@ -2559,7 +2578,7 @@ function App() {
     if (result.status === "already-submitting") return;
     if (result.status === "network-error") {
       setTimetableEditorMessage(
-        "ネットワークに接続できません。下書きはこの端末に保存されています。",
+        "ネットワークに接続できません。下書きはこの端末に保存されています。変更内容からもう一度お試しください。",
       );
       return;
     }
@@ -2575,6 +2594,7 @@ function App() {
       return;
     }
     if (result.status === "applied") {
+      setTimetableEditorRefreshNeeded(result.freshness === "stale");
       setTimetableEditorMessage(
         result.freshness === "stale"
           ? "変更は反映されましたが、最新の表示を読み込めませんでした。再読み込みしてください。"
@@ -2803,7 +2823,7 @@ function App() {
                       自分の予定に戻る
                     </button>
                   ) : null}
-                  <button className="menu-item" type="button" onClick={logout}>
+                  <button className="menu-item" type="button" onClick={requestLogout}>
                     ログアウト
                   </button>
                 </div>
@@ -2840,7 +2860,12 @@ function App() {
 
           {timetableEditorMessage ? (
             <div className="timetable-editor-toast" role="status">
-              {timetableEditorMessage}
+              <span>{timetableEditorMessage}</span>
+              {timetableEditorRefreshNeeded ? (
+                <StaleDirectChangeRefreshAction
+                  onReload={() => window.location.reload()}
+                />
+              ) : null}
             </div>
           ) : null}
 
@@ -3212,18 +3237,6 @@ function App() {
                     >
                       変更内容（{timetableEditor.draftCount}）
                     </button>
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      disabled={
-                        timetableEditor.submitting ||
-                        timetableEditor.draftCount === 0 ||
-                        timetableEditor.conflictCount > 0
-                      }
-                      onClick={() => void commitTimetableDrafts()}
-                    >
-                      変更を反映 ({timetableEditor.draftCount})
-                    </button>
                   </>
                 ) : null}
                 <button
@@ -3292,7 +3305,55 @@ function App() {
                     {changeContentItems.map(changeContentItemView)}
                   </ol>
                 )}
+                {timetableEditor.conflictCount > 0 ? (
+                  <p className="change-content-conflict-notice" role="alert">
+                    ほかの変更と重なっている下書きがあります。確認してから編集し直してください。
+                  </p>
+                ) : null}
+                <footer className="editor-dialog-actions change-content-actions">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    disabled={
+                      timetableEditor.submitting ||
+                      timetableEditor.draftCount === 0 ||
+                      timetableEditor.conflictCount > 0
+                    }
+                    onClick={openDirectChangeReview}
+                  >
+                    反映を確認
+                  </button>
+                </footer>
               </section>
+            </div>
+          ) : null}
+
+          {directChangeReviewOpen ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <DirectChangeReviewDialog
+                summary={buildDirectChangeReviewSummary({
+                  timetableDraftCount: timetableEditor.drafts.length,
+                  taskDraftCount: timetableEditor.taskDrafts.length,
+                  noteDraftCount: timetableEditor.noteDrafts.length,
+                })}
+                submitting={timetableEditor.submitting}
+                conflictCount={timetableEditor.conflictCount}
+                onBack={() => {
+                  setDirectChangeReviewOpen(false);
+                  setChangeContentOpen(true);
+                }}
+                onApply={() => void commitTimetableDrafts()}
+              />
+            </div>
+          ) : null}
+
+          {logoutConfirmationOpen ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <DraftLogoutConfirmationDialog
+                draftCount={timetableEditor.draftCount}
+                onBack={() => setLogoutConfirmationOpen(false)}
+                onLogout={() => void logout()}
+              />
             </div>
           ) : null}
 

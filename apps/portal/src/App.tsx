@@ -107,6 +107,7 @@ import {
   StaleDirectChangeRefreshAction,
 } from "./directChangeReviewView";
 import { buildDirectChangeReviewSummary } from "./directChangeReview";
+import { DialogBody, DialogHeader, DialogSurface } from "./dialogFoundation";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -564,11 +565,74 @@ function App() {
       noteHistoryDialog || referencePickerOpen || changeContentOpen ||
       directChangeReviewOpen || logoutConfirmationOpen,
   );
+  const dialogOpenRef = useRef(timetableDialogOpen);
+  const dialogHistoryActiveRef = useRef(false);
+  const ignoreDialogPopStateRef = useRef(false);
+  const browserBackHandlerRef = useRef<() => boolean>(() => false);
+  const [dialogHistoryRevision, setDialogHistoryRevision] = useState(0);
 
   useEffect(() => {
     if (!timetableDialogOpen) return;
 
     return lockPageScroll(document);
+  }, [timetableDialogOpen]);
+
+  useEffect(() => {
+    dialogOpenRef.current = timetableDialogOpen;
+  }, [timetableDialogOpen]);
+
+  useEffect(() => {
+    if (!timetableDialogOpen) {
+      const shouldRemoveHistoryEntry =
+        dialogHistoryActiveRef.current && window.history.state?.tsugiDialog;
+      dialogHistoryActiveRef.current = false;
+      if (shouldRemoveHistoryEntry) {
+        ignoreDialogPopStateRef.current = true;
+        window.history.back();
+      }
+      return;
+    }
+    if (dialogHistoryActiveRef.current) return;
+    window.history.pushState(
+      {
+        ...(window.history.state && typeof window.history.state === "object"
+          ? window.history.state
+          : {}),
+        tsugiDialog: true,
+      },
+      "",
+      window.location.href,
+    );
+    dialogHistoryActiveRef.current = true;
+  }, [dialogHistoryRevision, timetableDialogOpen]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (ignoreDialogPopStateRef.current) {
+        ignoreDialogPopStateRef.current = false;
+        return;
+      }
+      if (!dialogOpenRef.current) return;
+      dialogHistoryActiveRef.current = false;
+      browserBackHandlerRef.current();
+      setDialogHistoryRevision((revision) => revision + 1);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (!timetableDialogOpen) return;
+
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      browserBackHandlerRef.current();
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
   }, [timetableDialogOpen]);
 
   useEffect(() => {
@@ -2387,6 +2451,94 @@ function App() {
     else closeTimetableEditorBack();
   }
 
+  function handleBrowserBack() {
+    if (pendingEditorDismissal) return true;
+
+    if (noteEditorForm) {
+      const returnsToChangeContent = changeContentReturnRef.current;
+      if (requestEditorDismissal("note", "back")) return true;
+      closeNoteEditorFlow();
+      return returnsToChangeContent;
+    }
+
+    if (taskEditorForm) {
+      const returnsToChangeContent = changeContentReturnRef.current;
+      if (requestEditorDismissal("task", "back")) return true;
+      closeTaskEditorFlow();
+      return returnsToChangeContent;
+    }
+
+    if (timetableEditorForm) {
+      const hadParentDialog = Boolean(timetableLayerDialog || timetableHistoryDialog);
+      if (requestEditorDismissal("timetable", "back")) return true;
+      closeTimetableEditorBack();
+      return hadParentDialog || changeContentReturnRef.current;
+    }
+
+    if (taskRemovalConfirmation) {
+      setTaskRemovalConfirmation(null);
+      return Boolean(taskDetail);
+    }
+
+    if (taskHistoryDialog) {
+      setTaskDetail({ type: "active", task: taskHistoryDialog.task });
+      setTaskHistoryDialog(null);
+      return true;
+    }
+
+    if (noteHistoryDialog) {
+      setNoteHistoryDialog(null);
+      return false;
+    }
+
+    if (timetableHistoryDialog) {
+      if (timetableHistoryDialog.detail) {
+        setTimetableHistoryDialog((current) =>
+          current ? { ...current, detail: null } : current,
+        );
+        return true;
+      }
+      setTimetableHistoryDialog(null);
+      return Boolean(timetableLayerDialog);
+    }
+
+    if (timetableLayerDialog) {
+      const returnsToChangeContent = changeContentReturnRef.current;
+      closeTimetableDialogFlow();
+      return returnsToChangeContent;
+    }
+
+    if (taskDetail) {
+      setTaskDetail(null);
+      return false;
+    }
+
+    if (referencePickerOpen) {
+      setReferencePickerOpen(false);
+      return false;
+    }
+
+    if (directChangeReviewOpen) {
+      setDirectChangeReviewOpen(false);
+      setChangeContentOpen(true);
+      return true;
+    }
+
+    if (changeContentOpen) {
+      setChangeContentOpen(false);
+      return false;
+    }
+
+    if (logoutConfirmationOpen) {
+      setLogoutConfirmationOpen(false);
+      return false;
+    }
+
+    return false;
+  }
+
+  browserBackHandlerRef.current = handleBrowserBack;
+
   function discardUnsavedEditorInput() {
     const pending = pendingEditorDismissal;
     if (!pending) return;
@@ -3303,34 +3455,36 @@ function App() {
                     ×
                   </button>
                 </header>
-                {changeContentItems.length === 0 ? (
-                  <p className="change-content-empty">
-                    変更内容はありません。
-                  </p>
-                ) : (
-                  <ol className="change-content-list" aria-label="変更内容一覧">
-                    {changeContentItems.map(changeContentItemView)}
-                  </ol>
-                )}
-                {timetableEditor.conflictCount > 0 ? (
-                  <p className="change-content-conflict-notice" role="alert">
-                    ほかの変更と重なっている下書きがあります。確認してから編集し直してください。
-                  </p>
-                ) : null}
-                <footer className="editor-dialog-actions change-content-actions">
-                  <button
-                    className="button-secondary"
-                    type="button"
-                    disabled={
-                      timetableEditor.submitting ||
-                      timetableEditor.draftCount === 0 ||
-                      timetableEditor.conflictCount > 0
-                    }
-                    onClick={openDirectChangeReview}
-                  >
-                    反映を確認
-                  </button>
-                </footer>
+                <DialogBody>
+                  {changeContentItems.length === 0 ? (
+                    <p className="change-content-empty">
+                      変更内容はありません。
+                    </p>
+                  ) : (
+                    <ol className="change-content-list" aria-label="変更内容一覧">
+                      {changeContentItems.map(changeContentItemView)}
+                    </ol>
+                  )}
+                  {timetableEditor.conflictCount > 0 ? (
+                    <p className="change-content-conflict-notice" role="alert">
+                      ほかの変更と重なっている下書きがあります。確認してから編集し直してください。
+                    </p>
+                  ) : null}
+                  <footer className="editor-dialog-actions change-content-actions">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      disabled={
+                        timetableEditor.submitting ||
+                        timetableEditor.draftCount === 0 ||
+                        timetableEditor.conflictCount > 0
+                      }
+                      onClick={openDirectChangeReview}
+                    >
+                      反映を確認
+                    </button>
+                  </footer>
+                </DialogBody>
               </section>
             </div>
           ) : null}
@@ -3383,88 +3537,105 @@ function App() {
                     ×
                   </button>
                 </header>
-                {referenceScopeOptions?.status === "loading" ||
-                referenceScopeOptions === null ? (
-                  <p className="reference-scope-dialog-status" role="status">
-                    選べる範囲を読み込んでいます…
-                  </p>
-                ) : referenceScopeOptions.status === "error" ? (
-                  <div className="reference-scope-dialog-status" role="alert">
-                    <p>選べる範囲を読み込めませんでした。</p>
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={() => void loadReferenceScopeOptions()}
-                    >
-                      再読み込み
-                    </button>
-                  </div>
-                ) : (
-                  <form onSubmit={selectReferenceScope}>
-                    <label>
-                      <span>参照する変更適用範囲</span>
-                      <select
-                        value={referencePickerScopeKey}
-                        onChange={(event) =>
-                          setReferencePickerScopeKey(event.target.value)}
-                        disabled={referenceScopeOptions.options.length === 0}
-                      >
-                        {referenceScopeOptions.options.map((option) => (
-                          <option
-                            key={referenceScopeKey(option)}
-                            value={referenceScopeKey(option)}
-                          >
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {referenceScopeOptions.options.length === 0 ? (
-                      <p className="empty-state">参照できる範囲はありません。</p>
-                    ) : null}
-                    <div className="editor-dialog-actions">
+                <DialogBody>
+                  {referenceScopeOptions?.status === "loading" ||
+                  referenceScopeOptions === null ? (
+                    <p className="reference-scope-dialog-status" role="status">
+                      選べる範囲を読み込んでいます…
+                    </p>
+                  ) : referenceScopeOptions.status === "error" ? (
+                    <div className="reference-scope-dialog-status" role="alert">
+                      <p>選べる範囲を読み込めませんでした。</p>
                       <button
-                        className="button-primary"
-                        type="submit"
-                        disabled={referenceScopeOptions.options.length === 0}
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => void loadReferenceScopeOptions()}
                       >
-                        参照する
+                        再読み込み
                       </button>
                     </div>
-                  </form>
-                )}
+                  ) : (
+                    <form onSubmit={selectReferenceScope}>
+                      <label>
+                        <span>参照する変更適用範囲</span>
+                        <select
+                          value={referencePickerScopeKey}
+                          onChange={(event) =>
+                            setReferencePickerScopeKey(event.target.value)}
+                          disabled={referenceScopeOptions.options.length === 0}
+                        >
+                          {referenceScopeOptions.options.map((option) => (
+                            <option
+                              key={referenceScopeKey(option)}
+                              value={referenceScopeKey(option)}
+                            >
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {referenceScopeOptions.options.length === 0 ? (
+                        <p className="empty-state">参照できる範囲はありません。</p>
+                      ) : null}
+                      <div className="editor-dialog-actions">
+                        <button
+                          className="button-primary"
+                          type="submit"
+                          disabled={referenceScopeOptions.options.length === 0}
+                        >
+                          参照する
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </DialogBody>
               </section>
             </div>
           ) : null}
 
           {noteEditorForm ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className={`timetable-editor-dialog note-editor-dialog${
-                  noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
-                }`}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="note-editor-title"
-              >
-                <header className="editor-dialog-header">
-                  <h2 id="note-editor-title">
-                    {noteEditorForm.relatedTask
+            <DialogSurface
+              className={`editor-dialog-form-surface note-editor-dialog${
+                noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
+              }`}
+              labelledBy="note-editor-title"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                requestNoteEditorClose();
+              }}
+            >
+              <form className="editor-dialog-form" onSubmit={saveNoteDraft}>
+                <DialogHeader
+                  title={
+                    noteEditorForm.relatedTask
                       ? "ノートを書く"
                       : noteEditorForm.editingNote || noteEditorForm.editingDraft
-                      ? "ノートを編集"
-                      : "ノートを追加"}
-                  </h2>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    onClick={requestNoteEditorClose}
-                  >
-                    ×
-                  </button>
-                </header>
-                <form onSubmit={saveNoteDraft}>
+                        ? "ノートを編集"
+                        : "ノートを追加"
+                  }
+                  titleId="note-editor-title"
+                  onBack={requestNoteEditorClose}
+                  actionLabel={noteEditorForm.editingDraft?.changeKind === "remove"
+                    ? "削除予定を取り消す"
+                    : editorActionLabel(
+                        noteEditorForm.editingNote || noteEditorForm.editingDraft
+                          ? "update"
+                          : "add",
+                      )}
+                  actionType={noteEditorForm.editingDraft?.changeKind === "remove"
+                    ? "button"
+                    : "submit"}
+                  onAction={noteEditorForm.editingDraft?.changeKind === "remove"
+                    ? () => {
+                        timetableEditorClient.removeNoteDraft(
+                          noteEditorForm.editingDraft!.sourceId,
+                        );
+                        closeNoteEditorFlow();
+                      }
+                    : undefined}
+                />
+                <div className="editor-dialog-body">
                   <label>
                     <span>本文</span>
                     <textarea
@@ -3639,66 +3810,33 @@ function App() {
                       </label>
                     </ImmutableFieldNotice>
                   )}
-                  <div className="editor-dialog-actions">
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={requestNoteEditorClose}
-                    >
-                      キャンセル
-                    </button>
-                    {noteEditorForm.editingDraft?.changeKind === "remove" ? (
-                      <button
-                        className="button-secondary"
-                        type="button"
-                        onClick={() => {
-                          timetableEditorClient.removeNoteDraft(
-                            noteEditorForm.editingDraft!.sourceId,
-                          );
-                          closeNoteEditorFlow();
-                        }}
-                      >
-                        削除予定を取り消す
-                      </button>
-                    ) : (
-                      <button className="button-primary" type="submit">
-                        {editorActionLabel(
-                          noteEditorForm.editingNote || noteEditorForm.editingDraft
-                            ? "update"
-                            : "add",
-                        )}
-                      </button>
-                    )}
-                  </div>
-                </form>
-              </section>
-            </div>
+                </div>
+              </form>
+            </DialogSurface>
           ) : null}
 
           {taskEditorForm ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className="timetable-editor-dialog task-editor-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="task-editor-title"
-              >
-                <header className="editor-dialog-header">
-                  <h2 id="task-editor-title">
-                    {taskEditorForm.editingTask
-                      ? "タスクを編集"
-                      : "タスクを追加"}
-                  </h2>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    onClick={requestTaskEditorClose}
-                  >
-                    ×
-                  </button>
-                </header>
-                <form onSubmit={saveTaskDraft}>
+            <DialogSurface
+              className="editor-dialog-form-surface task-editor-dialog"
+              labelledBy="task-editor-title"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                requestTaskEditorClose();
+              }}
+            >
+              <form className="editor-dialog-form" onSubmit={saveTaskDraft}>
+                <DialogHeader
+                  title={taskEditorForm.editingTask ? "タスクを編集" : "タスクを追加"}
+                  titleId="task-editor-title"
+                  onBack={requestTaskEditorClose}
+                  actionLabel={editorActionLabel(
+                    taskEditorForm.editingTask || taskEditorForm.editingDraft
+                      ? "update"
+                      : "add",
+                  )}
+                />
+                <div className="editor-dialog-body">
                   <label>
                     <span>タイトル</span>
                     <input
@@ -3826,6 +3964,7 @@ function App() {
                           taskLessonNameListOpen
                         ) {
                           event.preventDefault();
+                          event.stopPropagation();
                           setTaskLessonNameListOpen(false);
                           setActiveTaskLessonNameOption(-1);
                         }
@@ -3926,25 +4065,9 @@ function App() {
                       </select>
                     </label>
                   )}
-                  <div className="editor-dialog-actions">
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={requestTaskEditorClose}
-                    >
-                      キャンセル
-                    </button>
-                    <button className="button-primary" type="submit">
-                      {editorActionLabel(
-                        taskEditorForm.editingTask || taskEditorForm.editingDraft
-                          ? "update"
-                          : "add",
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </section>
-            </div>
+                </div>
+              </form>
+            </DialogSurface>
           ) : null}
 
           {taskDetail ? (
@@ -4103,8 +4226,8 @@ function App() {
                     ×
                   </button>
                 </header>
-
-                {timetableHistoryDialog.detail ? (
+                <DialogBody>
+                  {timetableHistoryDialog.detail ? (
                   timetableHistoryDialog.detail.status === "loading" ? (
                     <p className="layer-dialog-status" aria-live="polite">
                       変更内容を読み込んでいます…
@@ -4180,7 +4303,8 @@ function App() {
                       </button>
                     ))}
                   </div>
-                )}
+                  )}
+                </DialogBody>
               </section>
             </div>
           ) : null}
@@ -4210,8 +4334,8 @@ function App() {
                     ×
                   </button>
                 </header>
-
-                <div className="layer-dialog-navigation" aria-label="日付と時限">
+                <DialogBody>
+                  <div className="layer-dialog-navigation" aria-label="日付と時限">
                   <button
                     type="button"
                     className="icon-button"
@@ -4415,46 +4539,46 @@ function App() {
                     </div>
                   </div>
                 ) : null}
+                </DialogBody>
               </section>
             </div>
           ) : null}
 
           {timetableEditorForm && schoolYearRange ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className="timetable-editor-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="timetable-editor-title"
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  event.preventDefault();
-                  requestTimetableEditorClose("back");
-                }}
-              >
-                <form onSubmit={saveTimetableDraft}>
-                  <header className="editor-dialog-header">
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="時間割の変更状況に戻る"
-                      onClick={() => requestTimetableEditorClose("back")}
-                    >
-                      ‹
-                    </button>
-                    <div className="timetable-dialog-heading">
-                      <h2 id="timetable-editor-title">時間割変更</h2>
-                    </div>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="閉じる"
-                      autoFocus
-                      onClick={() => requestTimetableEditorClose("close")}
-                    >
-                      ×
-                    </button>
-                  </header>
+            <DialogSurface
+              className="editor-dialog-form-surface timetable-editor-form-dialog"
+              labelledBy="timetable-editor-title"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                requestTimetableEditorClose("back");
+              }}
+            >
+              <form className="editor-dialog-form" onSubmit={saveTimetableDraft}>
+                <DialogHeader
+                  title="時間割変更"
+                  titleId="timetable-editor-title"
+                  onBack={() => requestTimetableEditorClose("back")}
+                  actionLabel={editorActionLabel(
+                    timetableEditorForm.sourceId ||
+                      loadedLayerState?.layers.some(
+                        (layer) =>
+                          layer.targetScopeType ===
+                            timetableEditorForm.targetScopeType &&
+                          layer.state === "active",
+                      )
+                      ? "update"
+                      : "add",
+                  )}
+                  actionDisabled={
+                    timetableEditor.submitting ||
+                    (timetableEditorForm.includeTimetableChange &&
+                      timetableEditorForm.replacement.type === "lesson_name" &&
+                      !timetableEditorForm.replacement.registeredLessonNameId &&
+                      !timetableEditorOptions)
+                  }
+                />
+                <div className="editor-dialog-body">
                   <ImmutableFieldNotice
                     kind="timetable"
                     active={Boolean(
@@ -4801,34 +4925,10 @@ function App() {
                         {editorActionLabel("remove")}
                       </button>
                     ) : null}
-                    <button
-                      className="button-primary"
-                      type="submit"
-                      disabled={
-                        timetableEditor.submitting ||
-                        (timetableEditorForm.includeTimetableChange &&
-                          timetableEditorForm.replacement.type === "lesson_name" &&
-                          !timetableEditorForm.replacement
-                            .registeredLessonNameId &&
-                          !timetableEditorOptions)
-                      }
-                    >
-                      {editorActionLabel(
-                        timetableEditorForm.sourceId ||
-                        loadedLayerState?.layers.some(
-                          (layer) =>
-                            layer.targetScopeType ===
-                              timetableEditorForm.targetScopeType &&
-                            layer.state === "active",
-                        )
-                          ? "update"
-                          : "add",
-                      )}
-                    </button>
                   </footer>
-                </form>
-              </section>
-            </div>
+                  </div>
+              </form>
+            </DialogSurface>
           ) : null}
 
           {pendingEditorDismissal ? (

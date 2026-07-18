@@ -63,11 +63,13 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
 
   const addDialog = page.getByRole('dialog', { name: 'タスクを追加' })
   const savedTitle = '下書き保護テスト'
+  await expect(addDialog.getByRole('button', { name: '戻る' })).toBeVisible()
+  await expect(addDialog.getByRole('button', { name: '閉じる' })).toHaveCount(0)
   await expect(
     addDialog.getByRole('button', { name: '下書きを保存' }),
   ).toBeVisible()
   await addDialog.getByRole('textbox', { name: 'タイトル' }).fill(savedTitle)
-  await addDialog.getByRole('button', { name: '閉じる' }).click()
+  await addDialog.getByRole('button', { name: '戻る' }).click()
 
   const discardDialog = page.getByRole('alertdialog', {
     name: '入力内容を破棄しますか？',
@@ -101,7 +103,7 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
   await savedDraftDialog
     .getByRole('textbox', { name: 'タイトル' })
     .fill('破棄される未保存入力')
-  await savedDraftDialog.getByRole('button', { name: '閉じる' }).click()
+  await savedDraftDialog.getByRole('button', { name: '戻る' }).click()
   await page
     .getByRole('alertdialog', { name: '入力内容を破棄しますか？' })
     .getByRole('button', { name: '入力内容を破棄' })
@@ -109,18 +111,52 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
   await expect(draftCard).toContainText(savedTitle)
   await expect(draftCard).not.toContainText('破棄される未保存入力')
 
+  await page.getByRole('button', { name: '変更内容（1）' }).click()
+  await page.getByRole('dialog', { name: '変更内容' })
+    .getByRole('button', { name: '反映を確認' })
+    .click()
   page.once('dialog', (dialog) => dialog.accept())
-  await page.getByRole('button', { name: '変更を反映 (1)' }).click()
+  await page.getByRole('button', { name: '変更を反映' }).click()
   await expect(draftCard).toHaveCount(0)
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
 
   const activeCard = page.locator('.task-entry').filter({ hasText: savedTitle })
+  await page.evaluate(() =>
+    (globalThis as unknown as { scrollTo(x: number, y: number): void }).scrollTo(
+      0,
+      240,
+    ),
+  )
+  const originalScrollY = await page.evaluate(
+    () => (globalThis as unknown as { scrollY: number }).scrollY,
+  )
   await activeCard.locator('.task-item').click()
   const detailDialog = page.getByRole('dialog', { name: 'タスクの詳細' })
+  await expect(page.locator('html')).toHaveClass(/page-scroll-locked/)
+  await expect(detailDialog.getByRole('button', { name: '編集履歴' })).toBeVisible()
+  await detailDialog.getByRole('button', { name: '編集履歴' }).click()
+  const historyDialog = page.getByRole('dialog', { name: 'タスクの編集履歴' })
+  await expect(historyDialog).toBeVisible()
+  await expect(page.locator('html')).toHaveClass(/page-scroll-locked/)
+  await historyDialog.getByRole('button', { name: 'タスクの詳細に戻る' }).click()
+  await expect(page.getByRole('dialog', { name: 'タスクの詳細' })).toBeVisible()
+  await page
+    .getByRole('dialog', { name: 'タスクの詳細' })
+    .getByRole('button', { name: '閉じる' })
+    .click()
+  await expect(page.locator('html')).not.toHaveClass(/page-scroll-locked/)
+  await expect
+    .poll(() =>
+      page.evaluate(() => (globalThis as unknown as { scrollY: number }).scrollY),
+    )
+    .toBe(originalScrollY)
+
+  await activeCard.locator('.task-item').click()
+  const activeDetailDialog = page.getByRole('dialog', { name: 'タスクの詳細' })
   await expect(
-    detailDialog.getByRole('button', { name: '削除予定にする' }),
+    activeDetailDialog.getByRole('button', { name: '削除予定にする' }),
   ).toBeVisible()
-  await detailDialog.getByRole('button', { name: '編集', exact: true }).click()
+  await activeDetailDialog.getByRole('button', { name: '編集', exact: true }).click()
 
   const immutableMessage =
     'タスクの変更適用範囲は変更できません。削除予定にしてから追加し直してください。'
@@ -132,6 +168,44 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
   await expect(
     page.getByRole('status').filter({ hasText: immutableMessage }),
   ).toBeVisible()
+})
+
+test('browser back uses the same dirty-input guard and preserves the page scroll position', async ({
+  page,
+  browserName,
+  isMobile,
+}) => {
+  test.skip(
+    browserName !== 'chromium' || isMobile,
+    'Chromium desktop dialog stack journey',
+  )
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: 'タスクを追加' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'タスクを追加' })
+  await dialog.getByRole('textbox', { name: 'タイトル' }).fill('戻る操作テスト')
+  await page.goBack()
+
+  const discardDialog = page.getByRole('alertdialog', {
+    name: '入力内容を破棄しますか？',
+  })
+  await expect(discardDialog).toBeVisible()
+  await discardDialog.getByRole('button', { name: '編集を続ける' }).click()
+  await expect(dialog.getByRole('textbox', { name: 'タイトル' })).toHaveValue(
+    '戻る操作テスト',
+  )
+
+  await page.keyboard.press('Escape')
+  await expect(discardDialog).toBeVisible()
+  await discardDialog.getByRole('button', { name: '入力内容を破棄' }).click()
+  await expect(dialog).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'タスクを追加' }).click()
+  const cleanDialog = page.getByRole('dialog', { name: 'タスクを追加' })
+  await cleanDialog.getByRole('button', { name: '戻る' }).click()
+  await expect(cleanDialog).toHaveCount(0)
 })
 
 test.describe('pointer state separation', () => {
@@ -248,8 +322,13 @@ test.describe('WebKit mobile editors', () => {
     if (viewport && changeDateBox) {
       expectBoxWithinViewport(changeDateBox, viewport.width)
     }
-    await timetableDialog.getByRole('button', { name: '閉じる' }).click()
+    await expect(
+      timetableDialog.getByRole('button', { name: '閉じる' }),
+    ).toHaveCount(0)
+    await timetableDialog.getByRole('button', { name: '戻る' }).click()
     await expect(timetableDialog).toHaveCount(0)
+    await expect(layerDialog).toBeVisible()
+    await layerDialog.getByRole('button', { name: '閉じる' }).click()
     await expect(layerDialog).toHaveCount(0)
 
     await page.getByRole('button', { name: 'タスクを追加' }).click()
@@ -262,9 +341,28 @@ test.describe('WebKit mobile editors', () => {
     })
 
     await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('button', { name: '戻る' })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: '閉じる' })).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: '下書きを保存' })).toBeVisible()
     await expect(titleInput).toBeInViewport()
     await expect(dueDateInput).toBeInViewport()
     await expect(clearDueDateButton).toBeInViewport()
+    const dialogBox = await dialog.boundingBox()
+    const headerBox = await dialog.locator('.editor-dialog-header').boundingBox()
+    expect(viewport).not.toBeNull()
+    expect(dialogBox).not.toBeNull()
+    expect(headerBox).not.toBeNull()
+    if (viewport && dialogBox && headerBox) {
+      expect(dialogBox.height).toBeLessThanOrEqual(viewport.height)
+      expect(headerBox.y).toBeGreaterThanOrEqual(0)
+      expect(headerBox.y + headerBox.height).toBeLessThanOrEqual(
+        viewport.height + 1,
+      )
+    }
+    await expect(dialog.locator('.editor-dialog-body')).toHaveCSS(
+      'overflow-y',
+      'auto',
+    )
     if (viewport) {
       const documentWidth = await page.evaluate(
         () =>
@@ -305,7 +403,7 @@ test.describe('WebKit mobile editors', () => {
 
     await clearDueDateButton.click()
     await expect(dueDateInput).toHaveValue('')
-    await dialog.getByRole('button', { name: '閉じる' }).click()
+    await dialog.getByRole('button', { name: '戻る' }).click()
     const discardDialog = page.getByRole('alertdialog', {
       name: '入力内容を破棄しますか？',
     })

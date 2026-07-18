@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 
 function expectBoxWithinViewport(
   box: { x: number; width: number },
@@ -45,6 +45,123 @@ test('a fixed test Student reaches authenticated Daily Plan', async ({
   await expect(
     page.getByRole('heading', { name: '学校のメールでログイン' }),
   ).toHaveCount(0)
+})
+
+test('Timetable Projection shows effective sources and keeps removal within the lesson name', async ({
+  page,
+  browserName,
+}) => {
+  const noteBody = `Issue 64 layer note ${Date.now()}`
+  const targetDate = browserName === 'webkit' ? '2026-07-13' : '2026-07-06'
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: /^1限/ }).click()
+
+  const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+  const dateInput = layerDialog.getByRole('textbox', { name: '変更対象日' })
+  await dateInput.fill(targetDate)
+  await expect(dateInput).toHaveValue(targetDate)
+  await expect(layerDialog.locator('.timetable-layer-lesson-name strong').first()).toHaveText('数Ⅱβ')
+
+  const saveLayerDraft = async (
+    scopeLabel: RegExp,
+    fillReplacement: (dialog: Locator) => Promise<void>,
+  ) => {
+    await layerDialog.getByRole('button', { name: scopeLabel }).click()
+    const editor = page.getByRole('dialog', { name: '時間割変更' })
+    await editor
+      .getByRole('checkbox', { name: '時間割も変更する' })
+      .check()
+    await fillReplacement(editor)
+    await editor.getByRole('button', { name: /下書きを(?:保存|更新)/ }).click()
+    await expect(editor).toHaveCount(0)
+  }
+
+  await saveLayerDraft(
+    /2年全体の時間割を編集/,
+    async (editor) => {
+      await editor.getByRole('button', { name: '月1', exact: true }).click()
+      await editor.getByRole('textbox', { name: 'ノート本文 1' }).fill(noteBody)
+    },
+  )
+  await saveLayerDraft(
+    /3組の時間割を編集/,
+    async (editor) => {
+      await editor.getByRole('button', { name: '★', exact: true }).click()
+    },
+  )
+  await saveLayerDraft(
+    /文科の時間割を編集/,
+    async (editor) => {
+      await editor.getByRole('combobox', { name: '授業名' }).fill('英語')
+    },
+  )
+
+  const sourceLabels = layerDialog.locator('.timetable-layer-source')
+  await expect(sourceLabels).toHaveText(['（月1）', '（月1）', '（★）'])
+  await expect(layerDialog.locator('.timetable-layer-lesson-name strong')).toHaveText([
+    '数Ⅱβ',
+    '数Ⅱβ',
+    '自走',
+    '英語',
+    '英語',
+  ])
+  await expect(layerDialog.locator('.layer-flow-arrow')).toHaveCount(5)
+
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+  await page.getByRole('button', { name: '変更内容（4）' }).click()
+  const review = page.getByRole('dialog', { name: '変更内容' })
+  await review.getByRole('button', { name: '反映を確認' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映' }).click()
+
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: /^1限/ }).click()
+  const activeLayerDialog = page.getByRole('dialog', {
+    name: '時間割の変更状況',
+  })
+  const activeDateInput = activeLayerDialog.getByRole('textbox', {
+    name: '変更対象日',
+  })
+  await activeDateInput.fill(targetDate)
+  await expect(
+    activeLayerDialog.locator('.timetable-layer-lesson-name strong').nth(3),
+  ).toHaveText('英語')
+
+  const gradeLayer = activeLayerDialog
+    .locator('.layer-with-notes')
+    .filter({ hasText: '2年全体' })
+  await gradeLayer.getByRole('button', { name: '2年全体のメニュー' }).click()
+  await gradeLayer
+    .getByRole('menuitem', { name: '削除予定にする' })
+    .click()
+
+  const removalLessonName = gradeLayer.locator('.timetable-layer-lesson-name')
+  await expect(removalLessonName).toHaveClass(/removal/)
+  await expect(
+    removalLessonName.getByRole('img', { name: '削除対象の時間割変更' }),
+  ).toBeVisible()
+  await expect(gradeLayer.locator('.layer-note-list .note-item')).toHaveCount(1)
+  await expect(
+    gradeLayer.locator('.layer-note-list .note-item'),
+  ).not.toHaveClass(/note-removal-draft/)
+  const noteBox = await gradeLayer.locator('.layer-note-list').boundingBox()
+  const arrowBox = await gradeLayer.locator('.layer-flow-arrow').boundingBox()
+  expect(noteBox).not.toBeNull()
+  expect(arrowBox).not.toBeNull()
+  if (noteBox && arrowBox) expect(noteBox.y + noteBox.height).toBeLessThanOrEqual(arrowBox.y)
+
+  const lifecycleStates = await activeLayerDialog
+    .locator('.layer-lifecycle-state small')
+    .all()
+  for (const state of lifecycleStates) {
+    await expect(state).toHaveClass(/sr-only/)
+  }
+
+  await activeLayerDialog.getByRole('button', { name: '閉じる' }).click()
+  await page.getByRole('button', { name: '編集を終了' }).click()
+  await expect(page.locator('.timetable-layer-source')).toHaveCount(0)
 })
 
 test('Daily Lesson Notes use the Timetable Change dialog and detail lifecycle', async ({

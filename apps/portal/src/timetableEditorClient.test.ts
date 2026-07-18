@@ -762,6 +762,59 @@ describe('Shared Information editor client', () => {
     }])
   })
 
+  it('stores a Task removal with its active Notes and restores dependent drafts on cancel', () => {
+    const taskId = '33000000-0000-4000-8000-000000000370'
+    const taskRemovalSourceId = '33000000-0000-4000-8000-000000000371'
+    const noteSourceId = '33000000-0000-4000-8000-000000000372'
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: (() => {
+        const ids = [noteSourceId, taskRemovalSourceId]
+        return () => ids.shift()!
+      })(),
+    })
+    const activeTask = {
+      taskId,
+      latestChangeId: `${taskId}:change`,
+      title: '数学ワーク',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+      notes: [{
+        noteId: '33000000-0000-4000-8000-000000000373',
+        latestChangeId: '33000000-0000-4000-8000-000000000373:change',
+        body: '持ち物のノート',
+        targetScopeType: 'track' as const,
+        relatedContext: { type: 'task' as const, taskId },
+      }],
+    }
+
+    expect(editor.saveTaskNoteDraft(activeTask, '編集中の補足')).toMatchObject({
+      status: 'saved',
+      sourceId: noteSourceId,
+    })
+    expect(editor.saveTaskRemoveDraft(activeTask)).toEqual({
+      status: 'saved',
+      sourceId: taskRemovalSourceId,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      taskDrafts: [{
+        sourceId: taskRemovalSourceId,
+        changeKind: 'remove',
+        baseTask: { notes: activeTask.notes },
+      }],
+      noteDrafts: [],
+    })
+
+    expect(editor.removeTaskDraft(taskRemovalSourceId)).toEqual({
+      status: 'removed',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      taskDrafts: [],
+      noteDrafts: [{ sourceId: noteSourceId, body: '編集中の補足' }],
+    })
+  })
+
   it('reuses Task draft identities and removes an update that returns to active values', () => {
     const ids = [
       '33000000-0000-4000-8000-000000000351',

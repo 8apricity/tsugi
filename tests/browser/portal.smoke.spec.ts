@@ -173,6 +173,9 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
 
   const savedDraftDialog = page.getByRole('dialog', { name: 'タスクを追加' })
   await expect(
+    savedDraftDialog.getByRole('checkbox', { name: '削除予定にする' }),
+  ).toHaveCount(0)
+  await expect(
     savedDraftDialog.getByRole('button', { name: '下書きを更新' }),
   ).toBeVisible()
   await savedDraftDialog
@@ -228,9 +231,6 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
 
   await activeCard.locator('.task-item').click()
   const activeDetailDialog = page.getByRole('dialog', { name: 'タスクの詳細' })
-  await expect(
-    activeDetailDialog.getByRole('button', { name: '削除予定にする' }),
-  ).toBeVisible()
   await activeDetailDialog.getByRole('button', { name: '編集', exact: true }).click()
 
   const updateDialog = page.getByRole('dialog', { name: 'タスクを編集' })
@@ -243,6 +243,28 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
   await expect(
     updateDialog.getByRole('combobox', { name: '変更適用範囲' }),
   ).toHaveCount(0)
+  const removalCheckbox = updateDialog.getByRole('checkbox', {
+    name: '削除予定にする',
+  })
+  await removalCheckbox.check()
+  await expect(
+    page.getByRole('dialog', { name: 'タスクを削除予定にしますか？' }),
+  ).toHaveCount(0)
+  await expect(updateDialog.getByRole('textbox', { name: 'タイトル' })).toBeDisabled()
+  await expect(updateDialog.locator('input[type="date"]')).toBeDisabled()
+  await expect(
+    updateDialog.getByRole('button', { name: '期限をクリア' }),
+  ).toBeDisabled()
+  await expect(
+    updateDialog.getByRole('textbox', { name: '関連する授業' }),
+  ).toBeDisabled()
+  await updateDialog.getByRole('button', { name: '削除予定にする' }).click()
+  await expect(
+    page.getByText('このタスクだけが削除予定になります。', { exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    page.locator('.task-removal-cascade-surface').filter({ hasText: savedTitle }),
+  ).toHaveCount(1)
 })
 
 test('Task add/edit supports zero, one, and multiple Notes and returns from Task Note detail', async ({
@@ -324,6 +346,112 @@ test('Task add/edit supports zero, one, and multiple Notes and returns from Task
     editDetail.locator('dt').filter({ hasText: '変更適用範囲' }),
   ).toBeVisible()
   await expect(editDetail.getByRole('combobox', { name: '変更適用範囲' })).toHaveCount(0)
+})
+
+test('reflected Task removal confirms active Notes and groups the cascade in Daily Plan', async ({
+  page,
+  browserName,
+  isMobile,
+}) => {
+  test.skip(
+    browserName !== 'chromium' || isMobile,
+    'Chromium desktop Task removal journey',
+  )
+
+  const title = `Issue 61 Task ${Date.now()}`
+  await page.goto('/')
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: 'タスクを追加' }).click()
+  const addDialog = page.getByRole('dialog', { name: 'タスクを追加' })
+  await addDialog.getByRole('textbox', { name: 'タイトル' }).fill(title)
+  await addDialog.getByRole('combobox', { name: '変更適用範囲' }).selectOption('class')
+  for (const body of ['削除確認ノート1', '削除確認ノート2']) {
+    await addDialog.getByRole('button', { name: '＋ノートを追加' }).click()
+    const fields = addDialog.getByRole('textbox', { name: /ノート本文/ })
+    await fields.nth((await fields.count()) - 1).fill(body)
+  }
+  await addDialog.getByRole('button', { name: '下書きを保存' }).click()
+  await page.getByRole('button', { name: /変更内容（/ }).click()
+  const review = page.getByRole('dialog', { name: '変更内容' })
+  await review.getByRole('button', { name: '反映を確認' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映' }).click()
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+
+  const taskCard = page.locator('.task-entry').filter({ hasText: title })
+  await taskCard.locator('.task-item').click()
+  await page.getByRole('dialog', { name: 'タスクの詳細' })
+    .getByRole('button', { name: '編集', exact: true }).click()
+  const editDialog = page.getByRole('dialog', { name: 'タスクを編集' })
+  await editDialog.getByRole('button', { name: 'ノートの詳細を開く' }).first().click()
+  const noteEditDialog = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await noteEditDialog.getByRole('checkbox', { name: '削除予定にする' }).check()
+  await noteEditDialog.getByRole('button', { name: '下書きを更新' }).click()
+  await editDialog.getByRole('button', { name: '戻る' }).click()
+  await page.getByRole('dialog', { name: 'タスクの詳細' })
+    .getByRole('button', { name: '閉じる' }).click()
+  await expect(taskCard).not.toHaveClass(/task-removal-cascade-surface/)
+  await expect(taskCard.locator('.note-removal-draft')).toHaveCount(1)
+  await expect(taskCard.locator('.note-removal-draft').getByRole('img', {
+    name: '削除対象のノート',
+  })).toBeVisible()
+
+  await taskCard.locator('.task-item').click()
+  await page.getByRole('dialog', { name: 'タスクの詳細' })
+    .getByRole('button', { name: '編集', exact: true }).click()
+  const restoredEditDialog = page.getByRole('dialog', { name: 'タスクを編集' })
+  const removalCheckbox = restoredEditDialog.getByRole('checkbox', {
+    name: '削除予定にする',
+  })
+  await restoredEditDialog.getByRole('button', { name: '＋ノートを追加' }).click()
+  await removalCheckbox.check()
+
+  const confirmation = page.getByRole('dialog', {
+    name: 'タスクを削除予定にしますか？',
+  })
+  await expect(confirmation).toContainText('関連するノート2件も削除予定になります。')
+  await expect(confirmation).toContainText('削除確認ノート1')
+  await expect(confirmation).toContainText('削除確認ノート2')
+  await expect(restoredEditDialog.getByRole('textbox', { name: 'タイトル' })).toBeDisabled()
+  await expect(restoredEditDialog.locator('input[type="date"]')).toBeDisabled()
+  await expect(
+    restoredEditDialog.getByRole('button', { name: '期限をクリア' }),
+  ).toBeDisabled()
+  await expect(
+    restoredEditDialog.getByRole('textbox', { name: '関連する授業' }),
+  ).toBeDisabled()
+  await expect(
+    restoredEditDialog.getByRole('textbox', { name: /ノート本文/ }),
+  ).toBeDisabled()
+  await expect(
+    restoredEditDialog.getByRole('button', { name: '＋ノートを追加' }),
+  ).toBeDisabled()
+  await expect(
+    restoredEditDialog.getByRole('button', { name: 'ノートの詳細を開く' }),
+  ).toHaveCount(0)
+
+  await confirmation.getByRole('button', { name: 'キャンセル' }).click()
+  await expect(confirmation).toHaveCount(0)
+  await expect(removalCheckbox).not.toBeChecked()
+  await expect(restoredEditDialog.getByRole('textbox', { name: 'タイトル' })).toBeEnabled()
+  await removalCheckbox.check()
+  await page.getByRole('dialog', { name: 'タスクを削除予定にしますか？' })
+    .getByRole('button', { name: '削除予定にする' }).click()
+  await expect(removalCheckbox).toBeChecked()
+  await restoredEditDialog.getByRole('button', { name: '削除予定にする' }).click()
+
+  const cascade = page.getByRole('group', {
+    name: 'タスクと関連ノートはタスクの削除に伴い削除予定です',
+  })
+  await expect(cascade).toBeVisible()
+  await expect(cascade.getByRole('img', {
+    name: '削除対象のタスクと関連ノート',
+  })).toBeVisible()
+  await expect(cascade.getByText('削除確認ノート1')).toBeVisible()
+  await expect(cascade.getByText('削除確認ノート2')).toBeVisible()
+  await expect(cascade.locator('.note-cascade-removal')).toHaveCount(2)
+  await expect(cascade.locator('.note-cascade-removal').nth(0)).toHaveClass(/sr-only/)
+  await expect(cascade.locator('.note-cascade-removal').nth(1)).toHaveClass(/sr-only/)
 })
 
 test('browser back uses the same dirty-input guard and preserves the page scroll position', async ({

@@ -505,6 +505,48 @@ button.period-inspect-button:active {
   gap: 8px;
 }
 
+.task-removal-cascade-surface {
+  position: relative;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid #e2abab;
+  border-radius: var(--radius-sm);
+  background: #fff1f1;
+}
+
+.task-removal-cascade-surface > .note-removal-glyph {
+  top: 50%;
+  left: 50%;
+  width: 110px;
+  height: 110px;
+  color: rgba(143, 29, 20, 0.16);
+}
+
+.task-removal-cascade-surface .task-item,
+.task-removal-cascade-surface .task-note-list .note-item {
+  position: relative;
+  z-index: 1;
+  border-color: transparent;
+  background: transparent;
+}
+
+.task-removal-cascade-surface > .task-note-list {
+  position: relative;
+  z-index: 1;
+}
+
+.task-removal-cascade-surface .task-item {
+  padding: 4px;
+}
+
+.task-removal-cascade-surface .task-note-list {
+  margin-left: 12px;
+}
+
+.task-removal-cascade-surface .task-note-list .note-item {
+  border-left-color: transparent;
+}
+
 .task-draft {
   padding: 8px;
   border-color: var(--color-accent);
@@ -520,6 +562,11 @@ button.period-inspect-button:active {
   border: 0;
   background: transparent;
   cursor: pointer;
+}
+
+.task-entry.task-removal-cascade-surface {
+  border-color: #e2abab;
+  background: #fff1f1;
 }
 
 .task-draft-actions {
@@ -688,6 +735,34 @@ button.period-inspect-button:active {
 
 .note-removal-checkbox {
   margin-top: 18px;
+}
+
+.task-removal-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.task-removal-checkbox input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #b42318;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .note-detail-context {

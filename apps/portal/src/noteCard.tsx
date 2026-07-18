@@ -135,7 +135,7 @@ export function NoteCard({
           bodyRef={bodyRef}
         />
       )}
-      {removalSurface ? <NoteRemovalGlyph /> : null}
+      {removalSurface ? <RemovalGlyph /> : null}
       <div className="note-meta">
         {targetScopeLabel ? (
           <span className="task-scope-badge">{targetScopeLabel}</span>
@@ -147,7 +147,7 @@ export function NoteCard({
           </span>
         ) : null}
         {removalReason === 'task-cascade' ? (
-          <small className="note-cascade-removal">
+          <small className="note-cascade-removal sr-only">
             タスクの削除に伴い削除予定
           </small>
         ) : null}
@@ -187,12 +187,16 @@ export function NoteCard({
   )
 }
 
-function NoteRemovalGlyph() {
+export function RemovalGlyph({
+  label = '削除対象のノート',
+}: {
+  label?: string
+}) {
   return (
     <span
       className="note-removal-glyph"
       role="img"
-      aria-label="削除対象のノート"
+      aria-label={label}
     >
       <svg viewBox="0 0 24 24" focusable="false">
         <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7" />

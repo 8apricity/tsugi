@@ -23,10 +23,10 @@ export function TaskDetailDialog({
   onRelatedLessonNameChange,
   onNoteBodyChange,
   onAddNote,
+  onRemovalChange,
   onOpenHistory,
   onEdit,
   onCancelDraft,
-  onRemove,
 }: {
   task: VisibleTask
   taskScopeLabel: string
@@ -39,6 +39,7 @@ export function TaskDetailDialog({
     dueDate: string | null
     relatedLessonInput: string
     noteBodies: string[]
+    removalPlanned: boolean
   }
   draftLifecycle?: { kind: LifecycleKind; conflicted: boolean }
   notes: ReactNode
@@ -50,10 +51,10 @@ export function TaskDetailDialog({
   onRelatedLessonNameChange?: (lessonName: string) => void
   onNoteBodyChange?: (index: number, body: string) => void
   onAddNote?: () => void
+  onRemovalChange?: (removalPlanned: boolean) => void
   onOpenHistory?: () => void
   onEdit?: () => void
   onCancelDraft?: () => void
-  onRemove?: () => void
 }) {
   if (mode === 'edit' && editForm && onSave) {
     return (
@@ -79,7 +80,7 @@ export function TaskDetailDialog({
                 className="button-primary dialog-save-button"
                 type="submit"
               >
-                下書きを更新
+                {editForm.removalPlanned ? '削除予定にする' : '下書きを更新'}
               </button>
             </header>
             <div className="editor-dialog-body">
@@ -90,6 +91,7 @@ export function TaskDetailDialog({
                   required
                   maxLength={120}
                   value={editForm.title}
+                  disabled={editForm.removalPlanned}
                   onChange={(event) => onTitleChange?.(event.target.value)}
                 />
               </label>
@@ -102,6 +104,7 @@ export function TaskDetailDialog({
                     min={dueDateMin}
                     max={dueDateMax}
                     value={editForm.dueDate ?? ''}
+                    disabled={editForm.removalPlanned}
                     onChange={(event) =>
                       onDueDateChange?.(event.target.value || null)}
                   />
@@ -110,7 +113,7 @@ export function TaskDetailDialog({
                     type="button"
                     aria-label="期限をクリア"
                     title="期限をクリア"
-                    disabled={!editForm.dueDate}
+                    disabled={!editForm.dueDate || editForm.removalPlanned}
                     onClick={() => onDueDateChange?.(null)}
                   >
                     ×
@@ -121,6 +124,7 @@ export function TaskDetailDialog({
                 <span>関連する授業</span>
                 <input
                   value={editForm.relatedLessonInput}
+                  disabled={editForm.removalPlanned}
                   onChange={(event) =>
                     onRelatedLessonNameChange?.(event.target.value)}
                 />
@@ -136,7 +140,19 @@ export function TaskDetailDialog({
                 noteBodies={editForm.noteBodies}
                 onBodyChange={onNoteBodyChange}
                 onAddNote={onAddNote}
+                disabled={editForm.removalPlanned}
               />
+              {editForm.removalPlanned || onRemovalChange ? (
+                <label className="task-removal-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={editForm.removalPlanned}
+                    onChange={(event) =>
+                      onRemovalChange?.(event.target.checked)}
+                  />
+                  <span>削除予定にする</span>
+                </label>
+              ) : null}
               <div className="editor-dialog-actions">
                 {onOpenHistory ? (
                   <button
@@ -225,11 +241,6 @@ export function TaskDetailDialog({
                 下書きを取り消す
               </button>
             ) : null}
-            {onRemove ? (
-              <button className="button-danger" type="button" onClick={onRemove}>
-                削除予定にする
-              </button>
-            ) : null}
           </div>
         </DialogBody>
       </section>
@@ -241,10 +252,12 @@ export function TaskNoteFields({
   noteBodies,
   onBodyChange,
   onAddNote,
+  disabled = false,
 }: {
   noteBodies: string[]
   onBodyChange?: (index: number, body: string) => void
   onAddNote?: () => void
+  disabled?: boolean
 }) {
   return (
     <div className="task-note-draft-fields">
@@ -255,6 +268,7 @@ export function TaskNoteFields({
             maxLength={1000}
             rows={4}
             value={body}
+            disabled={disabled}
             onChange={(event) => onBodyChange?.(index, event.target.value)}
           />
         </label>
@@ -263,6 +277,7 @@ export function TaskNoteFields({
         <button
           className="button-secondary task-note-add-button"
           type="button"
+          disabled={disabled}
           onClick={onAddNote}
         >
           ＋ノートを追加

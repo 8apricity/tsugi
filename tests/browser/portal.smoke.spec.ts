@@ -321,6 +321,47 @@ test('related Notes fuse with Daily Plan parents and keep detail targets on the 
     lessonNoteDetail.getByText(lessonNoteBody, { exact: true }),
   ).toBeVisible()
   await lessonNoteDetail.getByRole('button', { name: '戻る' }).click()
+
+  await activeLayerDialog
+    .getByRole('button', { name: 'ノートの詳細を開く' })
+    .filter({ hasText: lessonNoteBody })
+    .click()
+  const lessonNoteRemovalDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await lessonNoteRemovalDetail
+    .getByRole('checkbox', { name: '削除予定にする' })
+    .check()
+  await lessonNoteRemovalDetail.getByRole('button', { name: '下書きを更新' }).click()
+  await expect(
+    activeLayerDialog.getByRole('img', { name: '削除対象のノート' }),
+  ).toHaveCount(1)
+  await activeLayerDialog.getByRole('button', { name: '閉じる' }).click()
+
+  await taskCard.locator('.task-item').click()
+  const taskRemovalDetail = page.getByRole('dialog', { name: 'タスクの詳細' })
+  await taskRemovalDetail.getByRole('button', { name: '編集', exact: true }).click()
+  const taskRemovalEdit = page.getByRole('dialog', { name: 'タスクを編集' })
+  await taskRemovalEdit
+    .getByRole('checkbox', { name: '削除予定にする' })
+    .check()
+  const taskRemovalConfirmation = page.getByRole('dialog', {
+    name: 'タスクを削除予定にしますか？',
+  })
+  await taskRemovalConfirmation
+    .getByRole('button', { name: '削除予定にする' })
+    .click()
+  await taskRemovalEdit.getByRole('button', { name: '削除予定にする' }).click()
+
+  await page.getByRole('button', { name: /変更内容（/ }).click()
+  const cleanupReview = page.getByRole('dialog', { name: '変更内容' })
+  await cleanupReview.getByRole('button', { name: '反映を確認' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映' }).click()
+  await expect(
+    page.locator('.period-row .daily-lesson-note-list .note-item').filter({
+      hasText: lessonNoteBody,
+    }),
+  ).toHaveCount(0)
+  await expect(page.locator('.task-entry').filter({ hasText: taskTitle })).toHaveCount(0)
 })
 
 test('independent Note uses one detail flow for viewing, editing, removal, and history', async ({

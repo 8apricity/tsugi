@@ -332,6 +332,61 @@ button.period-inspect-button:active {
   font-size: 13px;
 }
 
+.period-lifecycle-icons,
+.lifecycle-summary,
+.layer-lifecycle-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.period-lifecycle-icons {
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.lifecycle-icon,
+.related-task-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.lifecycle-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.lifecycle-add,
+.lifecycle-update {
+  background: #e8f5f6;
+  color: #217c83;
+}
+
+.lifecycle-remove {
+  background: #fdecec;
+  color: #b42318;
+}
+
+.lifecycle-conflict {
+  background: #fff0c2;
+  color: #7a5100;
+}
+
+.lifecycle-summary small,
+.layer-lifecycle-state small {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
 .daily-lesson-note-list,
 .layer-note-list {
   display: grid;
@@ -804,19 +859,14 @@ body.page-scroll-locked {
 }
 
 .change-content-icon {
-  display: grid;
   width: 25px;
   height: 25px;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--color-accent-soft);
-  color: var(--color-primary);
-  font-weight: 900;
 }
 
-.change-content-item.conflicted .change-content-icon {
-  background: #fff0c2;
-  color: #7a5100;
+.related-task-icon {
+  background: #f1f3f5;
+  color: var(--color-muted);
+  font-weight: 900;
 }
 
 .change-content-main {
@@ -854,11 +904,6 @@ body.page-scroll-locked {
   color: var(--color-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.change-content-item.change-content-remove .change-content-icon {
-  background: #fbe9e7;
-  color: #8f1d14;
 }
 
 .change-content-status {
@@ -1476,19 +1521,62 @@ button.timetable-layer-row {
   text-align: right;
 }
 
-.layer-draft-badge {
+.layer-lifecycle-state {
   grid-column: 1;
   justify-self: start;
-  padding: 2px 6px;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  color: var(--color-primary);
-  font-size: 10px;
-  font-weight: 800;
 }
 
-.layer-draft-badge.conflict {
-  color: #7a5100;
+.immutable-field-notice {
+  display: grid;
+  gap: 12px;
+  border-radius: var(--radius-sm);
+  cursor: not-allowed;
+}
+
+.immutable-field-notice :disabled {
+  pointer-events: none;
+}
+
+.immutable-field-notice:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.note-placement-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.editor-discard-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(31, 41, 51, 0.42);
+}
+
+.editor-discard-dialog {
+  width: min(100%, 420px);
+  box-sizing: border-box;
+  padding: 22px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  box-shadow: 0 12px 30px rgba(35, 50, 77, 0.18);
+}
+
+.editor-discard-dialog h2 {
+  margin: 0 0 10px;
+  color: var(--color-primary);
+  font-size: 20px;
+}
+
+.editor-discard-dialog p {
+  margin: 0 0 22px;
+  color: var(--color-muted);
+  line-height: 1.6;
 }
 
 .layer-flow-arrow {
@@ -2226,7 +2314,7 @@ button.timetable-layer-row {
     text-align: left;
   }
 
-  .layer-draft-badge {
+  .layer-lifecycle-state {
     grid-column: 2;
   }
 

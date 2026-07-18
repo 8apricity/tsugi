@@ -15,7 +15,7 @@ describe('Task Note view', () => {
 
     expect(html.indexOf('新しいノート')).toBeLessThan(html.indexOf('下書きノート'))
     expect(html).toContain('note-body-clamped')
-    expect(html).toContain('下書き・要確認')
+    expect(html).toContain('追加予定・要確認')
     expect(html).not.toContain('task-scope-badge')
   })
 
@@ -25,8 +25,8 @@ describe('Task Note view', () => {
       { body: `${longFirstLine}\n二行目` },
       { body: '短いノート\n続き' },
     ])).toBe(
-      `このタスクとノート2件を削除します\n\n・${'あ'.repeat(80)}\n・短いノート`,
+      `このタスクとノート2件を削除予定にします\n\n・${'あ'.repeat(80)}\n・短いノート`,
     )
-    expect(taskRemovalConfirmation([])).toBe('このタスクを削除します')
+    expect(taskRemovalConfirmation([])).toBe('このタスクを削除予定にします')
   })
 })

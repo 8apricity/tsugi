@@ -47,6 +47,93 @@ test('a fixed test Student reaches authenticated Daily Plan', async ({
   ).toHaveCount(0)
 })
 
+test('draft lifecycle protects Task input and explains immutable scope', async ({
+  page,
+  browserName,
+  isMobile,
+}) => {
+  test.skip(
+    browserName !== 'chromium' || isMobile,
+    'Chromium desktop draft-lifecycle journey',
+  )
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: 'タスクを追加' }).click()
+
+  const addDialog = page.getByRole('dialog', { name: 'タスクを追加' })
+  const savedTitle = '下書き保護テスト'
+  await expect(
+    addDialog.getByRole('button', { name: '下書きを保存' }),
+  ).toBeVisible()
+  await addDialog.getByRole('textbox', { name: 'タイトル' }).fill(savedTitle)
+  await addDialog.getByRole('button', { name: '閉じる' }).click()
+
+  const discardDialog = page.getByRole('alertdialog', {
+    name: '入力内容を破棄しますか？',
+  })
+  await expect(discardDialog).toBeVisible()
+  await expect(discardDialog).toContainText('保存済みの下書きは変更されません。')
+  await discardDialog.getByRole('button', { name: '編集を続ける' }).click()
+
+  await addDialog
+    .getByRole('combobox', { name: '変更適用範囲' })
+    .selectOption('class')
+  await addDialog.getByRole('button', { name: '下書きを保存' }).click()
+
+  const draftCard = page.locator('.task-entry.task-draft').filter({
+    hasText: savedTitle,
+  })
+  await expect(draftCard.getByRole('img', { name: '追加予定' })).toHaveAttribute(
+    'title',
+    '追加予定の下書き',
+  )
+  await draftCard.locator('.task-item').click()
+  await page
+    .getByRole('dialog', { name: 'タスクの詳細' })
+    .getByRole('button', { name: '編集' })
+    .click()
+
+  const savedDraftDialog = page.getByRole('dialog', { name: 'タスクを追加' })
+  await expect(
+    savedDraftDialog.getByRole('button', { name: '下書きを更新' }),
+  ).toBeVisible()
+  await savedDraftDialog
+    .getByRole('textbox', { name: 'タイトル' })
+    .fill('破棄される未保存入力')
+  await savedDraftDialog.getByRole('button', { name: '閉じる' }).click()
+  await page
+    .getByRole('alertdialog', { name: '入力内容を破棄しますか？' })
+    .getByRole('button', { name: '入力内容を破棄' })
+    .click()
+  await expect(draftCard).toContainText(savedTitle)
+  await expect(draftCard).not.toContainText('破棄される未保存入力')
+
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映 (1)' }).click()
+  await expect(draftCard).toHaveCount(0)
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+
+  const activeCard = page.locator('.task-entry').filter({ hasText: savedTitle })
+  await activeCard.locator('.task-item').click()
+  const detailDialog = page.getByRole('dialog', { name: 'タスクの詳細' })
+  await expect(
+    detailDialog.getByRole('button', { name: '削除予定にする' }),
+  ).toBeVisible()
+  await detailDialog.getByRole('button', { name: '編集', exact: true }).click()
+
+  const immutableMessage =
+    'タスクの変更適用範囲は変更できません。削除予定にしてから追加し直してください。'
+  const updateDialog = page.getByRole('dialog', { name: 'タスクを編集' })
+  await expect(
+    updateDialog.getByRole('button', { name: '下書きを更新' }),
+  ).toBeVisible()
+  await updateDialog.getByRole('button', { name: immutableMessage }).click()
+  await expect(
+    page.getByRole('status').filter({ hasText: immutableMessage }),
+  ).toBeVisible()
+})
+
 test.describe('pointer state separation', () => {
   test('keeps hover styling and keyboard focus visible on desktop', async ({
     page,
@@ -219,6 +306,11 @@ test.describe('WebKit mobile editors', () => {
     await clearDueDateButton.click()
     await expect(dueDateInput).toHaveValue('')
     await dialog.getByRole('button', { name: '閉じる' }).click()
+    const discardDialog = page.getByRole('alertdialog', {
+      name: '入力内容を破棄しますか？',
+    })
+    await expect(discardDialog).toBeVisible()
+    await discardDialog.getByRole('button', { name: '入力内容を破棄' }).click()
     await expect(dialog).toHaveCount(0)
     await page.getByRole('button', { name: '編集を終了' }).click()
     await expect(

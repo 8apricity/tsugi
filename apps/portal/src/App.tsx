@@ -86,6 +86,18 @@ import {
   targetScopeLabel,
   type TargetScopeDisplayContext,
 } from "./uiCopy";
+import {
+  editorActionLabel,
+  hasUnsavedEditorInput,
+  lifecycleLabel,
+  type EditorKind,
+  type LifecycleKind,
+} from "./editorLifecycle";
+import {
+  DiscardConfirmationDialog,
+  ImmutableFieldNotice,
+  LifecycleIcon,
+} from "./editorLifecycleView";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -224,6 +236,17 @@ type NoteHistoryDialog = {
   note: DailyPlanNoteForCache;
   requestId: number;
   state: NoteEditHistoryState;
+};
+
+type PendingEditorDismissal = {
+  editor: EditorKind;
+  destination: "close" | "back" | "exit-editing";
+};
+
+type EditorInitialForms = {
+  timetable: TimetableEditorForm | null;
+  task: TaskEditorForm | null;
+  note: NoteEditorForm | null;
 };
 
 type ReferenceScopeOptionsState =
@@ -463,6 +486,13 @@ function App() {
     useState<TaskEditorForm | null>(null);
   const [noteEditorForm, setNoteEditorForm] =
     useState<NoteEditorForm | null>(null);
+  const editorInitialFormsRef = useRef<EditorInitialForms>({
+    timetable: null,
+    task: null,
+    note: null,
+  });
+  const [pendingEditorDismissal, setPendingEditorDismissal] =
+    useState<PendingEditorDismissal | null>(null);
   const [changeContentOpen, setChangeContentOpen] = useState(false);
   const changeContentReturnRef = useRef(false);
   const pendingChangeContentTimetableRef =
@@ -1223,6 +1253,8 @@ function App() {
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setNoteEditorForm(null);
+    clearEditorInitialForms();
+    setPendingEditorDismissal(null);
     setTaskDetail(null);
     setTaskHistoryDialog(null);
     setNoteHistoryDialog(null);
@@ -1245,15 +1277,32 @@ function App() {
     timetableEditorClient.enterEditing();
   }
 
-  function leaveTimetableEditing() {
+  function finishLeavingTimetableEditing() {
     timetableEditorClient.exitEditing();
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setNoteEditorForm(null);
+    clearEditorInitialForms();
+    setPendingEditorDismissal(null);
     setChangeContentOpen(false);
     changeContentReturnRef.current = false;
     pendingChangeContentTimetableRef.current = null;
     setTimetableEditorMessage(null);
+  }
+
+  function leaveTimetableEditing() {
+    const openEditor = timetableEditorForm
+      ? "timetable"
+      : taskEditorForm
+        ? "task"
+        : noteEditorForm
+          ? "note"
+          : null;
+    if (
+      openEditor &&
+      requestEditorDismissal(openEditor, "exit-editing")
+    ) return;
+    finishLeavingTimetableEditing();
   }
 
   function returnToChangeContentIfNeeded() {
@@ -1262,8 +1311,63 @@ function App() {
     setChangeContentOpen(true);
   }
 
+  function openTaskEditorForm(form: TaskEditorForm) {
+    editorInitialFormsRef.current.task = form;
+    setTaskEditorForm(form);
+  }
+
+  function openNoteEditorForm(form: NoteEditorForm) {
+    editorInitialFormsRef.current.note = form;
+    setNoteEditorForm(form);
+  }
+
+  function clearEditorInitialForms() {
+    editorInitialFormsRef.current = {
+      timetable: null,
+      task: null,
+      note: null,
+    };
+  }
+
+  function editorFormIsDirty(editor: EditorKind) {
+    if (editor === "timetable") {
+      return Boolean(
+        timetableEditorForm &&
+        editorInitialFormsRef.current.timetable &&
+        hasUnsavedEditorInput(
+          editorInitialFormsRef.current.timetable,
+          timetableEditorForm,
+        ),
+      );
+    }
+    if (editor === "task") {
+      return Boolean(
+        taskEditorForm &&
+        editorInitialFormsRef.current.task &&
+        hasUnsavedEditorInput(editorInitialFormsRef.current.task, taskEditorForm),
+      );
+    }
+    return Boolean(
+      noteEditorForm &&
+      editorInitialFormsRef.current.note &&
+      hasUnsavedEditorInput(editorInitialFormsRef.current.note, noteEditorForm),
+    );
+  }
+
+  function requestEditorDismissal(
+    editor: EditorKind,
+    destination: PendingEditorDismissal["destination"] = "close",
+  ) {
+    if (editorFormIsDirty(editor)) {
+      setPendingEditorDismissal({ editor, destination });
+      return true;
+    }
+    return false;
+  }
+
   function closeTaskEditorFlow() {
     setTaskEditorForm(null);
+    editorInitialFormsRef.current.task = null;
     setTaskLessonNameListOpen(false);
     setActiveTaskLessonNameOption(-1);
     returnToChangeContentIfNeeded();
@@ -1271,9 +1375,18 @@ function App() {
 
   function closeNoteEditorFlow() {
     setNoteEditorForm(null);
+    editorInitialFormsRef.current.note = null;
     setLessonNameListOpen(false);
     setActiveLessonNameOption(-1);
     returnToChangeContentIfNeeded();
+  }
+
+  function requestTaskEditorClose() {
+    if (!requestEditorDismissal("task")) closeTaskEditorFlow();
+  }
+
+  function requestNoteEditorClose() {
+    if (!requestEditorDismissal("note")) closeNoteEditorFlow();
   }
 
   function taskEditingSnapshotFromChangeItem(item: ChangeContentTaskItem) {
@@ -1335,6 +1448,7 @@ function App() {
 
   function openTimetableEditorAt(schoolDate: string, periodNumber: number) {
     setTimetableEditorForm(null);
+    editorInitialFormsRef.current.timetable = null;
     const cached = timetableLayerCacheRef.current.get(schoolDate, periodNumber);
     setTimetableLayerDialog({
       schoolDate,
@@ -1376,9 +1490,8 @@ function App() {
     changeKind: "add" | "update" | "remove" | null,
     conflicted: boolean,
   ) {
-    if (conflicted) return "要確認";
     if (changeKind === null) return "関連タスク";
-    return changeKindLabel(changeKind);
+    return lifecycleLabel(changeKind, conflicted);
   }
 
   function changeContentScopeContext() {
@@ -1403,9 +1516,11 @@ function App() {
             data-change-kind={item.changeKind}
             onClick={() => openChangeContentItem(item)}
           >
-            <span className="change-content-icon" aria-hidden="true" title={changeContentStatus(item.changeKind, item.conflicted)}>
-              {item.conflicted ? "⚠" : item.changeKind === "add" ? "+" : item.changeKind === "remove" ? "🗑" : "✎"}
-            </span>
+            <LifecycleIcon
+              className="change-content-icon"
+              kind={item.changeKind}
+              conflicted={item.conflicted}
+            />
             <span className="change-content-main">
               <strong>{item.periodNumber}限の時間割</strong>
               <small>
@@ -1439,9 +1554,11 @@ function App() {
           data-change-kind={item.draft.changeKind}
           onClick={() => openChangeContentItem(item)}
         >
-          <span className="change-content-icon" aria-hidden="true" title={changeContentStatus(item.changeKind, item.conflicted)}>
-            {item.conflicted ? "⚠" : item.changeKind === "add" ? "+" : item.changeKind === "remove" ? "🗑" : "✎"}
-          </span>
+          <LifecycleIcon
+            className="change-content-icon"
+            kind={item.draft.changeKind}
+            conflicted={item.conflicted}
+          />
           <span className="change-content-main">
             <strong>{item.task.title}</strong>
             <small>
@@ -1468,7 +1585,7 @@ function App() {
         </button>
       ) : (
         <div className="change-content-item change-content-task related-task-group">
-          <span className="change-content-icon" aria-hidden="true">↳</span>
+          <span className="related-task-icon" aria-hidden="true">↳</span>
           <span className="change-content-main">
             <strong>{item.task.title}</strong>
             <small>{changeContentDateLabel(item.task.dueDate)}・関連するタスク</small>
@@ -1490,9 +1607,11 @@ function App() {
                     data-change-kind={child.changeKind}
                     onClick={() => openChangeContentItem(child)}
                   >
-                    <span className="change-content-icon" aria-hidden="true" title={changeContentStatus(child.changeKind, child.conflicted)}>
-                      {child.conflicted ? "⚠" : child.changeKind === "add" ? "+" : child.changeKind === "remove" ? "🗑" : "✎"}
-                    </span>
+                    <LifecycleIcon
+                      className="change-content-icon"
+                      kind={child.changeKind}
+                      conflicted={child.conflicted}
+                    />
                     <span className="change-content-main">
                       <strong>ノート</strong>
                       {child.changeKind === "update" ? (
@@ -1531,9 +1650,11 @@ function App() {
           data-change-kind={item.changeKind}
           onClick={() => openChangeContentItem(item)}
         >
-          <span className="change-content-icon" aria-hidden="true" title={changeContentStatus(item.changeKind, item.conflicted)}>
-            {item.conflicted ? "⚠" : item.changeKind === "add" ? "+" : item.changeKind === "remove" ? "🗑" : "✎"}
-          </span>
+          <LifecycleIcon
+            className="change-content-icon"
+            kind={item.changeKind}
+            conflicted={item.conflicted}
+          />
           <span className="change-content-main">
             <strong>ノート</strong>
             <small>
@@ -1568,7 +1689,7 @@ function App() {
     setTaskLessonNamesExpanded(false);
     setTaskLessonNameListOpen(false);
     setActiveTaskLessonNameOption(-1);
-    setTaskEditorForm({
+    openTaskEditorForm({
       title: initial.title,
       dueDate: initial.dueDate,
       targetScopeType: initial.targetScopeType,
@@ -1579,7 +1700,7 @@ function App() {
   }
 
   function openNoteEditor() {
-    setNoteEditorForm({
+    openNoteEditorForm({
       ...createNewNoteDraftForm(selectedSchoolDate),
       editingNote: null,
       editingDraft: null,
@@ -1648,7 +1769,7 @@ function App() {
   }
 
   function openNoteUpdateEditor(note: DailyPlanNoteForCache) {
-    setNoteEditorForm({
+    openNoteEditorForm({
       body: note.body,
       schoolDate: noteSchoolDate(note),
       periodNumber: notePeriodNumber(note),
@@ -1660,7 +1781,7 @@ function App() {
   }
 
   function openNoteDraftEditor(draft: NoteDraft) {
-    setNoteEditorForm({
+    openNoteEditorForm({
       body: draft.body,
       schoolDate: draft.schoolDate,
       periodNumber: draft.periodNumber,
@@ -1677,7 +1798,7 @@ function App() {
     draft?: NoteDraft,
   ) {
     if (taskDetail?.task.taskId === task.taskId) setTaskDetail(null);
-    setNoteEditorForm({
+    openNoteEditorForm({
       body: note?.body ?? draft?.body ?? "",
       schoolDate: null,
       periodNumber: null,
@@ -1766,7 +1887,7 @@ function App() {
     setTaskLessonNamesExpanded(false);
     setTaskLessonNameListOpen(false);
     setActiveTaskLessonNameOption(-1);
-    setTaskEditorForm({
+    openTaskEditorForm({
       title: projectedTask?.title ?? task.title,
       dueDate: projectedTask?.dueDate ?? task.dueDate,
       targetScopeType: task.targetScopeType,
@@ -1783,7 +1904,7 @@ function App() {
     setTaskLessonNamesExpanded(false);
     setTaskLessonNameListOpen(false);
     setActiveTaskLessonNameOption(-1);
-    setTaskEditorForm({
+    openTaskEditorForm({
       title: draft.title,
       dueDate: draft.dueDate,
       targetScopeType: draft.targetScopeType,
@@ -1993,8 +2114,7 @@ function App() {
     setLessonNameOptionsExpanded(false);
     setLessonNameListOpen(false);
     setActiveLessonNameOption(-1);
-    setTimetableEditorForm(
-      existing
+    const form: TimetableEditorForm = existing
         ? {
             targetScopeType: existing.targetScopeType,
             changeDate: existing.changeDate,
@@ -2024,8 +2144,9 @@ function App() {
               includeTimetableChange: false,
               noteBody: "",
               replacement: { type: "lesson_name", lessonName: "" },
-            }),
-    );
+            });
+    editorInitialFormsRef.current.timetable = form;
+    setTimetableEditorForm(form);
   }
 
   openLayerReplacementRef.current = openLayerReplacement;
@@ -2126,6 +2247,7 @@ function App() {
 
   function closeTimetableDialogFlow() {
     setTimetableEditorForm(null);
+    editorInitialFormsRef.current.timetable = null;
     setTimetableHistoryDialog(null);
     setTimetableLayerDialog(null);
     pendingChangeContentTimetableRef.current = null;
@@ -2134,10 +2256,43 @@ function App() {
 
   function closeTimetableFormAfterDraftSave() {
     setTimetableEditorForm(null);
+    editorInitialFormsRef.current.timetable = null;
     if (!changeContentReturnRef.current) return;
     setTimetableLayerDialog(null);
     pendingChangeContentTimetableRef.current = null;
     returnToChangeContentIfNeeded();
+  }
+
+  function closeTimetableEditorBack() {
+    if (changeContentReturnRef.current) {
+      closeTimetableDialogFlow();
+      return;
+    }
+    setTimetableEditorForm(null);
+    editorInitialFormsRef.current.timetable = null;
+  }
+
+  function requestTimetableEditorClose(destination: "close" | "back") {
+    if (requestEditorDismissal("timetable", destination)) return;
+    if (destination === "close") closeTimetableDialogFlow();
+    else closeTimetableEditorBack();
+  }
+
+  function discardUnsavedEditorInput() {
+    const pending = pendingEditorDismissal;
+    if (!pending) return;
+    setPendingEditorDismissal(null);
+    if (pending.destination === "exit-editing") {
+      finishLeavingTimetableEditing();
+    } else if (pending.editor === "task") {
+      closeTaskEditorFlow();
+    } else if (pending.editor === "note") {
+      closeNoteEditorFlow();
+    } else if (pending.destination === "close") {
+      closeTimetableDialogFlow();
+    } else {
+      closeTimetableEditorBack();
+    }
   }
 
   function goBackInTimetableHistoryDialog() {
@@ -2148,6 +2303,7 @@ function App() {
 
   function navigateLayerDialog(schoolDate: string, periodNumber: number) {
     setTimetableEditorForm(null);
+    editorInitialFormsRef.current.timetable = null;
     setTimetableLayerDialog((current) =>
       current
         ? {
@@ -2709,7 +2865,13 @@ function App() {
                   aria-label="時間割"
                 >
                   <div className="period-list">
-                    {dailyPlanState.dailyPlan.periods.map((period) => (
+                    {dailyPlanState.dailyPlan.periods.map((period) => {
+                      const lifecycleDrafts = timetableEditor.drafts.filter(
+                        (draft) =>
+                          draft.changeDate === selectedSchoolDate &&
+                          draft.periodNumber === period.periodNumber,
+                      );
+                      return (
                       <article
                         className={`period-row inspectable ${
                           timetableEditorClient.isLessonEdited(
@@ -2725,11 +2887,13 @@ function App() {
                           className="period-inspect-button"
                           type="button"
                           aria-label={`${period.periodNumber}限 ${period.lessonName || "空欄"}${
-                            timetableEditorClient.isLessonEdited(
-                              selectedSchoolDate,
-                              period.periodNumber,
-                            )
-                              ? " 変更下書きあり"
+                            lifecycleDrafts.length > 0
+                              ? ` ${lifecycleDrafts.map((draft) =>
+                                  lifecycleLabel(
+                                    draft.changeKind,
+                                    Boolean(draft.conflicted),
+                                  )
+                                ).join("、")}`
                               : ""
                           }`}
                           onClick={() => openTimetableEditor(period.periodNumber)}
@@ -2745,6 +2909,17 @@ function App() {
                               {period.hasTasks ? (
                                 <span className="task-pill">タスク</span>
                               ) : null}
+                              {lifecycleDrafts.length > 0 ? (
+                                <span className="period-lifecycle-icons">
+                                  {lifecycleDrafts.map((draft) => (
+                                    <LifecycleIcon
+                                      key={draft.sourceId}
+                                      kind={draft.changeKind}
+                                      conflicted={draft.conflicted}
+                                    />
+                                  ))}
+                                </span>
+                              ) : null}
                             </span>
                           </span>
                         </button>
@@ -2755,7 +2930,8 @@ function App() {
                           targetScopeContext,
                         )}
                       </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
 
@@ -2806,7 +2982,18 @@ function App() {
                               {scopeLabel(task.targetScopeType, targetScopeContext)}
                             </span>
                             {item.type === "draft" ? (
-                              <small>{taskDraftStatus(item.draft)}</small>
+                              <span className="lifecycle-summary">
+                                <LifecycleIcon
+                                  kind={item.draft.changeKind}
+                                  conflicted={item.draft.conflicted}
+                                />
+                                <small>
+                                  {lifecycleLabel(
+                                    item.draft.changeKind,
+                                    Boolean(item.draft.conflicted),
+                                  )}
+                                </small>
+                              </span>
                             ) : null}
                           </span>
                           <span aria-hidden="true">›</span>
@@ -3135,7 +3322,7 @@ function App() {
                     className="icon-button"
                     type="button"
                     aria-label="閉じる"
-                    onClick={closeNoteEditorFlow}
+                    onClick={requestNoteEditorClose}
                   >
                     ×
                   </button>
@@ -3163,10 +3350,23 @@ function App() {
                     </small>
                   </label>
                   {noteEditorForm.relatedTask ? (
+                    <ImmutableFieldNotice
+                      kind="note"
+                      notePlacement="task"
+                      active={noteContextImmutable}
+                      onNotify={setTimetableEditorMessage}
+                    >
                     <p className="task-note-target">
                       {noteEditorForm.relatedTask.title}
                     </p>
+                    </ImmutableFieldNotice>
                   ) : noteEditorForm.periodNumber != null ? (
+                    <ImmutableFieldNotice
+                      kind="note"
+                      notePlacement="daily-lesson"
+                      active={noteContextImmutable}
+                      onNotify={setTimetableEditorMessage}
+                    >
                     <div className="note-fixed-context">
                       <label className="immutable-field">
                         <span>日付</span>
@@ -3196,8 +3396,14 @@ function App() {
                         </select>
                       </label>
                     </div>
+                    </ImmutableFieldNotice>
                   ) : (
-                    <>
+                    <ImmutableFieldNotice
+                      kind="note"
+                      active={noteContextImmutable}
+                      className="note-placement-fields"
+                      onNotify={setTimetableEditorMessage}
+                    >
                       <label
                         className={
                           noteContextImmutable ? "immutable-field" : undefined
@@ -3294,13 +3500,13 @@ function App() {
                           )}
                         </select>
                       </label>
-                    </>
+                    </ImmutableFieldNotice>
                   )}
                   <div className="editor-dialog-actions">
                     <button
                       className="button-secondary"
                       type="button"
-                      onClick={closeNoteEditorFlow}
+                      onClick={requestNoteEditorClose}
                     >
                       キャンセル
                     </button>
@@ -3319,9 +3525,11 @@ function App() {
                       </button>
                     ) : (
                       <button className="button-primary" type="submit">
-                        {noteEditorForm.editingNote || noteEditorForm.editingDraft
-                          ? "変更を下書きに保存"
-                          : "下書きに保存"}
+                        {editorActionLabel(
+                          noteEditorForm.editingNote || noteEditorForm.editingDraft
+                            ? "update"
+                            : "add",
+                        )}
                       </button>
                     )}
                   </div>
@@ -3348,7 +3556,7 @@ function App() {
                     className="icon-button"
                     type="button"
                     aria-label="閉じる"
-                    onClick={closeTaskEditorFlow}
+                    onClick={requestTaskEditorClose}
                   >
                     ×
                   </button>
@@ -3530,6 +3738,10 @@ function App() {
                     </p>
                   ) : null}
                   {taskEditorForm.editingTask ? (
+                    <ImmutableFieldNotice
+                      kind="task"
+                      onNotify={setTimetableEditorMessage}
+                    >
                     <label className="immutable-field">
                       <span>変更適用範囲</span>
                       <select
@@ -3544,6 +3756,7 @@ function App() {
                         </option>
                       </select>
                     </label>
+                    </ImmutableFieldNotice>
                   ) : (
                     <label>
                       <span>変更適用範囲</span>
@@ -3580,14 +3793,16 @@ function App() {
                     <button
                       className="button-secondary"
                       type="button"
-                      onClick={closeTaskEditorFlow}
+                      onClick={requestTaskEditorClose}
                     >
                       キャンセル
                     </button>
                     <button className="button-primary" type="submit">
-                      {taskEditorForm.editingTask
-                        ? "変更を下書きに保存"
-                        : "下書きに保存"}
+                      {editorActionLabel(
+                        taskEditorForm.editingTask || taskEditorForm.editingDraft
+                          ? "update"
+                          : "add",
+                      )}
                     </button>
                   </div>
                 </form>
@@ -3603,8 +3818,11 @@ function App() {
                 targetScopeContext,
               )}
               referenceSchoolDate={selectedSchoolDate}
-              draftStatus={taskDetail.type === "draft"
-                ? taskDraftStatus(taskDetail.draft)
+              draftLifecycle={taskDetail.type === "draft"
+                ? {
+                    kind: taskDetail.draft.changeKind,
+                    conflicted: Boolean(taskDetail.draft.conflicted),
+                  }
                 : undefined}
               notes={taskNoteList(taskDetail.task, taskDetail.task.notes)}
               addNoteDisabled={
@@ -3994,6 +4212,7 @@ function App() {
                         }
                         desired={layer.desired}
                         conflicted={layer.conflicted}
+                        lifecycleKind={existingDraft?.changeKind}
                         onClick={
                           editable
                             ? () => openLayerReplacement(layer.targetScopeType)
@@ -4013,7 +4232,7 @@ function App() {
                           ...(timetableEditor.editing &&
                             !timetableEditor.submitting &&
                             serverLayer?.state === "active" ? [{
-                              label: "削除",
+                              label: editorActionLabel("remove"),
                               onClick: () => planLayerRemoval(
                                 layer.targetScopeType,
                               ),
@@ -4058,11 +4277,8 @@ function App() {
                 aria-labelledby="timetable-editor-title"
                 onKeyDown={(event) => {
                   if (event.key !== "Escape") return;
-                  if (changeContentReturnRef.current) {
-                    closeTimetableDialogFlow();
-                  } else {
-                    setTimetableEditorForm(null);
-                  }
+                  event.preventDefault();
+                  requestTimetableEditorClose("back");
                 }}
               >
                 <form onSubmit={saveTimetableDraft}>
@@ -4071,13 +4287,7 @@ function App() {
                       className="icon-button"
                       type="button"
                       aria-label="時間割の変更状況に戻る"
-                      onClick={() => {
-                        if (changeContentReturnRef.current) {
-                          closeTimetableDialogFlow();
-                        } else {
-                          setTimetableEditorForm(null);
-                        }
-                      }}
+                      onClick={() => requestTimetableEditorClose("back")}
                     >
                       ‹
                     </button>
@@ -4089,11 +4299,24 @@ function App() {
                       type="button"
                       aria-label="閉じる"
                       autoFocus
-                      onClick={closeTimetableDialogFlow}
+                      onClick={() => requestTimetableEditorClose("close")}
                     >
                       ×
                     </button>
                   </header>
+                  <ImmutableFieldNotice
+                    kind="timetable"
+                    active={Boolean(
+                      timetableEditorForm.sourceId ||
+                      loadedLayerState?.layers.some(
+                        (layer) =>
+                          layer.targetScopeType ===
+                            timetableEditorForm.targetScopeType &&
+                          layer.state === "active",
+                      ),
+                    )}
+                    onNotify={setTimetableEditorMessage}
+                  >
                   <div className="editor-fields">
                     <label className="immutable-field">
                       変更対象日
@@ -4126,6 +4349,7 @@ function App() {
                       </select>
                     </label>
                   </div>
+                  </ImmutableFieldNotice>
 
                   <label className="timetable-change-toggle">
                     <input
@@ -4403,6 +4627,7 @@ function App() {
                             timetableEditorForm.periodNumber,
                           );
                           setTimetableEditorForm(null);
+                          editorInitialFormsRef.current.timetable = null;
                         }}
                       >
                         下書きを取り消す
@@ -4422,7 +4647,7 @@ function App() {
                         disabled={timetableEditor.submitting}
                         onClick={planTimetableRemoval}
                       >
-                        削除を下書きに追加
+                        {editorActionLabel("remove")}
                       </button>
                     ) : null}
                     <button
@@ -4437,12 +4662,29 @@ function App() {
                           !timetableEditorOptions)
                       }
                     >
-                      下書きに保存
+                      {editorActionLabel(
+                        timetableEditorForm.sourceId ||
+                        loadedLayerState?.layers.some(
+                          (layer) =>
+                            layer.targetScopeType ===
+                              timetableEditorForm.targetScopeType &&
+                            layer.state === "active",
+                        )
+                          ? "update"
+                          : "add",
+                      )}
                     </button>
                   </footer>
                 </form>
               </section>
             </div>
+          ) : null}
+
+          {pendingEditorDismissal ? (
+            <DiscardConfirmationDialog
+              onContinue={() => setPendingEditorDismissal(null)}
+              onDiscard={discardUnsavedEditorInput}
+            />
           ) : null}
         </section>
       </main>
@@ -4682,6 +4924,7 @@ function LayerRow({
   detail,
   desired = false,
   conflicted = false,
+  lifecycleKind,
   onClick,
   menuActions = [],
 }: {
@@ -4690,6 +4933,7 @@ function LayerRow({
   detail?: string;
   desired?: boolean;
   conflicted?: boolean;
+  lifecycleKind?: LifecycleKind;
   onClick?: () => void;
   menuActions?: Array<{
     label: string;
@@ -4703,9 +4947,10 @@ function LayerRow({
       <span className="timetable-layer-label">{label}</span>
       <strong>{value}</strong>
       <small>{detail}</small>
-      {desired ? (
-        <span className={`layer-draft-badge${conflicted ? " conflict" : ""}`}>
-          {conflicted ? "要確認" : "下書き"}
+      {desired && lifecycleKind ? (
+        <span className="layer-lifecycle-state">
+          <LifecycleIcon kind={lifecycleKind} conflicted={conflicted} />
+          <small>{lifecycleLabel(lifecycleKind, conflicted)}</small>
         </span>
       ) : null}
     </>
@@ -4720,7 +4965,11 @@ function LayerRow({
             className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
             type="button"
             onClick={onClick}
-            aria-label={`${label}の時間割を編集${desired ? "、下書きあり" : ""}`}
+            aria-label={`${label}の時間割を編集${
+              desired && lifecycleKind
+                ? `、${lifecycleLabel(lifecycleKind, conflicted)}`
+                : ""
+            }`}
           >
             {content}
           </button>
@@ -5297,13 +5546,6 @@ function formatRelativeTime(timestamp: number) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}時間前`;
   return `${Math.floor(hours / 24)}日前`;
-}
-
-function taskDraftStatus(draft: TaskDraft & { conflicted?: boolean }) {
-  if (draft.conflicted) return "ほかの変更あり";
-  if (draft.changeKind === "remove") return "削除予定";
-  if (draft.changeKind === "update") return "変更予定";
-  return "追加予定";
 }
 
 function editableTask(task: DailyPlanTaskForCache) {

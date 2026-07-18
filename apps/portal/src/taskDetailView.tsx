@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react'
 import type { VisibleTask } from './taskListView'
 import { formatDueDate } from './uiCopy'
+import { lifecycleLabel, type LifecycleKind } from './editorLifecycle'
+import { LifecycleIcon } from './editorLifecycleView'
 
 export function TaskDetailDialog({
   task,
   taskScopeLabel,
   referenceSchoolDate,
-  draftStatus,
+  draftLifecycle,
   notes,
   addNoteDisabled = false,
   onClose,
@@ -19,7 +21,7 @@ export function TaskDetailDialog({
   task: VisibleTask
   taskScopeLabel: string
   referenceSchoolDate: string
-  draftStatus?: string
+  draftLifecycle?: { kind: LifecycleKind; conflicted: boolean }
   notes: ReactNode
   addNoteDisabled?: boolean
   onClose: () => void
@@ -53,7 +55,23 @@ export function TaskDetailDialog({
           <div><dt>期限</dt><dd>{task.dueDate ? formatDueDate(task.dueDate, referenceSchoolDate) : "期限なし"}</dd></div>
           <div><dt>関連する授業</dt><dd>{task.relatedLessonName ?? "なし"}</dd></div>
           <div><dt>変更適用範囲</dt><dd>{taskScopeLabel}</dd></div>
-          {draftStatus ? <div><dt>状態</dt><dd>{draftStatus}</dd></div> : null}
+          {draftLifecycle ? (
+            <div>
+              <dt>状態</dt>
+              <dd className="lifecycle-summary">
+                <LifecycleIcon
+                  kind={draftLifecycle.kind}
+                  conflicted={draftLifecycle.conflicted}
+                />
+                <span>
+                  {lifecycleLabel(
+                    draftLifecycle.kind,
+                    draftLifecycle.conflicted,
+                  )}
+                </span>
+              </dd>
+            </div>
+          ) : null}
         </dl>
         {notes}
         <div className="editor-dialog-actions">
@@ -84,7 +102,7 @@ export function TaskDetailDialog({
           ) : null}
           {onRemove ? (
             <button className="button-danger" type="button" onClick={onRemove}>
-              削除
+              削除予定にする
             </button>
           ) : null}
         </div>

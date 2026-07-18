@@ -1,6 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import { isNoteBodyOverflowing } from './noteCardLayout'
+import { lifecycleLabel } from './editorLifecycle'
+import { LifecycleIcon } from './editorLifecycleView'
 
 export function NoteBodyView({
   body,
@@ -101,10 +103,10 @@ export function NoteCard({
           <span className="task-scope-badge">{targetScopeLabel}</span>
         ) : null}
         {draft ? (
-          <small>
-            {changeKind === 'remove' ? '削除予定' : '下書き'}
-            {conflicted ? '・要確認' : ''}
-          </small>
+          <span className="lifecycle-summary">
+            <LifecycleIcon kind={changeKind} conflicted={conflicted} />
+            <small>{lifecycleLabel(changeKind, conflicted)}</small>
+          </span>
         ) : null}
         {draft && onCancelDraft ? (
           <button
@@ -125,7 +127,7 @@ export function NoteCard({
         ) : null}
         {!draft && onRemove ? (
           <button className="button-link" type="button" onClick={onRemove}>
-            削除
+            削除予定にする
           </button>
         ) : null}
         {onOpenHistory ? (

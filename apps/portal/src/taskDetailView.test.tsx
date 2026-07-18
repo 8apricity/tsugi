@@ -17,7 +17,7 @@ describe('Task detail dialog', () => {
         }}
         taskScopeLabel="文科"
         referenceSchoolDate="2026-07-10"
-        draftStatus="変更予定"
+        draftLifecycle={{ kind: 'update', conflicted: false }}
         notes={<TaskNoteList notes={[{ noteId: 'note-1', body: '関連ノート' }]} />}
         onClose={() => undefined}
         onEdit={() => undefined}
@@ -30,7 +30,7 @@ describe('Task detail dialog', () => {
     expect(markup).toContain('7月11日まで')
     expect(markup).toContain('地理')
     expect(markup).toContain('文科')
-    expect(markup).toContain('変更予定')
+    expect(markup).toContain('更新予定')
     expect(markup).toContain('関連ノート')
     expect(markup).toContain('編集')
     expect(markup).toContain('下書きを取り消す')

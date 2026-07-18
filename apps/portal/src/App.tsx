@@ -2319,7 +2319,11 @@ function App() {
     activeNotes: DailyPlanNoteForCache[],
     taskRemovalPlanned = false,
     detailParent?: NoteDetailParent,
+    presentation: "daily-plan" | "parent" = detailParent
+      ? "parent"
+      : "daily-plan",
   ) {
+    const related = presentation === "daily-plan";
     const items = buildVisibleTaskNoteList(
       activeNotes,
       timetableEditor.noteDrafts,
@@ -2350,6 +2354,7 @@ function App() {
               ? () => openNoteDetail(item.activeNote!, detailParent, note)
               : undefined,
           wholeCardDetailTarget: detailParent?.type === "task",
+          related,
         };
       }
       if (item.type === "cascade-removal") {
@@ -2361,6 +2366,7 @@ function App() {
           changeKind: "remove" as const,
           removalReason: "task-cascade" as const,
           onOpenHistory: undefined,
+          related,
         };
       }
       const note = item.note;
@@ -2374,6 +2380,7 @@ function App() {
           ? () => openNoteDetail(note, detailParent)
           : undefined,
         wholeCardDetailTarget: detailParent?.type === "task",
+        related,
       };
     });
     return <TaskNoteList notes={items} />;
@@ -2412,6 +2419,7 @@ function App() {
             ? () => openNoteDetail(item.activeNote!, detailParent, note)
             : undefined,
           wholeCardDetailTarget: detailParent?.type === "timetable",
+          related: !detailParent,
         };
       }
       const note = item.note;
@@ -2426,6 +2434,7 @@ function App() {
           ? () => openNoteDetail(note, detailParent)
           : undefined,
         wholeCardDetailTarget: detailParent?.type === "timetable",
+        related: !detailParent,
       };
     });
     return <DailyLessonNoteList notes={items} className={className} />;
@@ -4290,6 +4299,8 @@ function App() {
                       taskEditorForm.editingTask,
                       taskEditorForm.editingTask.notes ?? [],
                       taskEditorForm.removalPlanned,
+                      undefined,
+                      "parent",
                     )
                   ) : null}
                   <TaskNoteFields

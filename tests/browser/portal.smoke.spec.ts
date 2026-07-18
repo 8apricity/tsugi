@@ -142,6 +142,187 @@ test('Daily Lesson Notes use the Timetable Change dialog and detail lifecycle', 
   ).toHaveCount(0)
 })
 
+test('related Notes fuse with Daily Plan parents and keep detail targets on the parent flows', async ({
+  page,
+}) => {
+  const lessonNoteBody = Array.from(
+    { length: 6 },
+    (_, index) => `Daily Plan 長文 ${Date.now()} ${index + 1}`,
+  ).join('\n')
+  const taskTitle = `Issue 63 Task ${Date.now()}`
+  const taskNoteBody = Array.from(
+    { length: 6 },
+    (_, index) => `Issue 63 Task Note ${Date.now()} ${index + 1}`,
+  ).join('\n')
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: /^1限/ }).click()
+
+  const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+  await layerDialog
+    .getByRole('button', { name: /の時間割を編集/ })
+    .first()
+    .click()
+  const timetableDialog = page.getByRole('dialog', { name: '時間割変更' })
+  await timetableDialog
+    .getByRole('textbox', { name: 'ノート本文 1' })
+    .fill(lessonNoteBody)
+  await timetableDialog.getByRole('button', { name: '下書きを保存' }).click()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+
+  await page.getByRole('button', { name: 'タスクを追加' }).click()
+  const taskDialog = page.getByRole('dialog', { name: 'タスクを追加' })
+  await taskDialog.getByRole('textbox', { name: 'タイトル' }).fill(taskTitle)
+  await taskDialog
+    .getByRole('combobox', { name: '変更適用範囲' })
+    .selectOption('class')
+  await taskDialog.getByRole('button', { name: '＋ノートを追加' }).click()
+  await taskDialog
+    .getByRole('textbox', { name: 'ノート本文 1' })
+    .fill(taskNoteBody)
+  await taskDialog.getByRole('button', { name: '下書きを保存' }).click()
+
+  const draftLessonNote = page
+    .locator('.period-row .daily-lesson-note-list .note-item')
+    .filter({ hasText: lessonNoteBody })
+  const draftTaskNote = page
+    .locator('.task-entry')
+    .filter({ hasText: taskTitle })
+    .locator('.task-note-list .note-item')
+    .filter({ hasText: taskNoteBody })
+  await expect(draftLessonNote).toHaveCount(1)
+  await expect(draftTaskNote).toHaveCount(1)
+  await expect(draftLessonNote.locator('.lifecycle-summary')).toHaveClass(/sr-only/)
+  await expect(draftTaskNote.locator('.lifecycle-summary')).toHaveClass(/sr-only/)
+  await expect(draftLessonNote.locator('.lifecycle-summary')).toHaveCSS(
+    'clip',
+    'rect(0px, 0px, 0px, 0px)',
+  )
+  await expect(draftTaskNote.locator('.lifecycle-summary')).toHaveCSS(
+    'clip',
+    'rect(0px, 0px, 0px, 0px)',
+  )
+  await expect(
+    draftLessonNote.getByRole('img', { name: '追加予定' }),
+  ).toHaveCount(1)
+  await expect(
+    draftTaskNote.getByRole('img', { name: '追加予定' }),
+  ).toHaveCount(1)
+  await expect(
+    draftLessonNote.getByRole('button', { name: 'ノートの詳細を開く' }),
+  ).toHaveCount(0)
+  await expect(
+    draftTaskNote.getByRole('button', { name: 'ノートの詳細を開く' }),
+  ).toHaveCount(0)
+
+  await page.getByRole('button', { name: /変更内容（/ }).click()
+  const review = page.getByRole('dialog', { name: '変更内容' })
+  await review.getByRole('button', { name: '反映を確認' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '変更を反映' }).click()
+
+  const lessonNote = page
+    .locator('.period-row .daily-lesson-note-list .note-item')
+    .filter({ hasText: lessonNoteBody })
+  await expect(lessonNote).toHaveCount(1)
+  await expect(lessonNote).toHaveCSS(
+    'background-color',
+    'rgba(0, 0, 0, 0)',
+  )
+  await expect(lessonNote).toHaveCSS('border-top-width', '0px')
+  await expect(
+    lessonNote.getByRole('button', { name: 'ノートの詳細を開く' }),
+  ).toHaveCount(0)
+  await expect(
+    lessonNote.locator('.note-body-clamped'),
+  ).toHaveCSS('-webkit-line-clamp', '3')
+  const periodNumberBox = await lessonNote
+    .locator('xpath=ancestor::article[contains(@class, "period-row")]')
+    .locator('.period-number')
+    .boundingBox()
+  const lessonNoteBox = await lessonNote.boundingBox()
+  expect(periodNumberBox).not.toBeNull()
+  expect(lessonNoteBox).not.toBeNull()
+  if (periodNumberBox && lessonNoteBox) {
+    expect(lessonNoteBox.x).toBeGreaterThanOrEqual(
+      periodNumberBox.x + periodNumberBox.width - 1,
+    )
+  }
+  const periodRowBox = await lessonNote
+    .locator('xpath=ancestor::article[contains(@class, "period-row")]')
+    .boundingBox()
+  const lessonNoteBodyBox = await lessonNote
+    .locator('.note-body-clamped')
+    .boundingBox()
+  expect(periodRowBox).not.toBeNull()
+  expect(lessonNoteBodyBox).not.toBeNull()
+  if (periodRowBox && lessonNoteBodyBox) {
+    expect(lessonNoteBodyBox.x).toBeGreaterThanOrEqual(
+      periodNumberBox ? periodNumberBox.x + periodNumberBox.width - 1 : 0,
+    )
+    expect(lessonNoteBodyBox.x + lessonNoteBodyBox.width).toBeLessThanOrEqual(
+      periodRowBox.x + periodRowBox.width + 1,
+    )
+  }
+  const expandButton = lessonNote.getByRole('button', {
+    name: 'ノートの続きを読む',
+  })
+  await expect(expandButton).toBeVisible()
+  await expandButton.click()
+  await expect(lessonNote.locator('.note-body-expanded')).toHaveText(
+    lessonNoteBody,
+  )
+
+  const taskCard = page.locator('.task-entry').filter({ hasText: taskTitle })
+  const taskNote = taskCard
+    .locator('.task-note-list .note-item')
+    .filter({ hasText: taskNoteBody })
+  await expect(taskNote).toHaveCount(1)
+  await expect(taskNote).toHaveCSS(
+    'background-color',
+    'rgba(0, 0, 0, 0)',
+  )
+  await expect(taskNote).toHaveCSS('border-top-width', '0px')
+  await expect(
+    taskNote.locator('.note-body-clamped'),
+  ).toHaveCSS('-webkit-line-clamp', '3')
+  await taskNote
+    .getByRole('button', { name: 'ノートの続きを読む' })
+    .click()
+  await expect(taskNote.locator('.note-body-expanded')).toHaveText(taskNoteBody)
+  await expect(
+    taskNote.getByRole('button', { name: 'ノートの詳細を開く' }),
+  ).toHaveCount(0)
+
+  await taskCard.locator('.task-item').click()
+  const taskDetail = page.getByRole('dialog', { name: 'タスクの詳細' })
+  await taskDetail
+    .getByRole('button', { name: 'ノートの詳細を開く' })
+    .click()
+  const taskNoteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await expect(taskNoteDetail.getByText(taskNoteBody, { exact: true })).toBeVisible()
+  await taskNoteDetail
+    .getByRole('button', { name: 'タスクの詳細に戻る' })
+    .click()
+  await taskDetail.getByRole('button', { name: '閉じる' }).click()
+
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await page.getByRole('button', { name: /^1限/ }).click()
+  const activeLayerDialog = page.getByRole('dialog', {
+    name: '時間割の変更状況',
+  })
+  await activeLayerDialog
+    .getByRole('button', { name: 'ノートの詳細を開く' })
+    .filter({ hasText: lessonNoteBody })
+    .click()
+  const lessonNoteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
+  await expect(
+    lessonNoteDetail.getByText(lessonNoteBody, { exact: true }),
+  ).toBeVisible()
+  await lessonNoteDetail.getByRole('button', { name: '戻る' }).click()
+})
+
 test('independent Note uses one detail flow for viewing, editing, removal, and history', async ({
   page,
 }) => {

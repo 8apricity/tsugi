@@ -13,6 +13,7 @@ export type DailyLessonNoteListItem = {
   onOpenHistory?: () => void
   onOpenDetail?: () => void
   wholeCardDetailTarget?: boolean
+  related?: boolean
 }
 
 export function DailyLessonNoteList({

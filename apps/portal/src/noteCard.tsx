@@ -56,6 +56,7 @@ export function NoteCard({
   onEdit,
   onRemove,
   onOpenHistory,
+  onOpenDetail,
 }: {
   noteId: string
   body: string
@@ -68,6 +69,7 @@ export function NoteCard({
   onEdit?: () => void
   onRemove?: () => void
   onOpenHistory?: () => void
+  onOpenDetail?: () => void
 }) {
   const generatedId = useId()
   const bodyId = `note-body-${generatedId.replace(/:/g, '')}`
@@ -87,24 +89,39 @@ export function NoteCard({
     return () => observer?.disconnect()
   }, [body, expanded])
 
+  const removalSurface = draft && changeKind === 'remove' &&
+    removalReason !== 'task-cascade'
+
   return (
     <article
-      className={`note-item${draft ? ' note-draft' : ''}`}
+      className={`note-item${draft ? ' note-draft' : ''}${removalSurface ? ' note-removal-draft' : ''}`}
       data-note-id={noteId}
     >
-      <NoteBodyView
-        body={body}
-        bodyId={bodyId}
-        expanded={expanded}
-        overflowing={overflowing}
-        onExpand={() => setExpanded(true)}
-        bodyRef={bodyRef}
-      />
+      {onOpenDetail ? (
+        <button
+          className="note-detail-card"
+          type="button"
+          aria-label="ノートの詳細を開く"
+          onClick={onOpenDetail}
+        >
+          <span className="note-detail-card-body">{body}</span>
+        </button>
+      ) : (
+        <NoteBodyView
+          body={body}
+          bodyId={bodyId}
+          expanded={expanded}
+          overflowing={overflowing}
+          onExpand={() => setExpanded(true)}
+          bodyRef={bodyRef}
+        />
+      )}
+      {removalSurface ? <NoteRemovalGlyph /> : null}
       <div className="note-meta">
         {targetScopeLabel ? (
           <span className="task-scope-badge">{targetScopeLabel}</span>
         ) : null}
-        {draft ? (
+        {draft && !removalSurface ? (
           <span className="lifecycle-summary">
             <LifecycleIcon kind={changeKind} conflicted={conflicted} />
             <small>{lifecycleLabel(changeKind, conflicted)}</small>
@@ -148,5 +165,19 @@ export function NoteCard({
         ) : null}
       </div>
     </article>
+  )
+}
+
+function NoteRemovalGlyph() {
+  return (
+    <span
+      className="note-removal-glyph"
+      role="img"
+      aria-label="削除対象のノート"
+    >
+      <svg viewBox="0 0 24 24" focusable="false">
+        <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7" />
+      </svg>
+    </span>
   )
 }

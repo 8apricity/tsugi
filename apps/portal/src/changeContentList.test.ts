@@ -198,11 +198,23 @@ describe('change-content list projection', () => {
       reviewVisible: false,
       badgeVisible: true,
       badgeLabel: '下書き2件',
+      editModeVisible: true,
     })
     expect(changeContentControlState({ editing: true, draftCount: 0 })).toEqual({
       reviewVisible: true,
       badgeVisible: false,
       badgeLabel: null,
+      editModeVisible: true,
+    })
+    expect(changeContentControlState({
+      editing: true,
+      draftCount: 2,
+      referenceScopeActive: true,
+    })).toEqual({
+      reviewVisible: false,
+      badgeVisible: false,
+      badgeLabel: null,
+      editModeVisible: false,
     })
   })
 

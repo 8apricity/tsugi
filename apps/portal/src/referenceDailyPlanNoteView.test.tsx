@@ -77,6 +77,8 @@ describe('Reference Scope Daily Plan Note view', () => {
     expect(html).not.toContain('編集履歴')
     expect(html).not.toContain('>編集<')
     expect(html).not.toContain('>削除<')
+    expect(html).not.toContain('変更内容')
+    expect(html).not.toContain('<button')
     expect(html).not.toContain('投稿者')
     expect(html).not.toContain('<time')
   })

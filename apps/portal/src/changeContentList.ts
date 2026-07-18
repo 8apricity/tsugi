@@ -97,14 +97,19 @@ export function countChangeContentDrafts({
 export function changeContentControlState({
   editing,
   draftCount,
+  referenceScopeActive = false,
 }: {
   editing: boolean
   draftCount: number
+  referenceScopeActive?: boolean
 }) {
   return {
-    reviewVisible: editing,
-    badgeVisible: draftCount > 0,
-    badgeLabel: draftCount > 0 ? `下書き${draftCount}件` : null,
+    editModeVisible: !referenceScopeActive,
+    reviewVisible: editing && !referenceScopeActive,
+    badgeVisible: draftCount > 0 && !referenceScopeActive,
+    badgeLabel: draftCount > 0 && !referenceScopeActive
+      ? `下書き${draftCount}件`
+      : null,
   }
 }
 

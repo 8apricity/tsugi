@@ -73,6 +73,7 @@ import type {
   ReferenceScopeOption,
   ReferenceScopeOptions,
 } from "../shared/referenceDailyPlan";
+import { createReferenceScopeEditingSession } from "./referenceScopeEditing";
 import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
@@ -477,6 +478,13 @@ function App() {
       draftStorageScope: null,
       submitDirectChanges:
         createSharedInformationDirectChangeTransport(),
+    }),
+  );
+  const [referenceScopeEditingSession] = useState(() =>
+    createReferenceScopeEditingSession({
+      isEditing: () => timetableEditorClient.getSnapshot().editing,
+      pauseEditing: () => timetableEditorClient.exitEditing(),
+      resumeEditing: () => timetableEditorClient.enterEditing(),
     }),
   );
   const timetableLayerCacheRef = useRef(
@@ -1295,6 +1303,7 @@ function App() {
     setReferenceScopeOptions(null);
     setReferencePickerScopeKey("");
     setReferenceScope(null);
+    referenceScopeEditingSession.reset();
     setMenuOpen(false);
     setChangeContentOpen(false);
     setDirectChangeReviewOpen(false);
@@ -1819,8 +1828,15 @@ function App() {
       return;
     }
     setReferenceDailyPlan(null);
+    referenceScopeEditingSession.enterReferenceScope();
     setReferenceScope(option);
     setReferencePickerOpen(false);
+  }
+
+  function leaveReferenceScope() {
+    setReferenceScope(null);
+    referenceScopeEditingSession.leaveReferenceScope();
+    setMenuOpen(false);
   }
 
   function notePeriodNumber(note: DailyPlanNoteForCache) {
@@ -2687,6 +2703,7 @@ function App() {
     const changeContentControls = changeContentControlState({
       editing: timetableEditor.editing,
       draftCount: timetableEditor.draftCount,
+      referenceScopeActive: referenceScope !== null,
     });
     const loadedLayerState =
       timetableLayerDialog?.state.status === "ready"
@@ -2815,10 +2832,7 @@ function App() {
                     <button
                       className="menu-item"
                       type="button"
-                      onClick={() => {
-                        setReferenceScope(null);
-                        setMenuOpen(false);
-                      }}
+                      onClick={leaveReferenceScope}
                     >
                       自分の予定に戻る
                     </button>
@@ -2901,13 +2915,6 @@ function App() {
               <>
                 <div className="reference-scope-banner" role="status">
                   自分の時間割で<strong>{referenceScope.label}</strong>を参照中
-                  <button
-                    className="button-link"
-                    type="button"
-                    onClick={openReferencePicker}
-                  >
-                    範囲を変更
-                  </button>
                 </div>
                 <ReferenceDailyPlanNotes
                   {...referenceDailyPlan}
@@ -3225,7 +3232,7 @@ function App() {
                   </button>
                 ))}
               </nav>
-              {!referenceScope ? (
+              {changeContentControls.editModeVisible ? (
               <div className="timetable-edit-controls">
                 {changeContentControls.reviewVisible ? (
                   <>

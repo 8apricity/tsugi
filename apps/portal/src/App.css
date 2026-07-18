@@ -464,7 +464,7 @@ button.period-inspect-button:active {
   padding: 4px;
   border: 0;
   background: transparent;
-  cursor: default;
+  cursor: pointer;
 }
 
 .task-draft-actions {

@@ -226,6 +226,7 @@ export function createDailyPlanClient({
   }
 
   return {
+    getCachedDailyPlans: () => cache.getCachedDailyPlans(),
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
       listeners.add(listener);

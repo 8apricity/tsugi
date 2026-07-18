@@ -116,6 +116,10 @@ export function createDailyPlanCache({
     return dailyPlans.get(schoolDate) ?? null;
   }
 
+  function getCachedDailyPlans() {
+    return [...dailyPlans.values()];
+  }
+
   async function fetchRange(start: string, end: string) {
     if (isRangeLoaded(start, end)) {
       return { status: "ready", dailyPlans: {} } as const;
@@ -196,6 +200,7 @@ export function createDailyPlanCache({
 
   return {
     getCachedDailyPlan,
+    getCachedDailyPlans,
     getDailyPlan,
     prefetchNearLoadedEdge,
     prefetchRange: fetchRange,

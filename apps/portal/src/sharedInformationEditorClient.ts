@@ -68,10 +68,27 @@ export type NewTaskDraftForm = {
 
 type TaskSnapshotDraft = Omit<NewTaskDraftForm, 'targetScopeType'>
 
+export type TaskNoteSnapshot = {
+  noteId: string
+  latestChangeId: string
+  body: string
+  targetScopeType: TargetScopeType
+  relatedContext:
+    | { type: 'daily-lesson'; schoolDate: string; periodNumber: number }
+    | { type: 'school-date'; schoolDate: string }
+    | { type: 'task'; taskId: string }
+    | null
+}
+
 export type ActiveTaskForEditing = TaskSnapshotDraft & {
   taskId: string
   latestChangeId: string
   targetScopeType: TargetScopeType
+  notes?: TaskNoteSnapshot[]
+}
+
+export type TaskBaseSnapshot = ActiveTaskForEditing & {
+  notes: TaskNoteSnapshot[]
 }
 
 type TaskDraftBase = TaskSnapshotDraft & {
@@ -89,6 +106,7 @@ export type TaskDraft = TaskDraftBase & (
       changeKind: 'update' | 'remove'
       sharedInformationItemId: string
       expectedLatestChangeId: string
+      baseTask?: TaskBaseSnapshot
     }
 )
 
@@ -995,6 +1013,16 @@ export function createSharedInformationEditorClient({
           draft.changeKind !== 'add' &&
           draft.sharedInformationItemId === activeTask.taskId,
       )
+      if (taskSnapshotsEqual(snapshot, activeTask)) {
+        if (existing) {
+          taskDrafts = taskDrafts.filter(
+            (draft) => draft.sourceId !== existing.sourceId,
+          )
+          taskConflictSourceIds.delete(existing.sourceId)
+          publish()
+        }
+        return { status: 'removed-noop' as const }
+      }
       if (!existing && totalDraftCount() >= maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
@@ -1005,11 +1033,39 @@ export function createSharedInformationEditorClient({
         changeKind: 'update',
         sharedInformationItemId: activeTask.taskId,
         expectedLatestChangeId: activeTask.latestChangeId,
+        baseTask: taskBaseSnapshot(activeTask),
         targetScopeType: activeTask.targetScopeType,
         ...snapshot,
       })
       taskConflictSourceIds.delete(sourceId)
       editing = true
+      lastCommitFailed = false
+      publish()
+      return { status: 'saved' as const, sourceId }
+    },
+    updateTaskDraft(sourceId: string, input: NewTaskDraftForm) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      const snapshot = normalizeTaskSnapshot(input)
+      const targetScopeType = input.targetScopeType
+      const existing = taskDrafts.find((draft) => draft.sourceId === sourceId)
+      if (
+        !existing ||
+        existing.changeKind !== 'add' ||
+        !targetScopeType ||
+        !snapshot
+      ) {
+        return { status: 'invalid-task' as const }
+      }
+      taskDrafts = taskDrafts.map((draft) =>
+        draft.sourceId === sourceId
+          ? {
+              ...draft,
+              ...snapshot,
+              targetScopeType,
+            }
+          : draft,
+      )
+      lastTargetScopeType = targetScopeType
       lastCommitFailed = false
       publish()
       return { status: 'saved' as const, sourceId }
@@ -1031,6 +1087,7 @@ export function createSharedInformationEditorClient({
         changeKind: 'remove',
         sharedInformationItemId: activeTask.taskId,
         expectedLatestChangeId: activeTask.latestChangeId,
+        baseTask: taskBaseSnapshot(activeTask),
         targetScopeType: activeTask.targetScopeType,
         title: activeTask.title,
         dueDate: activeTask.dueDate,
@@ -1602,6 +1659,7 @@ function restoreTaskDraft(value: unknown): TaskDraft | null {
     relatedLessonName: draft.relatedLessonName as TaskRelatedLessonName | null,
   }
   if (draft.changeKind === 'update' || draft.changeKind === 'remove') {
+    const baseTask = restoreTaskBaseSnapshot(draft.baseTask)
     return typeof draft.sharedInformationItemId === 'string' &&
       typeof draft.expectedLatestChangeId === 'string'
       ? {
@@ -1609,6 +1667,7 @@ function restoreTaskDraft(value: unknown): TaskDraft | null {
           changeKind: draft.changeKind,
           sharedInformationItemId: draft.sharedInformationItemId,
           expectedLatestChangeId: draft.expectedLatestChangeId,
+          ...(baseTask ? { baseTask } : {}),
         }
       : null
   }
@@ -1639,6 +1698,92 @@ function normalizeTaskSnapshot(
         /[\r\n]/.test(relatedLessonName.lessonName)))
   ) return null
   return { title, dueDate: input.dueDate, relatedLessonName }
+}
+
+function taskSnapshotsEqual(
+  left: TaskSnapshotDraft,
+  right: TaskSnapshotDraft,
+) {
+  return (
+    left.title === right.title &&
+    left.dueDate === right.dueDate &&
+    left.relatedLessonName?.lessonName === right.relatedLessonName?.lessonName &&
+    left.relatedLessonName?.registeredLessonNameId ===
+      right.relatedLessonName?.registeredLessonNameId
+  )
+}
+
+function taskBaseSnapshot(task: ActiveTaskForEditing): TaskBaseSnapshot {
+  return {
+    taskId: task.taskId,
+    latestChangeId: task.latestChangeId,
+    title: task.title,
+    dueDate: task.dueDate,
+    relatedLessonName: task.relatedLessonName,
+    targetScopeType: task.targetScopeType,
+    notes: task.notes?.map((note) => ({
+      noteId: note.noteId,
+      latestChangeId: note.latestChangeId,
+      body: note.body,
+      targetScopeType: note.targetScopeType,
+      relatedContext: note.relatedContext && { ...note.relatedContext },
+    })) ?? [],
+  }
+}
+
+function restoreTaskBaseSnapshot(value: unknown): TaskBaseSnapshot | null {
+  if (!value || typeof value !== 'object') return null
+  const task = value as Record<string, unknown>
+  if (
+    typeof task.title !== 'string' ||
+    (task.dueDate !== null && typeof task.dueDate !== 'string') ||
+    (task.relatedLessonName !== null &&
+      !isTaskRelatedLessonName(task.relatedLessonName))
+  ) return null
+  const snapshot = normalizeTaskSnapshot({
+    title: task.title,
+    dueDate: task.dueDate as string | null,
+    relatedLessonName: task.relatedLessonName as TaskRelatedLessonName | null,
+  })
+  if (
+    !snapshot ||
+    typeof task.taskId !== 'string' ||
+    typeof task.latestChangeId !== 'string' ||
+    !isTargetScopeType(task.targetScopeType) ||
+    !Array.isArray(task.notes)
+  ) return null
+  const notes = task.notes.map(restoreTaskNoteSnapshot)
+  if (notes.some((note) => note === null)) return null
+  return {
+    taskId: task.taskId,
+    latestChangeId: task.latestChangeId,
+    ...snapshot,
+    targetScopeType: task.targetScopeType,
+    notes: notes as TaskNoteSnapshot[],
+  }
+}
+
+function restoreTaskNoteSnapshot(value: unknown): TaskNoteSnapshot | null {
+  if (!value || typeof value !== 'object') return null
+  const note = value as Record<string, unknown>
+  const relatedContext = note.relatedContext as Record<string, unknown> | null
+  return (
+    typeof note.noteId === 'string' &&
+    typeof note.latestChangeId === 'string' &&
+    typeof note.body === 'string' &&
+    isTargetScopeType(note.targetScopeType) &&
+    relatedContext !== null &&
+    relatedContext.type === 'task' &&
+    typeof relatedContext.taskId === 'string'
+  )
+    ? {
+        noteId: note.noteId,
+        latestChangeId: note.latestChangeId,
+        body: note.body,
+        targetScopeType: note.targetScopeType,
+        relatedContext: { type: 'task', taskId: relatedContext.taskId },
+      }
+    : null
 }
 
 function normalizeNoteBody(body: string) {

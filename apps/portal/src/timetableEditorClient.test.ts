@@ -68,8 +68,9 @@ describe('Shared Information editor client', () => {
       '33000000-0000-4000-8000-000000000002',
       '33000000-0000-4000-8000-000000000003',
     ]
+    const storage = memoryStorage()
     const editor = createTimetableEditorClient({
-      storage: memoryStorage(),
+      storage,
       createId: () => ids.shift()!,
     })
 
@@ -590,6 +591,107 @@ describe('Shared Information editor client', () => {
         },
       ],
     }])
+  })
+
+  it('reuses Task draft identities and removes an update that returns to active values', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000351',
+      '33000000-0000-4000-8000-000000000352',
+    ]
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({
+      storage,
+      createId: () => ids.shift()!,
+    })
+    const activeTask = {
+      taskId: '33000000-0000-4000-8000-000000000350',
+      latestChangeId: '33000000-0000-4000-8000-000000000350:change',
+      title: '元Task',
+      dueDate: '2026-07-10',
+      relatedLessonName: { lessonName: '地理', registeredLessonNameId: 'geography' },
+      targetScopeType: 'track' as const,
+      notes: [{
+        noteId: '33000000-0000-4000-8000-000000000359',
+        latestChangeId: '33000000-0000-4000-8000-000000000359:change',
+        body: '関連ノート',
+        targetScopeType: 'track' as const,
+        relatedContext: {
+          type: 'task' as const,
+          taskId: '33000000-0000-4000-8000-000000000350',
+        },
+      }],
+    }
+
+    const added = editor.saveTaskDraft({
+      title: '追加Task',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track',
+    })
+    expect(added).toEqual({
+      status: 'saved',
+      sourceId: '33000000-0000-4000-8000-000000000351',
+    })
+    if (added.status !== 'saved') throw new Error('Task add draft was not saved')
+    const addedSourceId = added.sourceId
+    expect(editor.updateTaskDraft(addedSourceId, {
+      title: '編集した追加Task',
+      dueDate: null,
+      relatedLessonName: { lessonName: '特別活動' },
+      targetScopeType: 'class',
+    })).toEqual({ status: 'saved', sourceId: addedSourceId })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 1,
+      taskDrafts: [{
+        sourceId: addedSourceId,
+        changeKind: 'add',
+        title: '編集した追加Task',
+        targetScopeType: 'class',
+      }],
+    })
+
+    const firstUpdate = editor.saveTaskUpdateDraft(activeTask, {
+      title: '変更Task',
+      dueDate: '2026-07-11',
+      relatedLessonName: null,
+    })
+    expect(firstUpdate).toEqual({
+      status: 'saved',
+      sourceId: '33000000-0000-4000-8000-000000000352',
+    })
+    if (firstUpdate.status !== 'saved') {
+      throw new Error('Task update draft was not saved')
+    }
+    const firstUpdateSourceId = firstUpdate.sourceId
+    expect(createTimetableEditorClient({ storage }).getSnapshot().taskDrafts)
+      .toContainEqual(expect.objectContaining({
+        sourceId: firstUpdateSourceId,
+        baseTask: expect.objectContaining({
+          taskId: activeTask.taskId,
+          notes: activeTask.notes,
+        }),
+      }))
+    expect(editor.saveTaskUpdateDraft(activeTask, {
+      title: '再編集Task',
+      dueDate: null,
+      relatedLessonName: null,
+    })).toEqual({ status: 'saved', sourceId: firstUpdateSourceId })
+    expect(editor.getSnapshot().draftCount).toBe(2)
+    expect(editor.getSnapshot().taskDrafts).toContainEqual(expect.objectContaining({
+      sourceId: firstUpdateSourceId,
+      changeKind: 'update',
+      title: '再編集Task',
+    }))
+
+    expect(editor.saveTaskUpdateDraft(activeTask, {
+      title: activeTask.title,
+      dueDate: activeTask.dueDate,
+      relatedLessonName: activeTask.relatedLessonName,
+    })).toEqual({ status: 'removed-noop' })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 1,
+      taskDrafts: [{ sourceId: addedSourceId }],
+    })
   })
 
   it('retains every mixed draft and marks a stale Task without rebasing it', async () => {

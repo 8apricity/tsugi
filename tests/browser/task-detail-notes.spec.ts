@@ -21,6 +21,9 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
 
   await applyCurrentDrafts(page, 6)
 
+  await expectTaskNotes(page, zeroTitle, [])
+  await expectTaskNotes(page, oneTitle, ['1件目の関連ノート'])
+
   const multipleTask = page.locator('.task-entry').filter({
     hasText: multipleTitle,
   }).last()
@@ -93,6 +96,22 @@ async function addTask(page: Page, title: string, noteBodies: string[]) {
     await fields.nth((await fields.count()) - 1).fill(body)
   }
   await dialog.getByRole('button', { name: '下書きを保存' }).click()
+}
+
+async function expectTaskNotes(
+  page: Page,
+  title: string,
+  expectedBodies: string[],
+) {
+  await page.locator('.task-entry').filter({ hasText: title }).last()
+    .locator('.task-item').click()
+  const detail = page.getByRole('dialog', { name: 'タスクの詳細' })
+  const noteCards = detail.locator('.task-note-detail-list .note-item')
+  await expect(noteCards).toHaveCount(expectedBodies.length)
+  for (const [index, body] of expectedBodies.entries()) {
+    await expect(noteCards.nth(index)).toContainText(body)
+  }
+  await detail.getByRole('button', { name: '閉じる' }).click()
 }
 
 async function applyCurrentDrafts(page: Page, count: number) {

@@ -135,6 +135,35 @@ test('draft lifecycle protects Task input and renders immutable scope as text', 
     updateDialog.getByRole('combobox', { name: '変更適用範囲' }),
   ).toHaveCount(0)
   await expect(updateDialog.getByText('3組', { exact: true })).toBeVisible()
+
+  const updatedTitle = `${savedTitle}（更新）`
+  await updateDialog.getByRole('textbox', { name: 'タイトル' }).fill(updatedTitle)
+  await updateDialog.getByRole('button', { name: '下書きを保存' }).click()
+  await page.getByRole('button', { name: /変更内容（1）/ }).click()
+  await page
+    .getByRole('dialog', { name: '変更内容' })
+    .getByRole('button', { name: new RegExp(updatedTitle) })
+    .click()
+
+  const reflectedUpdateDialog = page.getByRole('dialog', { name: 'タスクを編集' })
+  await expect(
+    reflectedUpdateDialog.getByRole('combobox', { name: '変更適用範囲' }),
+  ).toHaveCount(0)
+  await expect(
+    reflectedUpdateDialog.locator('dt').filter({ hasText: '変更適用範囲' }),
+  ).toBeVisible()
+  await expect(reflectedUpdateDialog.getByText('3組', { exact: true }))
+    .toBeVisible()
+
+  await reflectedUpdateDialog.getByRole('textbox', { name: 'タイトル' })
+    .fill(`${updatedTitle}（未保存）`)
+  await reflectedUpdateDialog.getByRole('button', { name: '戻る' }).click()
+  await page
+    .getByRole('alertdialog', { name: '入力内容を破棄しますか？' })
+    .getByRole('button', { name: '入力内容を破棄' })
+    .click()
+  await expect(page.getByRole('dialog', { name: '変更内容' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'タスクの詳細' })).toHaveCount(0)
 })
 
 test.describe('pointer state separation', () => {

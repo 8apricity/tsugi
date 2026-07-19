@@ -9,18 +9,14 @@ export function TaskDetailDialog({
   task,
   taskScopeLabel,
   referenceSchoolDate,
-  dueDateMin,
-  dueDateMax,
   mode = 'view',
   editForm,
+  editorFields,
   draftLifecycle,
   notes,
   addNoteDisabled = false,
   onClose,
   onSave,
-  onTitleChange,
-  onDueDateChange,
-  onRelatedLessonNameChange,
   onNoteBodyChange,
   onOpenHistory,
   onAddNote,
@@ -31,23 +27,16 @@ export function TaskDetailDialog({
   task: VisibleTask
   taskScopeLabel: string
   referenceSchoolDate: string
-  dueDateMin?: string
-  dueDateMax?: string
   mode?: 'view' | 'edit'
   editForm?: {
-    title: string
-    dueDate: string | null
-    relatedLessonInput: string
     noteBodies: string[]
   }
+  editorFields?: ReactNode
   draftLifecycle?: { kind: LifecycleKind; conflicted: boolean }
   notes: ReactNode
   addNoteDisabled?: boolean
   onClose: () => void
   onSave?: (event: FormEvent<HTMLFormElement>) => void
-  onTitleChange?: (title: string) => void
-  onDueDateChange?: (dueDate: string | null) => void
-  onRelatedLessonNameChange?: (lessonName: string) => void
   onNoteBodyChange?: (index: number, body: string) => void
   onOpenHistory?: () => void
   onAddNote?: () => void
@@ -65,55 +54,7 @@ export function TaskDetailDialog({
         onBack={onClose}
       >
         <form id="task-detail-form" onSubmit={onSave}>
-          <label>
-            <span>タイトル</span>
-            <input
-              autoFocus
-              required
-              maxLength={120}
-              value={editForm.title}
-              onChange={(event) => onTitleChange?.(event.target.value)}
-            />
-          </label>
-          <div className="task-form-field">
-            <label htmlFor="task-detail-due-date">期限</label>
-            <div className="optional-date-row">
-              <input
-                id="task-detail-due-date"
-                type="date"
-                min={dueDateMin}
-                max={dueDateMax}
-                value={editForm.dueDate ?? ''}
-                onChange={(event) =>
-                  onDueDateChange?.(event.target.value || null)}
-              />
-              <button
-                className="optional-date-clear"
-                type="button"
-                aria-label="期限をクリア"
-                title="期限をクリア"
-                disabled={!editForm.dueDate}
-                onClick={() => onDueDateChange?.(null)}
-              >
-                ×
-              </button>
-            </div>
-          </div>
-          <label>
-            <span>関連する授業</span>
-            <input
-              maxLength={80}
-              value={editForm.relatedLessonInput}
-              onChange={(event) =>
-                onRelatedLessonNameChange?.(event.target.value)}
-            />
-          </label>
-          <dl className="detail-list task-edit-context">
-            <div>
-              <dt>変更適用範囲</dt>
-              <dd>{taskScopeLabel}</dd>
-            </div>
-          </dl>
+          {editorFields}
           {notes}
           <TaskNoteFields
             noteBodies={editForm.noteBodies}

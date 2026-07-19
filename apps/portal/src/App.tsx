@@ -1452,6 +1452,7 @@ function App() {
   }
 
   function closeTaskEditorFlow() {
+    if (changeContentReturnRef.current) setTaskDetail(null);
     setTaskEditorForm(null);
     editorInitialFormsRef.current.task = null;
     setTaskLessonNameListOpen(false);
@@ -1535,7 +1536,19 @@ function App() {
     }
     const editingTask = taskEditingSnapshotFromChangeItem(item);
     if (!editingTask) return;
-    openTaskUpdateEditor(editingTask, visibleTaskFromChangeItem(item));
+    const visibleTask = visibleTaskFromChangeItem(item);
+    const activeTask = dailyPlanClient
+      .getCachedDailyPlans()
+      .flatMap((plan) => plan.tasks)
+      .find((task) => task.taskId === editingTask.taskId);
+    setTaskDetail({
+      type: "draft",
+      task: visibleTask,
+      draft: item.draft,
+      ...(activeTask ? { activeTask } : {}),
+      editingTask,
+    });
+    openTaskUpdateEditor(editingTask, visibleTask);
   }
 
   function openTimetableEditorAt(schoolDate: string, periodNumber: number) {
@@ -2212,6 +2225,27 @@ function App() {
       };
     });
     return <TaskNoteList notes={items} presentation={presentation} />;
+  }
+
+  function updateTaskNoteBody(index: number, body: string) {
+    setTaskEditorForm((current) =>
+      current
+        ? {
+            ...current,
+            noteBodies: current.noteBodies.map((value, noteIndex) =>
+              noteIndex === index ? body : value
+            ),
+          }
+        : current
+    );
+  }
+
+  function addTaskNoteBody() {
+    setTaskEditorForm((current) =>
+      current
+        ? { ...current, noteBodies: [...current.noteBodies, ""] }
+        : current
+    );
   }
 
   function openTaskDetail(item: VisibleTaskListItem) {
@@ -2921,6 +2955,221 @@ function App() {
       referenceBasePeriods !== null;
     const referencePlanError =
       referencePlanMatchesSelection && referenceDailyPlan?.status === "error";
+
+    const taskEditorFields = taskEditorForm ? (
+      <>
+        <label>
+          <span>タイトル</span>
+          <input
+            autoFocus
+            required
+            maxLength={120}
+            value={taskEditorForm.title}
+            onChange={(event) =>
+              setTaskEditorForm((current) =>
+                current ? { ...current, title: event.target.value } : current
+              )}
+          />
+        </label>
+        <div className="task-form-field">
+          <label htmlFor="task-due-date">期限</label>
+          <div className="optional-date-row">
+            <input
+              id="task-due-date"
+              type="date"
+              min={schoolYearRange?.startsOn}
+              max={schoolYearRange?.endsOn}
+              value={taskEditorForm.dueDate ?? ""}
+              onChange={(event) =>
+                setTaskEditorForm((current) =>
+                  current
+                    ? { ...current, dueDate: event.target.value || null }
+                    : current
+                )}
+            />
+            <button
+              className="optional-date-clear"
+              type="button"
+              aria-label="期限をクリア"
+              title="期限をクリア"
+              disabled={!taskEditorForm.dueDate}
+              onClick={() =>
+                setTaskEditorForm((current) =>
+                  current ? { ...current, dueDate: null } : current
+                )}
+            >
+              <ClearDateIcon />
+            </button>
+          </div>
+        </div>
+        <div className="task-form-field">
+          <label htmlFor="task-related-lesson-name">
+            関連する授業（原則設定する）
+          </label>
+          <div
+            ref={taskLessonNameComboboxRef}
+            className="lesson-name-combobox"
+            onBlur={(event) =>
+              dismissLessonNameOptionsWhenFocusLeaves(event, () => {
+                setTaskLessonNameListOpen(false);
+                setActiveTaskLessonNameOption(-1);
+              })}
+          >
+            <input
+              id="task-related-lesson-name"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={taskLessonNameOptionsPopoverOpen}
+              aria-controls="task-lesson-name-options"
+              aria-activedescendant={
+                taskLessonNameOptionsPopoverOpen &&
+                taskLessonNameSnapshot.activeIndex >= 0
+                  ? lessonNameOptionId(
+                      "task-lesson-name-option",
+                      taskLessonNameSnapshot.activeIndex,
+                    )
+                  : undefined
+              }
+              value={taskEditorForm.relatedLessonInput}
+              onFocus={() => setTaskLessonNameListOpen(true)}
+              onChange={(event) => {
+                setTaskLessonNameListOpen(true);
+                setActiveTaskLessonNameOption(-1);
+                setTaskEditorForm((current) =>
+                  current
+                    ? { ...current, relatedLessonInput: event.target.value }
+                    : current
+                );
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setTaskLessonNameListOpen(true);
+                  taskLessonNameCombobox.moveActive(
+                    event.key === "ArrowDown" ? 1 : -1,
+                  );
+                  setActiveTaskLessonNameOption(
+                    taskLessonNameCombobox.getSnapshot().activeIndex,
+                  );
+                } else if (
+                  event.key === "Enter" &&
+                  taskLessonNameListOpen &&
+                  taskLessonNameSnapshot.activeIndex >= 0
+                ) {
+                  event.preventDefault();
+                  const option =
+                    taskLessonNameSnapshot.options[
+                      taskLessonNameSnapshot.activeIndex
+                    ];
+                  if (!option) return;
+                  setTaskEditorForm((current) =>
+                    current
+                      ? {
+                          ...current,
+                          relatedLessonInput: option.fullLessonName,
+                        }
+                      : current
+                  );
+                  setTaskLessonNameListOpen(false);
+                  setActiveTaskLessonNameOption(-1);
+                } else if (
+                  event.key === "Escape" &&
+                  taskLessonNameListOpen
+                ) {
+                  event.preventDefault();
+                  setTaskLessonNameListOpen(false);
+                  setActiveTaskLessonNameOption(-1);
+                }
+              }}
+            />
+            {taskLessonNameOptionsPopoverOpen ? (
+              <LessonNameOptionsPopover
+                listboxId="task-lesson-name-options"
+                optionIdPrefix="task-lesson-name-option"
+                options={taskLessonNameSnapshot.options}
+                activeIndex={activeTaskLessonNameOption}
+                expandedToAll={taskLessonNamesExpanded}
+                hasAdditionalOptions={
+                  taskLessonNameSnapshot.hasAdditionalOptions
+                }
+                ariaLabel="登録済みの授業名"
+                onChoose={(option) => {
+                  setTaskLessonNameListOpen(false);
+                  setActiveTaskLessonNameOption(-1);
+                  setTaskEditorForm((current) =>
+                    current
+                      ? {
+                          ...current,
+                          relatedLessonInput: option.fullLessonName,
+                        }
+                      : current
+                  );
+                }}
+                onExpand={() => {
+                  setTaskLessonNamesExpanded(true);
+                  setTaskLessonNameListOpen(true);
+                  setActiveTaskLessonNameOption(-1);
+                }}
+              />
+            ) : null}
+          </div>
+        </div>
+        {taskLessonResolution?.custom &&
+        !(
+          taskEditorForm.editingTask?.relatedLessonName
+            ?.registeredLessonNameId &&
+          taskEditorForm.relatedLessonInput.trim() ===
+            taskEditorForm.editingTask.relatedLessonName.lessonName
+        ) ? (
+          <p className="field-warning" role="status">
+            候補にない授業名として保存されます。
+          </p>
+        ) : null}
+        {taskEditorForm.editingTask ? (
+          <dl className="detail-list task-edit-context">
+            <div>
+              <dt>変更適用範囲</dt>
+              <dd>
+                {scopeLabel(
+                  taskEditorForm.editingTask.targetScopeType,
+                  targetScopeContext,
+                )}
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <label>
+            <span>変更適用範囲</span>
+            <select
+              required
+              value={taskEditorForm.targetScopeType ?? ""}
+              onChange={(event) =>
+                setTaskEditorForm((current) =>
+                  current
+                    ? {
+                        ...current,
+                        targetScopeType: (event.target.value || null) as
+                          | TargetScopeType
+                          | null,
+                      }
+                    : current
+                )}
+            >
+              <option value="" disabled hidden>
+                選択してください
+              </option>
+              {(["grade", "class", "track", "student"] as const).map(
+                (scope) => (
+                  <option key={scope} value={scope}>
+                    {scopeLabel(scope, targetScopeContext)}
+                  </option>
+                ),
+              )}
+            </select>
+          </label>
+        )}
+      </>
+    ) : null;
 
     return (
       <main className="app-page daily-plan-page">
@@ -3807,258 +4056,13 @@ function App() {
               onBack={requestTaskEditorClose}
             >
                 <form id="task-editor-form" onSubmit={saveTaskDraft}>
-                  <label>
-                    <span>タイトル</span>
-                    <input
-                      autoFocus
-                      required
-                      maxLength={120}
-                      value={taskEditorForm.title}
-                      onChange={(event) =>
-                        setTaskEditorForm((current) =>
-                          current
-                            ? { ...current, title: event.target.value }
-                            : current,
-                        )
-                      }
-                    />
-                  </label>
-                  <div className="task-form-field">
-                    <label htmlFor="task-due-date">期限</label>
-                    <div className="optional-date-row">
-                      <input
-                        id="task-due-date"
-                        type="date"
-                        min={schoolYearRange?.startsOn}
-                        max={schoolYearRange?.endsOn}
-                        value={taskEditorForm.dueDate ?? ""}
-                        onChange={(event) =>
-                          setTaskEditorForm((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  dueDate: event.target.value || null,
-                                }
-                              : current,
-                          )
-                        }
-                      />
-                      <button
-                        className="optional-date-clear"
-                        type="button"
-                        aria-label="期限をクリア"
-                        title="期限をクリア"
-                        disabled={!taskEditorForm.dueDate}
-                        onClick={() =>
-                          setTaskEditorForm((current) =>
-                            current ? { ...current, dueDate: null } : current,
-                          )
-                        }
-                      >
-                        <ClearDateIcon />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="task-form-field">
-                    <label htmlFor="task-related-lesson-name">
-                      関連する授業（原則設定する）
-                    </label>
-                    <div
-                      ref={taskLessonNameComboboxRef}
-                      className="lesson-name-combobox"
-                      onBlur={(event) =>
-                        dismissLessonNameOptionsWhenFocusLeaves(event, () => {
-                          setTaskLessonNameListOpen(false);
-                          setActiveTaskLessonNameOption(-1);
-                        })
-                      }
-                    >
-                    <input
-                      id="task-related-lesson-name"
-                      role="combobox"
-                      aria-autocomplete="list"
-                      aria-expanded={taskLessonNameOptionsPopoverOpen}
-                      aria-controls="task-lesson-name-options"
-                      aria-activedescendant={
-                        taskLessonNameOptionsPopoverOpen &&
-                        taskLessonNameSnapshot.activeIndex >= 0
-                          ? lessonNameOptionId(
-                              "task-lesson-name-option",
-                              taskLessonNameSnapshot.activeIndex,
-                            )
-                          : undefined
-                      }
-                      value={taskEditorForm.relatedLessonInput}
-                      onFocus={() => setTaskLessonNameListOpen(true)}
-                      onChange={(event) => {
-                        setTaskLessonNameListOpen(true);
-                        setActiveTaskLessonNameOption(-1);
-                        setTaskEditorForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                relatedLessonInput: event.target.value,
-                              }
-                            : current,
-                        );
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                          event.preventDefault();
-                          setTaskLessonNameListOpen(true);
-                          taskLessonNameCombobox.moveActive(
-                            event.key === "ArrowDown" ? 1 : -1,
-                          );
-                          setActiveTaskLessonNameOption(
-                            taskLessonNameCombobox.getSnapshot().activeIndex,
-                          );
-                        } else if (
-                          event.key === "Enter" &&
-                          taskLessonNameListOpen &&
-                          taskLessonNameSnapshot.activeIndex >= 0
-                        ) {
-                          event.preventDefault();
-                          const option = taskLessonNameSnapshot.options[
-                            taskLessonNameSnapshot.activeIndex
-                          ];
-                          if (!option) return;
-                          setTaskEditorForm((current) =>
-                            current
-                              ? { ...current, relatedLessonInput: option.fullLessonName }
-                              : current,
-                          );
-                          setTaskLessonNameListOpen(false);
-                          setActiveTaskLessonNameOption(-1);
-                        } else if (
-                          event.key === "Escape" &&
-                          taskLessonNameListOpen
-                        ) {
-                          event.preventDefault();
-                          setTaskLessonNameListOpen(false);
-                          setActiveTaskLessonNameOption(-1);
-                        }
-                      }}
-                    />
-                    {taskLessonNameOptionsPopoverOpen ? (
-                      <LessonNameOptionsPopover
-                        listboxId="task-lesson-name-options"
-                        optionIdPrefix="task-lesson-name-option"
-                        options={taskLessonNameSnapshot.options}
-                        activeIndex={activeTaskLessonNameOption}
-                        expandedToAll={taskLessonNamesExpanded}
-                        hasAdditionalOptions={
-                          taskLessonNameSnapshot.hasAdditionalOptions
-                        }
-                        ariaLabel="登録済みの授業名"
-                        onChoose={(option) => {
-                          setTaskLessonNameListOpen(false);
-                          setActiveTaskLessonNameOption(-1);
-                          setTaskEditorForm((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  relatedLessonInput: option.fullLessonName,
-                                }
-                              : current,
-                          );
-                        }}
-                        onExpand={() => {
-                          setTaskLessonNamesExpanded(true);
-                          setTaskLessonNameListOpen(true);
-                          setActiveTaskLessonNameOption(-1);
-                        }}
-                      />
-                    ) : null}
-                    </div>
-                  </div>
-                  {taskLessonResolution?.custom &&
-                  !(
-                    taskEditorForm.editingTask
-                      ?.relatedLessonName?.registeredLessonNameId &&
-                    taskEditorForm.relatedLessonInput.trim() ===
-                      taskEditorForm.editingTask.relatedLessonName.lessonName
-                  ) ? (
-                    <p className="field-warning" role="status">
-                      候補にない授業名として保存されます。
-                    </p>
-                  ) : null}
-                  {taskEditorForm.editingTask ? (
-                    <ImmutableFieldNotice
-                      kind="task"
-                      onNotify={setTimetableEditorMessage}
-                    >
-                    <label className="immutable-field">
-                      <span>変更適用範囲</span>
-                      <select
-                        value={taskEditorForm.editingTask.targetScopeType}
-                        disabled
-                      >
-                        <option value={taskEditorForm.editingTask.targetScopeType}>
-                          {scopeLabel(
-                            taskEditorForm.editingTask.targetScopeType,
-                            targetScopeContext,
-                          )}
-                        </option>
-                      </select>
-                    </label>
-                    </ImmutableFieldNotice>
-                  ) : (
-                    <label>
-                      <span>変更適用範囲</span>
-                      <select
-                        required
-                        value={taskEditorForm.targetScopeType ?? ""}
-                        onChange={(event) =>
-                          setTaskEditorForm((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  targetScopeType:
-                                    (event.target.value || null) as
-                                      TargetScopeType | null,
-                                }
-                              : current,
-                          )
-                        }
-                      >
-                        <option value="" disabled hidden>
-                          選択してください
-                        </option>
-                        {(["grade", "class", "track", "student"] as const).map(
-                          (scope) => (
-                            <option key={scope} value={scope}>
-                              {scopeLabel(scope, targetScopeContext)}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </label>
-                  )}
+                  {taskEditorFields}
                   <TaskNoteFields
                     noteBodies={taskEditorForm.noteBodies}
                     disabled={timetableEditor.submitting}
                     addDisabled={timetableEditor.atLimit}
-                    onBodyChange={(index, body) =>
-                      setTaskEditorForm((current) =>
-                        current
-                          ? {
-                              ...current,
-                              noteBodies: current.noteBodies.map(
-                                (value, noteIndex) =>
-                                  noteIndex === index ? body : value,
-                              ),
-                            }
-                          : current,
-                      )}
-                    onAddNote={() =>
-                      setTaskEditorForm((current) =>
-                        current
-                          ? {
-                              ...current,
-                              noteBodies: [...current.noteBodies, ""],
-                            }
-                          : current,
-                      )}
+                    onBodyChange={updateTaskNoteBody}
+                    onAddNote={addTaskNoteBody}
                   />
                 </form>
             </EditorDialogShell>
@@ -4073,12 +4077,11 @@ function App() {
                 targetScopeContext,
               )}
               referenceSchoolDate={selectedSchoolDate}
-              dueDateMin={schoolYearRange?.startsOn}
-              dueDateMax={schoolYearRange?.endsOn}
               mode={taskEditorForm?.editingTask ? "edit" : "view"}
               editForm={taskEditorForm?.editingTask
                 ? taskEditorForm
                 : undefined}
+              editorFields={taskEditorFields}
               draftLifecycle={taskDetail.type === "draft"
                 ? {
                     kind: taskDetail.draft.changeKind,
@@ -4101,43 +4104,14 @@ function App() {
                 ? requestTaskEditorClose
                 : () => setTaskDetail(null)}
               onSave={taskEditorForm?.editingTask ? saveTaskDraft : undefined}
-              onTitleChange={(title) =>
-                setTaskEditorForm((current) =>
-                  current ? { ...current, title } : current,
-                )}
-              onDueDateChange={(dueDate) =>
-                setTaskEditorForm((current) =>
-                  current ? { ...current, dueDate } : current,
-                )}
-              onRelatedLessonNameChange={(relatedLessonInput) =>
-                setTaskEditorForm((current) =>
-                  current ? { ...current, relatedLessonInput } : current,
-                )}
-              onNoteBodyChange={(index, body) =>
-                setTaskEditorForm((current) =>
-                  current
-                    ? {
-                        ...current,
-                        noteBodies: current.noteBodies.map(
-                          (value, noteIndex) =>
-                            noteIndex === index ? body : value,
-                        ),
-                      }
-                    : current,
-                )}
+              onNoteBodyChange={updateTaskNoteBody}
               onOpenHistory={taskDetail.type === "active"
                 ? () => openTaskHistory(taskDetail.task)
                 : taskDetail.activeTask
                   ? () => openTaskHistory(taskDetail.activeTask!)
                   : undefined}
               onAddNote={taskEditorForm?.editingTask
-                ? () => setTaskEditorForm((current) =>
-                    current
-                      ? {
-                          ...current,
-                          noteBodies: [...current.noteBodies, ""],
-                        }
-                      : current)
+                ? addTaskNoteBody
                 : timetableEditor.editing &&
                     (taskDetail.type === "active" ||
                       taskDetail.draft.changeKind === "add")

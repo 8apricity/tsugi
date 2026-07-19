@@ -51,11 +51,17 @@ describe('Task detail dialog', () => {
         referenceSchoolDate="2026-07-10"
         mode="edit"
         editForm={{
-          title: '編集するタスク',
-          dueDate: null,
-          relatedLessonInput: '数学',
           noteBodies: ['', '補足'],
         }}
+        editorFields={
+          <>
+            <label><span>タイトル</span><input defaultValue="編集するタスク" /></label>
+            <label><span>関連する授業（原則設定する）</span><input role="combobox" defaultValue="数学" /></label>
+            <dl className="detail-list task-edit-context">
+              <div><dt>変更適用範囲</dt><dd>文科</dd></div>
+            </dl>
+          </>
+        }
         notes={
           <TaskNoteList
             presentation="detail"
@@ -68,9 +74,6 @@ describe('Task detail dialog', () => {
         }
         onClose={() => undefined}
         onSave={() => undefined}
-        onTitleChange={() => undefined}
-        onDueDateChange={() => undefined}
-        onRelatedLessonNameChange={() => undefined}
         onNoteBodyChange={() => undefined}
         onAddNote={() => undefined}
         onOpenHistory={() => undefined}

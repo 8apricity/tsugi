@@ -67,7 +67,7 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
     addDialog.getByRole('button', { name: '下書きを保存' }),
   ).toBeVisible()
   await addDialog.getByRole('textbox', { name: 'タイトル' }).fill(savedTitle)
-  await addDialog.getByRole('button', { name: '閉じる' }).click()
+  await addDialog.getByRole('button', { name: '戻る' }).click()
 
   const discardDialog = page.getByRole('alertdialog', {
     name: '入力内容を破棄しますか？',
@@ -96,12 +96,12 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
 
   const savedDraftDialog = page.getByRole('dialog', { name: 'タスクを追加' })
   await expect(
-    savedDraftDialog.getByRole('button', { name: '下書きを更新' }),
+    savedDraftDialog.getByRole('button', { name: '下書きを保存' }),
   ).toBeVisible()
   await savedDraftDialog
     .getByRole('textbox', { name: 'タイトル' })
     .fill('破棄される未保存入力')
-  await savedDraftDialog.getByRole('button', { name: '閉じる' }).click()
+  await savedDraftDialog.getByRole('button', { name: '戻る' }).click()
   await page
     .getByRole('alertdialog', { name: '入力内容を破棄しますか？' })
     .getByRole('button', { name: '入力内容を破棄' })
@@ -109,8 +109,16 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
   await expect(draftCard).toContainText(savedTitle)
   await expect(draftCard).not.toContainText('破棄される未保存入力')
 
+  await page.getByRole('button', { name: /変更内容（1）/ }).click()
+  await page
+    .getByRole('dialog', { name: '変更内容' })
+    .getByRole('button', { name: '反映を確認' })
+    .click()
   page.once('dialog', (dialog) => dialog.accept())
-  await page.getByRole('button', { name: '変更を反映 (1)' }).click()
+  await page
+    .getByRole('dialog', { name: '最終確認' })
+    .getByRole('button', { name: '変更を反映' })
+    .click()
   await expect(draftCard).toHaveCount(0)
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
 
@@ -126,7 +134,7 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
     'タスクの変更適用範囲は変更できません。削除予定にしてから追加し直してください。'
   const updateDialog = page.getByRole('dialog', { name: 'タスクを編集' })
   await expect(
-    updateDialog.getByRole('button', { name: '下書きを更新' }),
+    updateDialog.getByRole('button', { name: '下書きを保存' }),
   ).toBeVisible()
   await updateDialog.getByRole('button', { name: immutableMessage }).click()
   await expect(
@@ -248,9 +256,10 @@ test.describe('WebKit mobile editors', () => {
     if (viewport && changeDateBox) {
       expectBoxWithinViewport(changeDateBox, viewport.width)
     }
-    await timetableDialog.getByRole('button', { name: '閉じる' }).click()
+    await timetableDialog.getByRole('button', { name: '戻る' }).click()
     await expect(timetableDialog).toHaveCount(0)
-    await expect(layerDialog).toHaveCount(0)
+    await expect(layerDialog).toBeVisible()
+    await layerDialog.getByRole('button', { name: '閉じる' }).click()
 
     await page.getByRole('button', { name: 'タスクを追加' }).click()
 
@@ -305,7 +314,7 @@ test.describe('WebKit mobile editors', () => {
 
     await clearDueDateButton.click()
     await expect(dueDateInput).toHaveValue('')
-    await dialog.getByRole('button', { name: '閉じる' }).click()
+    await dialog.getByRole('button', { name: '戻る' }).click()
     const discardDialog = page.getByRole('alertdialog', {
       name: '入力内容を破棄しますか？',
     })

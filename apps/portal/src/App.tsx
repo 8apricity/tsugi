@@ -12,6 +12,8 @@ import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
+import { EditorDialogShell } from "./dialogFoundation";
+import { useDialogBrowserBack } from "./dialogNavigation";
 import {
   createLessonNameComboboxClient,
   type LessonNameComboboxOption,
@@ -227,6 +229,7 @@ type TimetableHistoryDialog = {
 
 type TaskHistoryDialog = {
   task: DailyPlanTaskForCache;
+  returnTaskDetail: VisibleTaskListItem;
   requestId: number;
   state: TaskEditHistoryState;
 };
@@ -570,6 +573,38 @@ function App() {
 
     return lockPageScroll(document);
   }, [timetableDialogOpen]);
+
+  useDialogBrowserBack(timetableDialogOpen, () => {
+    if (pendingEditorDismissal) {
+      setPendingEditorDismissal(null);
+    } else if (taskEditorForm) {
+      requestTaskEditorClose();
+    } else if (noteEditorForm) {
+      requestNoteEditorClose();
+    } else if (timetableEditorForm) {
+      requestTimetableEditorClose("back");
+    } else if (taskHistoryDialog) {
+      goBackFromTaskHistory();
+    } else if (taskDetail) {
+      setTaskDetail(null);
+    } else if (noteHistoryDialog) {
+      setNoteHistoryDialog(null);
+    } else if (timetableHistoryDialog) {
+      goBackInTimetableHistoryDialog();
+    } else if (taskRemovalConfirmation) {
+      setTaskRemovalConfirmation(null);
+    } else if (referencePickerOpen) {
+      setReferencePickerOpen(false);
+    } else if (directChangeReviewOpen) {
+      setDirectChangeReviewOpen(false);
+    } else if (logoutConfirmationOpen) {
+      setLogoutConfirmationOpen(false);
+    } else if (changeContentOpen) {
+      setChangeContentOpen(false);
+    } else {
+      closeTimetableDialogFlow();
+    }
+  });
 
   useEffect(() => {
     if (!timetableEditorMessage || timetableEditorRefreshNeeded) return;
@@ -2273,9 +2308,13 @@ function App() {
   }
 
   function openTaskHistory(task: DailyPlanTaskForCache) {
+    const returnTaskDetail = taskDetail?.task.taskId === task.taskId
+      ? taskDetail
+      : { type: "active" as const, task };
     setTaskDetail(null);
     setTaskHistoryDialog({
       task,
+      returnTaskDetail,
       requestId: 0,
       state: { status: "loading" },
     });
@@ -2408,6 +2447,12 @@ function App() {
     setTimetableHistoryDialog((current) =>
       current?.detail ? { ...current, detail: null } : null,
     );
+  }
+
+  function goBackFromTaskHistory() {
+    if (!taskHistoryDialog) return;
+    setTaskDetail(taskHistoryDialog.returnTaskDetail);
+    setTaskHistoryDialog(null);
   }
 
   function navigateLayerDialog(schoolDate: string, periodNumber: number) {
@@ -3438,33 +3483,21 @@ function App() {
           ) : null}
 
           {noteEditorForm ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className={`timetable-editor-dialog note-editor-dialog${
+            <EditorDialogShell
+              title={noteEditorForm.relatedTask
+                ? "ノートを書く"
+                : noteEditorForm.editingNote || noteEditorForm.editingDraft
+                  ? "ノートを編集"
+                  : "ノートを追加"}
+              titleId="note-editor-title"
+              formId="note-editor-form"
+              className={`note-editor-dialog${
                   noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
                 }`}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="note-editor-title"
-              >
-                <header className="editor-dialog-header">
-                  <h2 id="note-editor-title">
-                    {noteEditorForm.relatedTask
-                      ? "ノートを書く"
-                      : noteEditorForm.editingNote || noteEditorForm.editingDraft
-                      ? "ノートを編集"
-                      : "ノートを追加"}
-                  </h2>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    onClick={requestNoteEditorClose}
-                  >
-                    ×
-                  </button>
-                </header>
-                <form onSubmit={saveNoteDraft}>
+              saveDisabled={noteEditorForm.editingDraft?.changeKind === "remove"}
+              onBack={requestNoteEditorClose}
+            >
+                <form id="note-editor-form" onSubmit={saveNoteDraft}>
                   <label>
                     <span>本文</span>
                     <textarea
@@ -3639,15 +3672,8 @@ function App() {
                       </label>
                     </ImmutableFieldNotice>
                   )}
-                  <div className="editor-dialog-actions">
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={requestNoteEditorClose}
-                    >
-                      キャンセル
-                    </button>
-                    {noteEditorForm.editingDraft?.changeKind === "remove" ? (
+                  {noteEditorForm.editingDraft?.changeKind === "remove" ? (
+                    <div className="editor-dialog-actions">
                       <button
                         className="button-secondary"
                         type="button"
@@ -3660,45 +3686,21 @@ function App() {
                       >
                         削除予定を取り消す
                       </button>
-                    ) : (
-                      <button className="button-primary" type="submit">
-                        {editorActionLabel(
-                          noteEditorForm.editingNote || noteEditorForm.editingDraft
-                            ? "update"
-                            : "add",
-                        )}
-                      </button>
-                    )}
-                  </div>
+                    </div>
+                  ) : null}
                 </form>
-              </section>
-            </div>
+            </EditorDialogShell>
           ) : null}
 
           {taskEditorForm ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className="timetable-editor-dialog task-editor-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="task-editor-title"
-              >
-                <header className="editor-dialog-header">
-                  <h2 id="task-editor-title">
-                    {taskEditorForm.editingTask
-                      ? "タスクを編集"
-                      : "タスクを追加"}
-                  </h2>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    onClick={requestTaskEditorClose}
-                  >
-                    ×
-                  </button>
-                </header>
-                <form onSubmit={saveTaskDraft}>
+            <EditorDialogShell
+              title={taskEditorForm.editingTask ? "タスクを編集" : "タスクを追加"}
+              titleId="task-editor-title"
+              formId="task-editor-form"
+              className="task-editor-dialog"
+              onBack={requestTaskEditorClose}
+            >
+                <form id="task-editor-form" onSubmit={saveTaskDraft}>
                   <label>
                     <span>タイトル</span>
                     <input
@@ -3926,25 +3928,8 @@ function App() {
                       </select>
                     </label>
                   )}
-                  <div className="editor-dialog-actions">
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={requestTaskEditorClose}
-                    >
-                      キャンセル
-                    </button>
-                    <button className="button-primary" type="submit">
-                      {editorActionLabel(
-                        taskEditorForm.editingTask || taskEditorForm.editingDraft
-                          ? "update"
-                          : "add",
-                      )}
-                    </button>
-                  </div>
                 </form>
-              </section>
-            </div>
+            </EditorDialogShell>
           ) : null}
 
           {taskDetail ? (
@@ -4022,14 +4007,7 @@ function App() {
               targetScopeContext={targetScopeContext}
               referenceSchoolDate={selectedSchoolDate}
               state={taskHistoryDialog.state}
-              onBack={() => {
-                setTaskDetail(
-                  visibleTasks.find(
-                    (item) => item.task.taskId === taskHistoryDialog.task.taskId,
-                  ) ?? { type: "active", task: taskHistoryDialog.task },
-                );
-                setTaskHistoryDialog(null);
-              }}
+              onBack={goBackFromTaskHistory}
               onClose={() => setTaskHistoryDialog(null)}
               onRetry={() => setTaskHistoryDialog((current) =>
                 current ? {
@@ -4420,41 +4398,20 @@ function App() {
           ) : null}
 
           {timetableEditorForm && schoolYearRange ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className="timetable-editor-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="timetable-editor-title"
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  event.preventDefault();
-                  requestTimetableEditorClose("back");
-                }}
-              >
-                <form onSubmit={saveTimetableDraft}>
-                  <header className="editor-dialog-header">
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="時間割の変更状況に戻る"
-                      onClick={() => requestTimetableEditorClose("back")}
-                    >
-                      ‹
-                    </button>
-                    <div className="timetable-dialog-heading">
-                      <h2 id="timetable-editor-title">時間割変更</h2>
-                    </div>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="閉じる"
-                      autoFocus
-                      onClick={() => requestTimetableEditorClose("close")}
-                    >
-                      ×
-                    </button>
-                  </header>
+            <EditorDialogShell
+              title="時間割変更"
+              titleId="timetable-editor-title"
+              formId="timetable-editor-form"
+              saveDisabled={
+                timetableEditor.submitting ||
+                (timetableEditorForm.includeTimetableChange &&
+                  timetableEditorForm.replacement.type === "lesson_name" &&
+                  !timetableEditorForm.replacement.registeredLessonNameId &&
+                  !timetableEditorOptions)
+              }
+              onBack={() => requestTimetableEditorClose("back")}
+            >
+                <form id="timetable-editor-form" onSubmit={saveTimetableDraft}>
                   <ImmutableFieldNotice
                     kind="timetable"
                     active={Boolean(
@@ -4801,34 +4758,9 @@ function App() {
                         {editorActionLabel("remove")}
                       </button>
                     ) : null}
-                    <button
-                      className="button-primary"
-                      type="submit"
-                      disabled={
-                        timetableEditor.submitting ||
-                        (timetableEditorForm.includeTimetableChange &&
-                          timetableEditorForm.replacement.type === "lesson_name" &&
-                          !timetableEditorForm.replacement
-                            .registeredLessonNameId &&
-                          !timetableEditorOptions)
-                      }
-                    >
-                      {editorActionLabel(
-                        timetableEditorForm.sourceId ||
-                        loadedLayerState?.layers.some(
-                          (layer) =>
-                            layer.targetScopeType ===
-                              timetableEditorForm.targetScopeType &&
-                            layer.state === "active",
-                        )
-                          ? "update"
-                          : "add",
-                      )}
-                    </button>
                   </footer>
                 </form>
-              </section>
-            </div>
+            </EditorDialogShell>
           ) : null}
 
           {pendingEditorDismissal ? (

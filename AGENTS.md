@@ -30,13 +30,22 @@ more detail.
 
 ## Release-period git workflow
 
-Until the current release is complete, agents should commit and push their own
-file changes without waiting for a separate request. After each completed change:
+Until the current release is complete, agents should commit, push, and merge
+their own file changes into `main` without waiting for a separate request. After
+each completed change:
 
 1. Run the relevant verification commands.
 2. Commit only the files changed for that task.
-3. Push the current branch.
-4. State the commit title, branch, and push status in the final response.
+3. Push the task branch.
+4. Fetch the latest `origin/main`, merge the completed task branch into `main`,
+   and push `main`. Prefer a fast-forward merge when the task branch is directly
+   based on the latest `main`.
+5. State the commit title, task branch, merge result, and both push statuses in
+   the final response.
+
+Do not overwrite remote history or bypass branch protection. If the merge has
+conflicts, required verification fails, or repository protection prevents a
+direct `main` push, stop before pushing `main` and report the blocker.
 
 If pushing or applying remote infrastructure changes needs approval, request it
 and continue once approved.

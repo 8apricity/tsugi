@@ -564,6 +564,7 @@ button.period-inspect-button:active {
 }
 
 .note-item {
+  position: relative;
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -581,6 +582,45 @@ button.period-inspect-button:active {
 .note-draft {
   border-color: var(--color-accent);
   background: var(--color-accent-soft);
+}
+
+.note-detail-target {
+  cursor: pointer;
+}
+
+.note-detail-target:focus-visible {
+  border-color: var(--color-accent);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.note-removal-draft {
+  min-height: 74px;
+  border-color: #e3b4b4;
+  background: #fdecec;
+}
+
+.note-removal-draft > :not(.note-removal-mark) {
+  opacity: 0.48;
+}
+
+.note-removal-mark {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(138, 61, 61, 0.58);
+  pointer-events: none;
+}
+
+.note-removal-mark svg {
+  width: 38px;
+  height: 38px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .note-body-clamped {
@@ -834,6 +874,7 @@ body.page-scroll-locked {
 
 .task-editor-dialog,
 .note-editor-dialog,
+.note-detail-dialog,
 .task-detail-dialog,
 .change-content-dialog {
   width: min(560px, 100%);
@@ -1053,6 +1094,7 @@ body.page-scroll-locked {
 
 .task-editor-dialog .editor-dialog-header,
 .note-editor-dialog .editor-dialog-header,
+.note-detail-dialog .editor-dialog-header,
 .task-detail-dialog .editor-dialog-header {
   padding: 18px 22px;
   border-bottom: 1px solid var(--color-border);
@@ -1084,6 +1126,49 @@ body.page-scroll-locked {
 .note-editor-dialog form select,
 .note-editor-dialog form textarea {
   width: 100%;
+}
+
+.note-detail-dialog .note-detail-body {
+  display: grid;
+  gap: 8px;
+  padding: 22px 22px 0;
+}
+
+.note-detail-dialog .note-detail-body h3 {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.note-detail-dialog .note-detail-body p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-detail-dialog form .note-detail-values {
+  padding: 0;
+}
+
+.note-detail-dialog form .note-removal-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+}
+
+.note-detail-dialog form .note-removal-checkbox input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.note-detail-actions {
+  justify-content: flex-start;
+}
+
+.note-detail-dialog > .editor-dialog-body > .note-detail-actions {
+  padding: 0 22px 22px;
 }
 
 .note-character-count {

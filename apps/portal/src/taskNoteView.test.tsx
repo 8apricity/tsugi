@@ -40,7 +40,7 @@ describe('Task Note view', () => {
     expect(html).toContain('削除予定にする')
   })
 
-  it('shows Task cascade Notes as removal projections without Note actions', () => {
+  it('keeps Task cascade Notes inside the parent removal unit', () => {
     const html = renderToStaticMarkup(<TaskNoteList notes={[
       {
         noteId: 'cascade-note',
@@ -51,8 +51,9 @@ describe('Task Note view', () => {
       },
     ]} />)
 
-    expect(html).toContain('削除予定')
-    expect(html).toContain('タスクの削除に伴い削除予定')
+    expect(html).not.toContain('note-removal-draft')
+    expect(html).not.toContain('note-removal-mark')
+    expect(html).not.toContain('タスクの削除に伴い削除予定')
     expect(html).not.toContain('ノートの削除を取り消す')
     expect(html).not.toContain('削除予定にする</button>')
   })

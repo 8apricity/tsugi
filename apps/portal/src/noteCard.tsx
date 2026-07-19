@@ -35,7 +35,10 @@ export function NoteBodyView({
           aria-expanded={false}
           aria-controls={bodyId}
           aria-label="ノートの続きを読む"
-          onClick={onExpand}
+          onClick={(event) => {
+            event.stopPropagation()
+            onExpand()
+          }}
         >
           続きを読む
         </button>
@@ -52,6 +55,7 @@ export function NoteCard({
   changeKind = 'add',
   conflicted = false,
   removalReason,
+  onOpen,
   onCancelDraft,
   onEdit,
   onRemove,
@@ -64,6 +68,7 @@ export function NoteCard({
   changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean
   removalReason?: 'task-cascade'
+  onOpen?: () => void
   onCancelDraft?: () => void
   onEdit?: () => void
   onRemove?: () => void
@@ -87,10 +92,25 @@ export function NoteCard({
     return () => observer?.disconnect()
   }, [body, expanded])
 
+  const individuallyRemoved = draft && changeKind === 'remove' &&
+    removalReason !== 'task-cascade'
+
   return (
     <article
-      className={`note-item${draft ? ' note-draft' : ''}`}
+      className={`note-item${draft ? ' note-draft' : ''}${
+        individuallyRemoved ? ' note-removal-draft' : ''
+      }${onOpen ? ' note-detail-target' : ''}`}
       data-note-id={noteId}
+      role={onOpen ? 'button' : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onClick={onOpen}
+      onKeyDown={onOpen
+        ? (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            onOpen()
+          }
+        : undefined}
     >
       <NoteBodyView
         body={body}
@@ -104,27 +124,20 @@ export function NoteCard({
         {targetScopeLabel ? (
           <span className="task-scope-badge">{targetScopeLabel}</span>
         ) : null}
-        {draft ? (
+        {draft && changeKind !== 'remove' ? (
           <span className="lifecycle-summary">
             <LifecycleIcon kind={changeKind} conflicted={conflicted} />
             <small>{lifecycleLabel(changeKind, conflicted)}</small>
           </span>
         ) : null}
-        {removalReason === 'task-cascade' ? (
-          <small className="note-cascade-removal">
-            タスクの削除に伴い削除予定
-          </small>
-        ) : null}
-        {draft && onCancelDraft ? (
+        {draft && changeKind !== 'remove' && onCancelDraft ? (
           <button
             className="button-link"
             type="button"
-            aria-label={changeKind === 'remove'
-              ? 'ノートの削除を取り消す'
-              : 'ノートの下書きを取り消す'}
+            aria-label="ノートの下書きを取り消す"
             onClick={onCancelDraft}
           >
-            {changeKind === 'remove' ? '削除を取り消す' : '取り消す'}
+            取り消す
           </button>
         ) : null}
         {onEdit ? (
@@ -147,6 +160,17 @@ export function NoteCard({
           </button>
         ) : null}
       </div>
+      {individuallyRemoved ? (
+        <span
+          className="note-removal-mark"
+          role="img"
+          aria-label="削除予定のノート"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M5 7h14M9 7V4h6v3m2 0-1 13H8L7 7m4 4v5m2-5v5" />
+          </svg>
+        </span>
+      ) : null}
     </article>
   )
 }

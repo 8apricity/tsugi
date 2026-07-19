@@ -54,7 +54,7 @@ describe('School Date Note body', () => {
       .toBe(false)
   })
 
-  it('shows textual lifecycle states and keeps history outside editing mode', () => {
+  it('shows a semantic trash surface for removal and keeps history in detail', () => {
     const removed = renderToStaticMarkup(
       <NoteCard
         noteId="note-remove"
@@ -66,9 +66,11 @@ describe('School Date Note body', () => {
         onCancelDraft={() => undefined}
       />,
     )
-    expect(removed).toContain('削除予定')
-    expect(removed).toContain('要確認')
-    expect(removed).toContain('削除を取り消す')
+    expect(removed).toContain('role="img"')
+    expect(removed).toContain('aria-label="削除予定のノート"')
+    expect(removed).toContain('<svg')
+    expect(removed).not.toContain('要確認')
+    expect(removed).not.toContain('削除を取り消す')
     expect(removed).toContain('削除前\n全文')
 
     const viewMode = renderToStaticMarkup(
@@ -76,10 +78,11 @@ describe('School Date Note body', () => {
         noteId="note-active"
         body="本文"
         targetScopeLabel="文科"
-        onOpenHistory={() => undefined}
+        onOpen={() => undefined}
       />,
     )
-    expect(viewMode).toContain('編集履歴')
+    expect(viewMode).toContain('role="button"')
+    expect(viewMode).not.toContain('編集履歴')
     expect(viewMode).not.toContain('>編集<')
     expect(viewMode).not.toContain('>削除<')
   })

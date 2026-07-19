@@ -7,6 +7,7 @@ export type DailyLessonNoteListItem = {
   draft?: boolean
   changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean
+  onOpen?: () => void
   onCancelDraft?: () => void
   onEdit?: () => void
   onRemove?: () => void

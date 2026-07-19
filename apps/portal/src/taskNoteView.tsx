@@ -8,6 +8,7 @@ export type TaskNoteListItem = {
   changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean
   removalReason?: 'task-cascade'
+  onOpen?: () => void
   onCancelDraft?: () => void
   onEdit?: () => void
   onRemove?: () => void

@@ -21,7 +21,7 @@ describe('Note Edit History view', () => {
             removalReason: 'task_cascade',
           }],
         }}
-        onClose={() => undefined}
+        onBack={() => undefined}
         onRetry={() => undefined}
       />,
     )

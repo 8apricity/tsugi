@@ -616,6 +616,87 @@ export function createSharedInformationEditorClient({
     }
   }
 
+  function saveNoteUpdateDraft(
+    activeNote: ActiveNoteForEditing,
+    desiredBody: string,
+  ) {
+    if (submitting) return { status: 'submission-in-progress' as const }
+    const body = normalizeNoteBody(desiredBody)
+    if (body === null) return { status: 'invalid-note' as const }
+    const existing = noteDrafts.find(
+      (draft) =>
+        draft.changeKind !== 'add' &&
+        draft.sharedInformationItemId === activeNote.noteId,
+    )
+    if (body === activeNote.body) {
+      if (existing) {
+        noteDrafts = noteDrafts.filter(
+          (draft) => draft.sourceId !== existing.sourceId,
+        )
+        noteConflictSourceIds.delete(existing.sourceId)
+        publish()
+      }
+      return { status: 'removed-noop' as const }
+    }
+    if (!existing && totalDraftCount() >= maximumDraftKeys) {
+      return { status: 'limit-reached' as const }
+    }
+    const sourceId = existing?.sourceId ?? createId()
+    noteDrafts = noteDrafts.filter((draft) => draft.sourceId !== sourceId)
+    noteDrafts.push({
+      kind: 'note',
+      changeKind: 'update',
+      sourceId,
+      sharedInformationItemId: activeNote.noteId,
+      expectedLatestChangeId: activeNote.latestChangeId,
+      body,
+      schoolDate: activeNote.schoolDate,
+      periodNumber: activeNote.periodNumber,
+      targetScopeType: activeNote.targetScopeType,
+      ...(activeNote.relatedTaskItemId
+        ? { relatedTaskItemId: activeNote.relatedTaskItemId }
+        : {}),
+    })
+    noteConflictSourceIds.delete(sourceId)
+    editing = true
+    lastCommitFailed = false
+    publish()
+    return { status: 'saved' as const, sourceId }
+  }
+
+  function saveNoteRemoveDraft(activeNote: ActiveNoteForEditing) {
+    if (submitting) return { status: 'submission-in-progress' as const }
+    const existing = noteDrafts.find(
+      (draft) =>
+        draft.changeKind !== 'add' &&
+        draft.sharedInformationItemId === activeNote.noteId,
+    )
+    if (!existing && totalDraftCount() >= maximumDraftKeys) {
+      return { status: 'limit-reached' as const }
+    }
+    const sourceId = existing?.sourceId ?? createId()
+    noteDrafts = noteDrafts.filter((draft) => draft.sourceId !== sourceId)
+    noteDrafts.push({
+      kind: 'note',
+      changeKind: 'remove',
+      sourceId,
+      sharedInformationItemId: activeNote.noteId,
+      expectedLatestChangeId: activeNote.latestChangeId,
+      body: activeNote.body,
+      schoolDate: activeNote.schoolDate,
+      periodNumber: activeNote.periodNumber,
+      targetScopeType: activeNote.targetScopeType,
+      ...(activeNote.relatedTaskItemId
+        ? { relatedTaskItemId: activeNote.relatedTaskItemId }
+        : {}),
+    })
+    noteConflictSourceIds.delete(sourceId)
+    editing = true
+    lastCommitFailed = false
+    publish()
+    return { status: 'saved' as const, sourceId }
+  }
+
   return {
     subscribe(listener: () => void) {
       listeners.add(listener)
@@ -965,81 +1046,16 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const }
     },
-    saveNoteUpdateDraft(activeNote: ActiveNoteForEditing, desiredBody: string) {
-      if (submitting) return { status: 'submission-in-progress' as const }
-      const body = normalizeNoteBody(desiredBody)
-      if (body === null) return { status: 'invalid-note' as const }
-      const existing = noteDrafts.find(
-        (draft) =>
-          draft.changeKind !== 'add' &&
-          draft.sharedInformationItemId === activeNote.noteId,
-      )
-      if (body === activeNote.body) {
-        if (existing) {
-          noteDrafts = noteDrafts.filter(
-            (draft) => draft.sourceId !== existing.sourceId,
-          )
-          noteConflictSourceIds.delete(existing.sourceId)
-          publish()
-        }
-        return { status: 'removed-noop' as const }
-      }
-      if (!existing && totalDraftCount() >= maximumDraftKeys) {
-        return { status: 'limit-reached' as const }
-      }
-      const sourceId = existing?.sourceId ?? createId()
-      noteDrafts = noteDrafts.filter((draft) => draft.sourceId !== sourceId)
-      noteDrafts.push({
-        kind: 'note',
-        changeKind: 'update',
-        sourceId,
-        sharedInformationItemId: activeNote.noteId,
-        expectedLatestChangeId: activeNote.latestChangeId,
-        body,
-        schoolDate: activeNote.schoolDate,
-        periodNumber: activeNote.periodNumber,
-        targetScopeType: activeNote.targetScopeType,
-        ...(activeNote.relatedTaskItemId
-          ? { relatedTaskItemId: activeNote.relatedTaskItemId }
-          : {}),
-      })
-      noteConflictSourceIds.delete(sourceId)
-      editing = true
-      lastCommitFailed = false
-      publish()
-      return { status: 'saved' as const, sourceId }
-    },
-    saveNoteRemoveDraft(activeNote: ActiveNoteForEditing) {
-      if (submitting) return { status: 'submission-in-progress' as const }
-      const existing = noteDrafts.find(
-        (draft) =>
-          draft.changeKind !== 'add' &&
-          draft.sharedInformationItemId === activeNote.noteId,
-      )
-      if (!existing && totalDraftCount() >= maximumDraftKeys) {
-        return { status: 'limit-reached' as const }
-      }
-      const sourceId = existing?.sourceId ?? createId()
-      noteDrafts = noteDrafts.filter((draft) => draft.sourceId !== sourceId)
-      noteDrafts.push({
-        kind: 'note',
-        changeKind: 'remove',
-        sourceId,
-        sharedInformationItemId: activeNote.noteId,
-        expectedLatestChangeId: activeNote.latestChangeId,
-        body: activeNote.body,
-        schoolDate: activeNote.schoolDate,
-        periodNumber: activeNote.periodNumber,
-        targetScopeType: activeNote.targetScopeType,
-        ...(activeNote.relatedTaskItemId
-          ? { relatedTaskItemId: activeNote.relatedTaskItemId }
-          : {}),
-      })
-      noteConflictSourceIds.delete(sourceId)
-      editing = true
-      lastCommitFailed = false
-      publish()
-      return { status: 'saved' as const, sourceId }
+    saveNoteUpdateDraft,
+    saveNoteRemoveDraft,
+    saveNoteDetailDraft(
+      activeNote: ActiveNoteForEditing,
+      desiredBody: string,
+      removalPlanned: boolean,
+    ) {
+      return removalPlanned
+        ? saveNoteRemoveDraft(activeNote)
+        : saveNoteUpdateDraft(activeNote, desiredBody)
     },
     reconcileActiveNotes(
       activeNotes: readonly ActiveNoteForEditing[],

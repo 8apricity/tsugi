@@ -602,6 +602,50 @@ describe('Shared Information editor client', () => {
     })
   })
 
+  it('saves reflected Note detail transitions through the removal checkbox', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000301',
+      '33000000-0000-4000-8000-000000000302',
+      '33000000-0000-4000-8000-000000000303',
+    ]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+    })
+    const active = {
+      noteId: '33000000-0000-4000-8000-000000000399',
+      latestChangeId: 'note-change-1',
+      body: '変更前の本文',
+      schoolDate: '2026-07-10',
+      targetScopeType: 'class' as const,
+    }
+
+    expect(editor.saveNoteDetailDraft(active, '変更後の本文', false))
+      .toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot().noteDrafts).toMatchObject([{
+      changeKind: 'update',
+      body: '変更後の本文',
+    }])
+
+    expect(editor.saveNoteDetailDraft(active, '無視される入力', true))
+      .toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot().noteDrafts).toMatchObject([{
+      changeKind: 'remove',
+      body: '変更前の本文',
+    }])
+
+    expect(editor.saveNoteDetailDraft(active, '削除を解除した本文', false))
+      .toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot().noteDrafts).toMatchObject([{
+      changeKind: 'update',
+      body: '削除を解除した本文',
+    }])
+
+    expect(editor.saveNoteDetailDraft(active, active.body, false))
+      .toEqual({ status: 'removed-noop' })
+    expect(editor.getSnapshot().noteDrafts).toEqual([])
+  })
+
   it('retains and marks a Task draft after an idempotency conflict', async () => {
     const sourceId = '33000000-0000-4000-8000-000000000201'
     const storage = memoryStorage()

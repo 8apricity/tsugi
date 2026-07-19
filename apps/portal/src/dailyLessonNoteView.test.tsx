@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { DailyLessonNoteList } from './dailyLessonNoteView'
 
 describe('Daily Lesson Note view', () => {
-  it('renders scope badges and lifecycle actions without attribution or time', () => {
+  it('renders scope badges and semantic removal without attribution or time', () => {
     const html = renderToStaticMarkup(<DailyLessonNoteList notes={[
       {
         noteId: 'grade-note',
         body: '学年のノート',
         targetScopeLabel: '2年',
-        onOpenHistory: () => undefined,
+        onOpen: () => undefined,
       },
       {
         noteId: 'track-draft',
@@ -18,7 +18,7 @@ describe('Daily Lesson Note view', () => {
         draft: true,
         changeKind: 'remove',
         conflicted: true,
-        onCancelDraft: () => undefined,
+        onOpen: () => undefined,
       },
     ]} />)
 
@@ -27,8 +27,12 @@ describe('Daily Lesson Note view', () => {
     )
     expect(html).toContain('2年')
     expect(html).toContain('文科')
-    expect(html).toContain('削除予定・要確認')
-    expect(html).toContain('編集履歴')
+    expect(html).toContain('role="img"')
+    expect(html).toContain('aria-label="削除予定のノート"')
+    expect(html).toContain('<svg')
+    expect(html).not.toContain('削除予定・要確認')
+    expect(html).not.toContain('編集履歴')
+    expect(html).toContain('role="button"')
     expect(html).not.toContain('<time')
     expect(html).not.toContain('投稿者')
   })

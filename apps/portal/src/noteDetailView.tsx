@@ -82,15 +82,15 @@ export function NoteDetailDialog(props: NoteDetailDialogProps) {
         }}
       >
         <header className="editor-dialog-header">
+          <h2 id="note-detail-title">ノートの詳細</h2>
           <button
             className="icon-button"
             type="button"
-            aria-label="戻る"
+            aria-label="閉じる"
             onClick={props.onBack}
           >
-            ‹
+            ×
           </button>
-          <h2 id="note-detail-title">ノートの詳細</h2>
         </header>
         <div className="editor-dialog-body">
           <section className="note-detail-body" aria-labelledby="note-body-title">

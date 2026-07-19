@@ -41,6 +41,12 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await expect(readOnlyDetail).toContainText('3組')
     await expect(readOnlyDetail.locator('textarea')).toHaveCount(0)
     await expect(
+      readOnlyDetail.getByRole('button', { name: '閉じる' }),
+    ).toBeVisible()
+    await expect(
+      readOnlyDetail.getByRole('button', { name: '戻る' }),
+    ).toHaveCount(0)
+    await expect(
       readOnlyDetail.getByRole('checkbox', { name: '削除予定にする' }),
     ).toHaveCount(0)
 
@@ -51,7 +57,19 @@ test.describe('authenticated Daily Plan Note detail', () => {
       .getByRole('button', { name: 'ノートの詳細に戻る' })
       .click()
     await expect(readOnlyDetail).toBeVisible()
-    await readOnlyDetail.getByRole('button', { name: '戻る' }).click()
+    await readOnlyDetail.getByRole('button', { name: '閉じる' }).click()
+
+    await noteCard.click()
+    await readOnlyDetail.getByRole('button', { name: '編集履歴' }).click()
+    await expect(
+      history.getByRole('button', { name: 'ノートの詳細に戻る' }),
+    ).toBeVisible()
+    await expect(
+      history.getByRole('button', { name: '閉じる' }),
+    ).toBeVisible()
+    await history.getByRole('button', { name: '閉じる' }).click()
+    await expect(history).toHaveCount(0)
+    await expect(readOnlyDetail).toHaveCount(0)
 
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
     await noteCard.click()
@@ -59,6 +77,8 @@ test.describe('authenticated Daily Plan Note detail', () => {
     const editor = page.getByRole('dialog', { name: 'ノートの詳細' })
     const body = editor.getByRole('textbox', { name: '本文' })
     const removal = editor.getByRole('checkbox', { name: '削除予定にする' })
+    await expect(editor.getByRole('button', { name: '戻る' })).toBeVisible()
+    await expect(editor.getByRole('button', { name: '閉じる' })).toHaveCount(0)
     await expect(body).toHaveValue(originalBody)
     await expect(removal).not.toBeChecked()
     await expect(editor.locator('select:disabled, input[type="date"]:disabled'))
@@ -146,7 +166,7 @@ test.describe('authenticated Daily Plan Note detail', () => {
     const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
     await expect(noteDetail).toContainText(`タスク「${taskTitle}」`)
     await expect(taskDetail).toHaveCount(0)
-    await noteDetail.getByRole('button', { name: '戻る' }).click()
+    await noteDetail.getByRole('button', { name: '閉じる' }).click()
     await expect(noteDetail).toHaveCount(0)
     await expect(taskDetail).toBeVisible()
 

@@ -22,8 +22,17 @@ describe('Note Edit History view', () => {
           }],
         }}
         onBack={() => undefined}
+        onClose={() => undefined}
         onRetry={() => undefined}
       />,
+    )
+    expect(markup).toContain('aria-label="ノートの詳細に戻る"')
+    expect(markup).toContain('aria-label="閉じる"')
+    expect(markup.indexOf('aria-label="ノートの詳細に戻る"')).toBeLessThan(
+      markup.indexOf('ノートの編集履歴'),
+    )
+    expect(markup.indexOf('ノートの編集履歴')).toBeLessThan(
+      markup.indexOf('aria-label="閉じる"'),
     )
     expect(markup).toContain('ノートの編集履歴')
     expect(markup).toContain('Sora')

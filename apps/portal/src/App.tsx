@@ -1474,6 +1474,11 @@ function App() {
     if (!requestEditorDismissal("note")) closeNoteEditorFlow();
   }
 
+  function closeNoteHistoryFlow() {
+    setNoteHistoryDialog(null);
+    if (!requestEditorDismissal("note")) closeNoteEditorFlow();
+  }
+
   function taskEditingSnapshotFromChangeItem(item: ChangeContentTaskItem) {
     if (!item.draft || item.draft.changeKind === "add") return null;
     const baseTask = item.draft.baseTask;
@@ -4086,6 +4091,7 @@ function App() {
               targetScopeContext={targetScopeContext}
               state={noteHistoryDialog.state}
               onBack={() => setNoteHistoryDialog(null)}
+              onClose={closeNoteHistoryFlow}
               onRetry={() => setNoteHistoryDialog((current) =>
                 current ? {
                   ...current,

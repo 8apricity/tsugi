@@ -29,7 +29,11 @@ describe('Note detail view', () => {
     expect(markup).toContain('3組')
     expect(markup).toContain('関連先')
     expect(markup).toContain('2026年7月10日')
-    expect(markup).toContain('aria-label="戻る"')
+    expect(markup).toContain('aria-label="閉じる"')
+    expect(markup).not.toContain('aria-label="戻る"')
+    expect(markup.indexOf('ノートの詳細')).toBeLessThan(
+      markup.indexOf('aria-label="閉じる"'),
+    )
     expect(markup).toContain('編集履歴')
     expect(markup).not.toContain('<textarea')
     expect(markup).not.toContain('削除予定にする')

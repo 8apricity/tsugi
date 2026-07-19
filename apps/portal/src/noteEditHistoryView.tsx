@@ -14,11 +14,13 @@ export function NoteEditHistoryDialog({
   state,
   targetScopeContext,
   onBack,
+  onClose,
   onRetry,
 }: {
   state: NoteEditHistoryState
   targetScopeContext?: TargetScopeDisplayContext
   onBack: () => void
+  onClose: () => void
   onRetry: () => void
 }) {
   return (
@@ -28,9 +30,11 @@ export function NoteEditHistoryDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="note-history-title"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') onBack()
+        }}
       >
         <header className="editor-dialog-header">
-          <h2 id="note-history-title">ノートの編集履歴</h2>
           <button
             className="icon-button"
             type="button"
@@ -38,6 +42,15 @@ export function NoteEditHistoryDialog({
             onClick={onBack}
           >
             ‹
+          </button>
+          <h2 id="note-history-title">ノートの編集履歴</h2>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="閉じる"
+            onClick={onClose}
+          >
+            ×
           </button>
         </header>
         {state.status === 'loading' ? (

@@ -100,13 +100,46 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
       expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(
         viewport.height + 1,
       )
+      if (isMobile) {
+        expect(dialogBox.x).toBe(0)
+        expect(dialogBox.y).toBe(0)
+        expect(dialogBox.width).toBe(viewport.width)
+        expect(dialogBox.height).toBe(viewport.height)
+      }
     }
 
     const headerY = (await header.boundingBox())?.y
-    await body.evaluate((element) => {
+    const bodyScroll = await body.evaluate((element) => {
       element.scrollTop = element.scrollHeight
+      return {
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop,
+      }
     })
+    expect(bodyScroll.scrollHeight).toBeGreaterThan(bodyScroll.clientHeight)
+    expect(bodyScroll.scrollTop).toBeGreaterThan(0)
     await expect.poll(async () => (await header.boundingBox())?.y).toBe(headerY)
+
+    if (viewport) {
+      for (const control of [
+        header.getByRole('button', { name: '戻る' }),
+        header.getByRole('button', { name: '下書きを保存' }),
+      ]) {
+        const controlBox = await control.boundingBox()
+        expect(controlBox).not.toBeNull()
+        if (controlBox) {
+          expect(controlBox.x).toBeGreaterThanOrEqual(0)
+          expect(controlBox.y).toBeGreaterThanOrEqual(0)
+          expect(controlBox.x + controlBox.width).toBeLessThanOrEqual(
+            viewport.width + 1,
+          )
+          expect(controlBox.y + controlBox.height).toBeLessThanOrEqual(
+            viewport.height + 1,
+          )
+        }
+      }
+    }
 
     if (!isMobile) {
       await page.mouse.click(2, 2)

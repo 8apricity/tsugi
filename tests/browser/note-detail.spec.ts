@@ -46,6 +46,15 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await expect(
       readOnlyDetail.getByRole('button', { name: '戻る' }),
     ).toHaveCount(0)
+    await expectLeftToRight(
+      readOnlyDetail.getByRole('heading', { name: 'ノートの詳細' }),
+      readOnlyDetail.getByRole('button', { name: '閉じる' }),
+    )
+    await expectAtHeaderEdges(
+      readOnlyDetail,
+      readOnlyDetail.getByRole('heading', { name: 'ノートの詳細' }),
+      readOnlyDetail.getByRole('button', { name: '閉じる' }),
+    )
     await expect(
       readOnlyDetail.getByRole('checkbox', { name: '削除予定にする' }),
     ).toHaveCount(0)
@@ -67,6 +76,16 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await expect(
       history.getByRole('button', { name: '閉じる' }),
     ).toBeVisible()
+    await expectLeftToRight(
+      history.getByRole('button', { name: 'ノートの詳細に戻る' }),
+      history.getByRole('heading', { name: 'ノートの編集履歴' }),
+      history.getByRole('button', { name: '閉じる' }),
+    )
+    await expectAtHeaderEdges(
+      history,
+      history.getByRole('button', { name: 'ノートの詳細に戻る' }),
+      history.getByRole('button', { name: '閉じる' }),
+    )
     await history.getByRole('button', { name: '閉じる' }).click()
     await expect(history).toHaveCount(0)
     await expect(readOnlyDetail).toHaveCount(0)
@@ -79,6 +98,16 @@ test.describe('authenticated Daily Plan Note detail', () => {
     const removal = editor.getByRole('checkbox', { name: '削除予定にする' })
     await expect(editor.getByRole('button', { name: '戻る' })).toBeVisible()
     await expect(editor.getByRole('button', { name: '閉じる' })).toHaveCount(0)
+    await expectLeftToRight(
+      editor.getByRole('button', { name: '戻る' }),
+      editor.getByRole('heading', { name: 'ノートの詳細' }),
+      editor.getByRole('button', { name: '下書きを保存' }),
+    )
+    await expectAtHeaderEdges(
+      editor,
+      editor.getByRole('button', { name: '戻る' }),
+      editor.getByRole('button', { name: '下書きを保存' }),
+    )
     await expect(body).toHaveValue(originalBody)
     await expect(removal).not.toBeChecked()
     await expect(editor.locator('select:disabled, input[type="date"]:disabled'))
@@ -217,4 +246,40 @@ async function applyCurrentDrafts(page: import('@playwright/test').Page) {
     .getByRole('dialog', { name: '最終確認' })
     .getByRole('button', { name: '変更を反映' })
     .click()
+}
+
+async function expectLeftToRight(
+  ...elements: import('@playwright/test').Locator[]
+) {
+  const leftEdges = await Promise.all(elements.map(async (element) => {
+    const box = await element.boundingBox()
+    expect(box).not.toBeNull()
+    return box?.x ?? Number.NaN
+  }))
+
+  for (let index = 1; index < leftEdges.length; index += 1) {
+    expect(leftEdges[index - 1]).toBeLessThan(leftEdges[index])
+  }
+}
+
+async function expectAtHeaderEdges(
+  dialog: import('@playwright/test').Locator,
+  leftElement: import('@playwright/test').Locator,
+  rightElement: import('@playwright/test').Locator,
+) {
+  const [headerBox, leftBox, rightBox] = await Promise.all([
+    dialog.locator('.editor-dialog-header').boundingBox(),
+    leftElement.boundingBox(),
+    rightElement.boundingBox(),
+  ])
+  expect(headerBox).not.toBeNull()
+  expect(leftBox).not.toBeNull()
+  expect(rightBox).not.toBeNull()
+  if (!headerBox || !leftBox || !rightBox) return
+
+  const leftInset = leftBox.x - headerBox.x
+  const rightInset = headerBox.x + headerBox.width - rightBox.x - rightBox.width
+  expect(leftInset).toBeLessThanOrEqual(24)
+  expect(rightInset).toBeLessThanOrEqual(24)
+  expect(Math.abs(leftInset - rightInset)).toBeLessThanOrEqual(2)
 }

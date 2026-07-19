@@ -1,9 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { NoteEditHistoryDialog } from './noteEditHistoryView'
+import { dialogHeader } from './testMarkup'
 
 describe('Note Edit History view', () => {
-  it('renders exact attribution, removal reason, and full multiline bodies', () => {
+  it('shows back at the left and close at the right of the header', () => {
     const markup = renderToStaticMarkup(
       <NoteEditHistoryDialog
         state={{
@@ -26,13 +27,15 @@ describe('Note Edit History view', () => {
         onRetry={() => undefined}
       />,
     )
-    expect(markup).toContain('aria-label="ノートの詳細に戻る"')
-    expect(markup).toContain('aria-label="閉じる"')
-    expect(markup.indexOf('aria-label="ノートの詳細に戻る"')).toBeLessThan(
-      markup.indexOf('ノートの編集履歴'),
+    const header = dialogHeader(markup)
+    expect(header).toContain('aria-label="ノートの詳細に戻る"')
+    expect(header).toContain('<h2 id="note-history-title">ノートの編集履歴</h2>')
+    expect(header).toContain('aria-label="閉じる"')
+    expect(header.indexOf('aria-label="ノートの詳細に戻る"')).toBeLessThan(
+      header.indexOf('<h2'),
     )
-    expect(markup.indexOf('ノートの編集履歴')).toBeLessThan(
-      markup.indexOf('aria-label="閉じる"'),
+    expect(header.indexOf('<h2')).toBeLessThan(
+      header.indexOf('aria-label="閉じる"'),
     )
     expect(markup).toContain('ノートの編集履歴')
     expect(markup).toContain('Sora')

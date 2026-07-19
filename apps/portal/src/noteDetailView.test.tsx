@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { NoteDetailDialog } from './noteDetailView'
+import { dialogHeader } from './testMarkup'
 
 const details = [
   { label: '変更適用範囲', value: '3組' },
@@ -8,7 +9,7 @@ const details = [
 ]
 
 describe('Note detail view', () => {
-  it('uses one read-only detail flow with text context and history navigation', () => {
+  it('shows the title at the left and close button at the right when read-only', () => {
     const markup = renderToStaticMarkup(
       <NoteDetailDialog
         body={'連絡事項\n全文'}
@@ -29,10 +30,12 @@ describe('Note detail view', () => {
     expect(markup).toContain('3組')
     expect(markup).toContain('関連先')
     expect(markup).toContain('2026年7月10日')
-    expect(markup).toContain('aria-label="閉じる"')
-    expect(markup).not.toContain('aria-label="戻る"')
-    expect(markup.indexOf('ノートの詳細')).toBeLessThan(
-      markup.indexOf('aria-label="閉じる"'),
+    const header = dialogHeader(markup)
+    expect(header).toContain('<h2 id="note-detail-title">ノートの詳細</h2>')
+    expect(header).toContain('aria-label="閉じる"')
+    expect(header).not.toContain('aria-label="戻る"')
+    expect(header.indexOf('<h2')).toBeLessThan(
+      header.indexOf('aria-label="閉じる"'),
     )
     expect(markup).toContain('編集履歴')
     expect(markup).not.toContain('<textarea')
@@ -55,6 +58,17 @@ describe('Note detail view', () => {
       />,
     )
 
+    const header = dialogHeader(markup)
+    expect(header).toContain('aria-label="戻る"')
+    expect(header).toContain('<h2 id="note-detail-title">ノートの詳細</h2>')
+    expect(header).toContain('aria-label="下書きを保存"')
+    expect(header).not.toContain('aria-label="閉じる"')
+    expect(header.indexOf('aria-label="戻る"')).toBeLessThan(
+      header.indexOf('<h2'),
+    )
+    expect(header.indexOf('<h2')).toBeLessThan(
+      header.indexOf('aria-label="下書きを保存"'),
+    )
     expect(markup).toContain('<textarea')
     expect(markup).toContain('disabled')
     expect(markup).toContain('削除予定にする')

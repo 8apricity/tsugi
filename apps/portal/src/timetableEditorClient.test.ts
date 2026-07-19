@@ -62,7 +62,7 @@ function layerState(
 }
 
 describe('Shared Information editor client', () => {
-  it('pauses editing without deleting drafts and restores the paused state', () => {
+  it('restores the editing session and drafts after reload', () => {
     const storage = memoryStorage()
     const editor = createTimetableEditorClient({ storage })
 
@@ -73,17 +73,63 @@ describe('Shared Information editor client', () => {
       targetScopeType: 'track',
     })
     expect(editor.getSnapshot()).toMatchObject({ editing: true, draftCount: 1 })
-    expect(editor.exitEditing()).toEqual({ status: 'paused' })
-    expect(editor.getSnapshot()).toMatchObject({ editing: false, draftCount: 1 })
 
     const restored = createTimetableEditorClient({ storage })
     expect(restored.getSnapshot()).toMatchObject({
-      editing: false,
+      editing: true,
       draftCount: 1,
       taskDrafts: [{ title: '持ち越す下書き' }],
     })
-    expect(restored.enterEditing()).toEqual({ status: 'editing' })
-    expect(restored.getSnapshot().draftCount).toBe(1)
+  })
+
+  it('restores an empty editing session after reload', () => {
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({ storage })
+
+    editor.enterEditing()
+
+    expect(createTimetableEditorClient({ storage }).getSnapshot()).toMatchObject({
+      editing: true,
+      draftCount: 0,
+    })
+  })
+
+  it('exits editing by deleting the whole draft workspace', () => {
+    const storage = memoryStorage()
+    const editor = createTimetableEditorClient({ storage })
+
+    editor.saveTaskDraft({
+      title: '削除する下書き',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track',
+    })
+    editor.setDesiredState({
+      targetScopeType: 'class',
+      changeDate: '2026-07-11',
+      periodNumber: 3,
+      replacement: { type: 'cancelled' },
+    })
+    editor.saveNoteDraft({
+      body: '削除するノート',
+      schoolDate: '2026-07-12',
+      targetScopeType: 'grade',
+    })
+
+    expect(editor.shouldConfirmExit()).toBe(true)
+    expect(editor.getSnapshot().draftCount).toBe(3)
+    expect(editor.exitEditing()).toEqual({ status: 'exited' })
+    expect(editor.getSnapshot()).toMatchObject({
+      editing: false,
+      draftCount: 0,
+      drafts: [],
+      taskDrafts: [],
+      noteDrafts: [],
+    })
+    expect(createTimetableEditorClient({ storage }).getSnapshot()).toMatchObject({
+      editing: false,
+      draftCount: 0,
+    })
   })
 
   it('saves multiple Daily Lesson Notes without a Timetable Change and inherits the dialog context', () => {
@@ -255,10 +301,11 @@ describe('Shared Information editor client', () => {
     })
 
     editor.setDraftStorageScope('student-b')
-    expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
+    expect(editor.getSnapshot()).toMatchObject({ editing: false, draftCount: 0 })
 
     editor.setDraftStorageScope('student-a')
     expect(editor.getSnapshot()).toMatchObject({
+      editing: true,
       draftCount: 1,
       taskDrafts: [{ title: '提出物' }],
     })

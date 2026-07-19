@@ -1,17 +1,16 @@
 import { readFile, rm } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname } from 'node:path'
 import { request, type FullConfig } from '@playwright/test'
+import {
+  browserAuthStatePath,
+  browserTestAuthProjectNames,
+  type BrowserAuthStateVariant,
+} from './auth-state.js'
 
 const fixedTestStudentAccountId =
   'test-student-2026-2-3-humanities-1'
-const storageStateByProject = new Map([
-  ['chromium', resolve('test-results/playwright/auth/chromium.json')],
-  [
-    'webkit-iphone',
-    resolve('test-results/playwright/auth/webkit-iphone.json'),
-  ],
-  ['chrome', resolve('test-results/playwright/auth/chrome.json')],
-])
+const otherTestStudentAccountId =
+  'test-student-2026-2-3-science-1'
 
 function requestedProjectNames() {
   const names: string[] = []
@@ -39,8 +38,7 @@ export default async function globalSetup(config: FullConfig) {
     ? config.projects.filter((project) => requestedNames.includes(project.name))
     : config.projects
   const authenticatedProjects = projects.flatMap((project) => {
-    const storageState = storageStateByProject.get(project.name)
-    if (!storageState) return []
+    if (!browserTestAuthProjectNames.has(project.name)) return []
 
     const baseURL = project.use.baseURL
     if (typeof baseURL !== 'string') {
@@ -49,7 +47,11 @@ export default async function globalSetup(config: FullConfig) {
       )
     }
 
-    return [{ baseURL, name: project.name, storageState }]
+    return [{
+      baseURL,
+      name: project.name,
+      storageState: browserAuthStatePath(project.name),
+    }]
   })
 
   if (authenticatedProjects.length === 0) {
@@ -62,32 +64,59 @@ export default async function globalSetup(config: FullConfig) {
   })
 
   for (const project of authenticatedProjects) {
-    const apiRequestContext = await request.newContext({
-      baseURL: project.baseURL,
-    })
-    try {
-      const response = await apiRequestContext.post('/api/test/login', {
-        data: { studentAccountId: fixedTestStudentAccountId },
-        headers: { 'x-test-login-secret': testLoginSecret },
+    const loginStates = [
+      {
+        studentAccountId: fixedTestStudentAccountId,
+        variant: 'default',
+      },
+      {
+        studentAccountId: otherTestStudentAccountId,
+        variant: 'secondary',
+      },
+      {
+        studentAccountId: fixedTestStudentAccountId,
+        variant: 'relogin',
+      },
+      {
+        studentAccountId: fixedTestStudentAccountId,
+        variant: 'post-logout',
+      },
+    ] satisfies Array<{
+      studentAccountId: string
+      variant: BrowserAuthStateVariant
+    }>
+    for (const loginState of loginStates) {
+      const storageState = browserAuthStatePath(
+        project.name,
+        loginState.variant,
+      )
+      const apiRequestContext = await request.newContext({
+        baseURL: project.baseURL,
       })
+      try {
+        const response = await apiRequestContext.post('/api/test/login', {
+          data: { studentAccountId: loginState.studentAccountId },
+          headers: { 'x-test-login-secret': testLoginSecret },
+        })
 
-      if (!response.ok()) {
-        throw new Error(
-          `Node-side ${project.name} test login failed with status ${response.status()}`,
-        )
+        if (!response.ok()) {
+          throw new Error(
+            `Node-side ${project.name} test login failed with status ${response.status()}`,
+          )
+        }
+
+        await apiRequestContext.storageState({ path: storageState })
+
+        const persistedState = await readFile(storageState, 'utf8')
+        if (persistedState.includes(testLoginSecret)) {
+          await rm(storageState, { force: true })
+          throw new Error(
+            `${project.name} storage state contained test-login secret`,
+          )
+        }
+      } finally {
+        await apiRequestContext.dispose()
       }
-
-      await apiRequestContext.storageState({ path: project.storageState })
-
-      const persistedState = await readFile(project.storageState, 'utf8')
-      if (persistedState.includes(testLoginSecret)) {
-        await rm(project.storageState, { force: true })
-        throw new Error(
-          `${project.name} storage state contained test-login secret`,
-        )
-      }
-    } finally {
-      await apiRequestContext.dispose()
     }
   }
 }

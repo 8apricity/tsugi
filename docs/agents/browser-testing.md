@@ -50,14 +50,20 @@ database must not contain real school or personal data. Never apply the fixed
 test Student seed to production.
 
 Before a selected project starts, Playwright generates an ephemeral test-login
-secret in Node. Global setup creates a separate Node-side `APIRequestContext`
-for every selected project, calls the existing `POST /api/test/login` endpoint
-for `test-student-2026-2-3-humanities-1`, and writes resulting cookies to that
-project's own disposable state file:
+secret in Node. Global setup creates separate Node-side `APIRequestContext`s
+for every selected project, calls the existing `POST /api/test/login` endpoint,
+and writes resulting cookies to disposable state files. Each project receives
+its default session for `test-student-2026-2-3-humanities-1`:
 
 - Chromium: `test-results/playwright/auth/chromium.json`
 - WebKit/iPhone: `test-results/playwright/auth/webkit-iphone.json`
 - optional branded Chrome: `test-results/playwright/auth/chrome.json`
+
+Draft-lifecycle tests also receive isolated secondary-account, switch-back, and
+post-logout sessions under the same directory. Their filenames add
+`-secondary`, `-relogin`, or `-post-logout` before `.json`; these sessions keep
+account-switch and logout checks from invalidating another test's default
+session.
 
 Each project's `BrowserContext` starts from only its corresponding state; WebKit
 never uses Chromium state. No UI login step runs. The secret is not written to

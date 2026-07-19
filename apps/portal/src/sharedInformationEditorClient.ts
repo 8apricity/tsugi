@@ -912,9 +912,8 @@ export function createSharedInformationEditorClient({
     },
     exitEditing() {
       if (submitting) return { status: 'submission-in-progress' as const }
-      editing = false
-      publish()
-      return { status: 'paused' as const }
+      clearEditorState()
+      return { status: 'exited' as const }
     },
     shouldConfirmExit() {
       return totalDraftCount() > 0

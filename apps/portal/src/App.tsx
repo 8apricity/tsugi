@@ -75,7 +75,6 @@ import type {
   ReferenceScopeOption,
   ReferenceScopeOptions,
 } from "../shared/referenceDailyPlan";
-import { createReferenceScopeEditingSession } from "./referenceScopeEditing";
 import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
@@ -106,6 +105,7 @@ import {
 } from "./editorLifecycleView";
 import {
   DirectChangeReviewDialog,
+  DraftExitConfirmationDialog,
   DraftLogoutConfirmationDialog,
   StaleDirectChangeRefreshAction,
 } from "./directChangeReviewView";
@@ -511,13 +511,6 @@ function App() {
         createSharedInformationDirectChangeTransport(),
     }),
   );
-  const [referenceScopeEditingSession] = useState(() =>
-    createReferenceScopeEditingSession({
-      isEditing: () => timetableEditorClient.getSnapshot().editing,
-      pauseEditing: () => timetableEditorClient.exitEditing(),
-      resumeEditing: () => timetableEditorClient.enterEditing(),
-    }),
-  );
   const timetableLayerCacheRef = useRef(
     new TimetableLayerMemoryCache<TimetableLayerState>(),
   );
@@ -549,6 +542,8 @@ function App() {
     useState<PendingEditorDismissal | null>(null);
   const [changeContentOpen, setChangeContentOpen] = useState(false);
   const [directChangeReviewOpen, setDirectChangeReviewOpen] = useState(false);
+  const [draftExitConfirmationOpen, setDraftExitConfirmationOpen] =
+    useState(false);
   const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
   const [timetableEditorRefreshNeeded, setTimetableEditorRefreshNeeded] =
     useState(false);
@@ -597,7 +592,8 @@ function App() {
     timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
       taskEditorForm || noteEditorForm || taskRemovalConfirmation || taskDetail || taskHistoryDialog ||
       noteHistoryDialog || referencePickerOpen || changeContentOpen ||
-      directChangeReviewOpen || logoutConfirmationOpen,
+      directChangeReviewOpen || draftExitConfirmationOpen ||
+      logoutConfirmationOpen,
   );
 
   useEffect(() => {
@@ -641,6 +637,8 @@ function App() {
       setReferencePickerOpen(false);
     } else if (directChangeReviewOpen) {
       setDirectChangeReviewOpen(false);
+    } else if (draftExitConfirmationOpen) {
+      setDraftExitConfirmationOpen(false);
     } else if (logoutConfirmationOpen) {
       setLogoutConfirmationOpen(false);
     } else if (changeContentOpen) {
@@ -1387,10 +1385,10 @@ function App() {
     setReferenceScopeOptions(null);
     setReferencePickerScopeKey("");
     setReferenceScope(null);
-    referenceScopeEditingSession.reset();
     setMenuOpen(false);
     setChangeContentOpen(false);
     setDirectChangeReviewOpen(false);
+    setDraftExitConfirmationOpen(false);
     setTimetableEditorRefreshNeeded(false);
     changeContentReturnRef.current = false;
     pendingChangeContentTimetableRef.current = null;
@@ -1405,6 +1403,7 @@ function App() {
 
   function finishLeavingTimetableEditing() {
     timetableEditorClient.exitEditing();
+    setDraftExitConfirmationOpen(false);
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setNoteEditorForm(null);
@@ -1416,6 +1415,20 @@ function App() {
     changeContentReturnRef.current = false;
     pendingChangeContentTimetableRef.current = null;
     setTimetableEditorMessage(null);
+  }
+
+  function requestDraftWorkspaceExit() {
+    if (timetableEditorClient.shouldConfirmExit()) {
+      setTimetableEditorForm(null);
+      setTaskEditorForm(null);
+      setNoteEditorForm(null);
+      setTaskRemovalConfirmation(null);
+      clearEditorInitialForms();
+      setPendingEditorDismissal(null);
+      setDraftExitConfirmationOpen(true);
+      return;
+    }
+    finishLeavingTimetableEditing();
   }
 
   function leaveTimetableEditing() {
@@ -1430,7 +1443,7 @@ function App() {
       openEditor &&
       requestEditorDismissal(openEditor, "exit-editing")
     ) return;
-    finishLeavingTimetableEditing();
+    requestDraftWorkspaceExit();
   }
 
   function returnToChangeContentIfNeeded() {
@@ -1935,14 +1948,12 @@ function App() {
       return;
     }
     setReferenceDailyPlan(null);
-    referenceScopeEditingSession.enterReferenceScope();
     setReferenceScope(option);
     setReferencePickerOpen(false);
   }
 
   function leaveReferenceScope() {
     setReferenceScope(null);
-    referenceScopeEditingSession.leaveReferenceScope();
     setMenuOpen(false);
   }
 
@@ -2666,7 +2677,7 @@ function App() {
     if (!pending) return;
     setPendingEditorDismissal(null);
     if (pending.destination === "exit-editing") {
-      finishLeavingTimetableEditing();
+      requestDraftWorkspaceExit();
     } else if (pending.editor === "task") {
       closeTaskEditorFlow();
     } else if (pending.editor === "note") {
@@ -3839,7 +3850,8 @@ function App() {
                     <span className="date-cell-weekday">
                       {date.weekdayLabel}
                     </span>
-                    {timetableEditor.draftDates.includes(date.schoolDate) ? (
+                    {!referenceScope &&
+                    timetableEditor.draftDates.includes(date.schoolDate) ? (
                       <span
                         className="date-draft-mark"
                         aria-label="変更下書きあり"
@@ -3976,6 +3988,16 @@ function App() {
                 draftCount={timetableEditor.draftCount}
                 onBack={() => setLogoutConfirmationOpen(false)}
                 onLogout={() => void logout()}
+              />
+            </div>
+          ) : null}
+
+          {draftExitConfirmationOpen ? (
+            <div className="editor-dialog-backdrop" role="presentation">
+              <DraftExitConfirmationDialog
+                draftCount={timetableEditor.draftCount}
+                onContinue={() => setDraftExitConfirmationOpen(false)}
+                onExit={finishLeavingTimetableEditing}
               />
             </div>
           ) : null}

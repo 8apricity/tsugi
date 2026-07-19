@@ -24,9 +24,11 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
 
     await scrollToPageBottom(page)
+    const taskAddButton = page.getByRole('button', { name: 'タスクを追加' })
+    await taskAddButton.scrollIntoViewIfNeeded()
     const dailyPlanScrollY = await readPageScrollY(page)
 
-    await page.getByRole('button', { name: 'タスクを追加' }).click()
+    await taskAddButton.click()
     const editor = page.getByRole('dialog', { name: 'タスクを追加' })
     const header = editor.locator('.editor-dialog-header')
 
@@ -180,22 +182,30 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
 
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
     await scrollToPageBottom(page)
+    const task = page.locator('.task-entry').filter({ hasText: title }).last()
+    await task.scrollIntoViewIfNeeded()
     const dailyPlanScrollY = await readPageScrollY(page)
-    await page.locator('.task-entry').filter({ hasText: title }).last().click()
+    await task.click()
 
-    const detail = page.getByRole('dialog', { name: 'タスクの詳細' })
-    await detail.getByRole('button', { name: '編集履歴' }).click()
+    const editorDetail = page.getByRole('dialog', { name: 'タスクを編集' })
+    await editorDetail.getByRole('button', { name: '編集履歴' }).click()
     const history = page.getByRole('dialog', { name: 'タスクの編集履歴' })
     await expect(history).toBeVisible()
     await expect(page.locator('body')).toHaveClass(/page-scroll-locked/)
 
     await page.goBack()
     await expect(history).toHaveCount(0)
-    await expect(detail).toBeVisible()
+    await expect(editorDetail).toBeVisible()
     await expect(page.locator('body')).toHaveClass(/page-scroll-locked/)
 
     await page.goBack()
-    await expect(detail).toHaveCount(0)
+    const readOnlyDetail = page.getByRole('dialog', { name: 'タスクの詳細' })
+    await expect(editorDetail).toHaveCount(0)
+    await expect(readOnlyDetail).toBeVisible()
+    await expect(page.locator('body')).toHaveClass(/page-scroll-locked/)
+
+    await page.goBack()
+    await expect(readOnlyDetail).toHaveCount(0)
     await expect(page.locator('body')).not.toHaveClass(/page-scroll-locked/)
     await expect.poll(() => readPageScrollY(page)).toBe(
       dailyPlanScrollY,

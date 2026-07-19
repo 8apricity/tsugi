@@ -15,14 +15,23 @@ export type TaskNoteListItem = {
   onOpenHistory?: () => void
 }
 
-export function TaskNoteList({ notes }: { notes: TaskNoteListItem[] }) {
+export function TaskNoteList({
+  notes,
+  presentation = 'daily-plan',
+}: {
+  notes: TaskNoteListItem[]
+  presentation?: 'daily-plan' | 'detail'
+}) {
   if (notes.length === 0) return null
   return (
-    <div className="task-note-list">
+    <div className={`task-note-list${
+      presentation === 'detail' ? ' task-note-detail-list' : ''
+    }`}>
       {notes.map((note) => (
         <NoteCard
           key={note.noteId}
           {...note}
+          showChevron={presentation === 'detail' && Boolean(note.onOpen)}
         />
       ))}
     </div>

@@ -35,4 +35,60 @@ describe('Task detail dialog', () => {
     expect(markup).toContain('編集')
     expect(markup).toContain('下書きを取り消す')
   })
+
+  it('uses the Task detail surface for direct editing and repeatable new Notes', () => {
+    const markup = renderToStaticMarkup(
+      <TaskDetailDialog
+        task={{
+          taskId: 'task-2',
+          title: '編集するタスク',
+          dueDate: null,
+          relatedLessonName: '数学',
+          targetScopeType: 'track',
+          notes: [],
+        }}
+        taskScopeLabel="文科"
+        referenceSchoolDate="2026-07-10"
+        mode="edit"
+        editForm={{
+          title: '編集するタスク',
+          dueDate: null,
+          relatedLessonInput: '数学',
+          noteBodies: ['', '補足'],
+        }}
+        notes={
+          <TaskNoteList
+            presentation="detail"
+            notes={[{
+              noteId: 'note-2',
+              body: '既存ノート',
+              onOpen: () => undefined,
+            }]}
+          />
+        }
+        onClose={() => undefined}
+        onSave={() => undefined}
+        onTitleChange={() => undefined}
+        onDueDateChange={() => undefined}
+        onRelatedLessonNameChange={() => undefined}
+        onNoteBodyChange={() => undefined}
+        onAddNote={() => undefined}
+        onOpenHistory={() => undefined}
+      />,
+    )
+
+    expect(markup).toContain('タスクを編集')
+    expect(markup).toContain('ノート本文 1')
+    expect(markup).toContain('ノート本文 2')
+    expect(markup).toContain('＋ノートを追加')
+    expect(markup).toContain('変更適用範囲')
+    expect(markup).toContain('文科')
+    expect(markup).not.toContain('<select')
+    expect(markup).toContain('task-note-detail-list')
+    expect(markup).toContain('note-detail-chevron')
+    expect(markup).not.toContain('task-scope-badge')
+    expect(markup).toContain('編集履歴')
+    expect(markup).not.toContain('>編集</button>')
+    expect(markup).not.toContain('削除予定にする')
+  })
 })

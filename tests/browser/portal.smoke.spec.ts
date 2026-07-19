@@ -47,7 +47,7 @@ test('a fixed test Student reaches authenticated Daily Plan', async ({
   ).toHaveCount(0)
 })
 
-test('draft lifecycle protects Task input and explains immutable scope', async ({
+test('draft lifecycle protects Task input and renders immutable scope as text', async ({
   page,
   browserName,
   isMobile,
@@ -124,22 +124,17 @@ test('draft lifecycle protects Task input and explains immutable scope', async (
 
   const activeCard = page.locator('.task-entry').filter({ hasText: savedTitle })
   await activeCard.locator('.task-item').click()
-  const detailDialog = page.getByRole('dialog', { name: 'タスクの詳細' })
-  await expect(
-    detailDialog.getByRole('button', { name: '削除予定にする' }),
-  ).toBeVisible()
-  await detailDialog.getByRole('button', { name: '編集', exact: true }).click()
-
-  const immutableMessage =
-    'タスクの変更適用範囲は変更できません。削除予定にしてから追加し直してください。'
   const updateDialog = page.getByRole('dialog', { name: 'タスクを編集' })
   await expect(
     updateDialog.getByRole('button', { name: '下書きを保存' }),
   ).toBeVisible()
-  await updateDialog.getByRole('button', { name: immutableMessage }).click()
   await expect(
-    page.getByRole('status').filter({ hasText: immutableMessage }),
+    updateDialog.locator('dt').filter({ hasText: '変更適用範囲' }),
   ).toBeVisible()
+  await expect(
+    updateDialog.getByRole('combobox', { name: '変更適用範囲' }),
+  ).toHaveCount(0)
+  await expect(updateDialog.getByText('3組', { exact: true })).toBeVisible()
 })
 
 test.describe('pointer state separation', () => {

@@ -173,23 +173,20 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
     const taskCard = page.locator('.task-entry').filter({ hasText: taskTitle })
     await taskCard.locator('.task-item').click()
-    const taskDetail = page.getByRole('dialog', { name: 'タスクの詳細' })
-    await taskDetail.getByRole('button', { name: 'ノートを書く' }).click()
-
-    const noteAddition = page.getByRole('dialog', { name: 'ノートを書く' })
-    await noteAddition.getByRole('textbox', { name: '本文' }).fill(noteBody)
-    await noteAddition.getByRole('button', { name: '下書きを保存' }).click()
-    await expect(taskDetail).toBeVisible()
-    await taskDetail.getByRole('button', { name: '閉じる' }).click()
+    const taskEditor = page.getByRole('dialog', { name: 'タスクを編集' })
+    await taskEditor.getByRole('button', { name: '＋ノートを追加' }).click()
+    await taskEditor.getByRole('textbox', { name: 'ノート本文 1' }).fill(noteBody)
+    await taskEditor.getByRole('button', { name: '下書きを保存' }).click()
     await applyCurrentDrafts(page)
 
     await taskCard.locator('.task-item').click()
+    const taskDetail = page.getByRole('dialog', { name: 'タスクの詳細' })
     await expect(taskDetail).toBeVisible()
     const relatedNote = taskDetail.locator('.note-item').filter({
       hasText: noteBody,
     })
     await expect(relatedNote).toHaveAttribute('role', 'button')
-    await expect(relatedNote.locator('.note-detail-chevron')).toHaveCount(0)
+    await expect(relatedNote).toContainText('›')
     await relatedNote.click()
 
     const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
@@ -202,7 +199,8 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await taskDetail.getByRole('button', { name: '閉じる' }).click()
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
     await taskCard.locator('.task-item').click()
-    const editableRelatedNote = taskDetail.locator('.note-item').filter({
+    const editableTaskDetail = page.getByRole('dialog', { name: 'タスクを編集' })
+    const editableRelatedNote = editableTaskDetail.locator('.note-item').filter({
       hasText: noteBody,
     })
     await editableRelatedNote.click()
@@ -214,9 +212,9 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await relatedNoteEditor
       .getByRole('button', { name: '下書きを保存' })
       .click()
-    await expect(taskDetail).toBeVisible()
+    await expect(editableTaskDetail).toBeVisible()
 
-    const relatedUpdateDraft = taskDetail.locator('.note-item').filter({
+    const relatedUpdateDraft = editableTaskDetail.locator('.note-item').filter({
       hasText: updatedNoteBody,
     })
     await relatedUpdateDraft.click()
@@ -224,13 +222,11 @@ test.describe('authenticated Daily Plan Note detail', () => {
       relatedNoteEditor.getByRole('textbox', { name: '本文' }),
     ).toHaveValue(updatedNoteBody)
     await relatedNoteEditor.getByRole('button', { name: '戻る' }).click()
-    await expect(taskDetail).toBeVisible()
+    await expect(editableTaskDetail).toBeVisible()
 
-    await taskDetail.getByRole('button', { name: '削除予定にする' }).click()
-    await page
-      .getByRole('dialog', { name: 'タスクを削除予定にしますか？' })
-      .getByRole('button', { name: '削除予定にする' })
-      .click()
+    await editableTaskDetail.getByRole('button', { name: '戻る' }).click()
+    await page.getByRole('dialog', { name: 'タスクの詳細' })
+      .getByRole('button', { name: '閉じる' }).click()
     await applyCurrentDrafts(page)
   })
 })

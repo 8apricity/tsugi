@@ -540,6 +540,29 @@ button.period-inspect-button:active {
   background: #fff;
 }
 
+.task-note-detail-list {
+  margin-left: 0;
+}
+
+.task-note-detail-list .note-item {
+  border: 1px solid var(--color-border);
+  background: #f8fafb;
+}
+
+.task-note-draft-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.task-note-draft-fields textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.task-note-add-button {
+  justify-self: start;
+}
+
 .task-item span {
   display: grid;
   gap: 4px;

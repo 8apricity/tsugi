@@ -18,6 +18,27 @@ describe('Task Note view', () => {
     expect(html).not.toContain('task-scope-badge')
   })
 
+  it('reuses the independent Note card in Task detail without Target Scope', () => {
+    const html = renderToStaticMarkup(
+      <TaskNoteList
+        presentation="detail"
+        notes={[{
+          noteId: 'detail-note',
+          body: '詳細内のノート',
+          onOpen: () => undefined,
+        }]}
+      />,
+    )
+
+    expect(html).toContain('task-note-detail-list')
+    expect(html).toContain('note-detail-target')
+    expect(html).toContain('note-detail-chevron')
+    expect(html).not.toContain('task-scope-badge')
+    expect(html).not.toContain('>編集</button>')
+    expect(html).not.toContain('削除予定にする</button>')
+    expect(html).not.toContain('編集履歴</button>')
+  })
+
   it('renders Task removal as an in-app cascade confirmation', () => {
     const longFirstLine = 'あ'.repeat(81)
     const html = renderToStaticMarkup(

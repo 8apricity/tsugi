@@ -839,6 +839,7 @@ function App() {
       schoolDate,
       schoolYearRange.startsOn,
       schoolYearRange.endsOn,
+      timetableEditor.draftDates,
     );
     setTimetableLayerDialog((current) => {
       if (!current || current.schoolDate !== schoolDate) return current;
@@ -894,6 +895,7 @@ function App() {
     layerDialogSchoolDate,
     layerDialogRequestId,
     schoolYearRange,
+    timetableEditor.draftDates,
     timetableEditorClient,
   ]);
 
@@ -3576,14 +3578,19 @@ function App() {
                                       ? lifecycleDrafts.length > 0
                                         ? (
                                           <span className="lesson-transition">
-                                            <EffectiveDailyLesson lesson={period} />
-                                            <span
-                                              className="lesson-transition-arrow"
-                                              aria-hidden="true"
-                                            >
-                                              ▶
+                                            <EffectiveDailyLesson
+                                              className="lesson-transition-before"
+                                              lesson={period}
+                                            />
+                                            <span className="lesson-transition-destination">
+                                              <span
+                                                className="lesson-transition-arrow"
+                                                aria-hidden="true"
+                                              >
+                                                ▶
+                                              </span>
+                                              <EffectiveDailyLesson lesson={projectedLesson} />
                                             </span>
-                                            <EffectiveDailyLesson lesson={projectedLesson} />
                                           </span>
                                         )
                                         : <EffectiveDailyLesson lesson={period} />
@@ -6051,9 +6058,15 @@ type EffectiveDailyLesson = {
   lessonReference?: TimetableReference;
 };
 
-function EffectiveDailyLesson({ lesson }: { lesson: EffectiveDailyLesson }) {
+function EffectiveDailyLesson({
+  className,
+  lesson,
+}: {
+  className?: string;
+  lesson: EffectiveDailyLesson;
+}) {
   return (
-    <span className="effective-daily-lesson">
+    <span className={`effective-daily-lesson${className ? ` ${className}` : ""}`}>
       <span>{lesson.lessonName || "授業なし"}</span>
       {lesson.lessonReference ? (
         <span className="lesson-reference">

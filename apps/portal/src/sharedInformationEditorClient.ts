@@ -2,6 +2,7 @@ import {
   projectTimetableSlot,
   timetableReplacementsEqual,
   type DesiredTimetableLayer,
+  type ProjectedDailyLesson,
   type TargetScopeType as ProjectionTargetScopeType,
   type TimetableReference as ProjectionTimetableReference,
   type TimetableReplacement as ProjectionTimetableReplacement,
@@ -202,15 +203,7 @@ export type TimetableLayerState = {
         }>
       }
   >
-  finalDailyLesson: {
-    lessonName: string
-    lessonReference?: TimetableReference
-    timetableChangeState:
-      | 'unchanged'
-      | 'resolved'
-      | 'cancelled'
-      | 'unresolved-reference'
-  }
+  finalDailyLesson: ProjectedDailyLesson
 }
 
 type StorageLike = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>

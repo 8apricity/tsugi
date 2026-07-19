@@ -7,7 +7,7 @@ import type {
 } from './persistence'
 import {
   projectTimetableSlot,
-  type TimetableReference,
+  type ProjectedDailyLesson,
 } from '../shared/timetableProjection'
 import { resolveStudentOperationalContext } from './studentOperationalContext'
 import {
@@ -57,15 +57,7 @@ export type TimetableChangeLayerResult =
             notes?: TimetableLayerNote[]
           }
       >
-      finalDailyLesson: {
-        lessonName: string
-        lessonReference?: TimetableReference
-        timetableChangeState:
-          | 'unchanged'
-          | 'resolved'
-          | 'cancelled'
-          | 'unresolved-reference'
-      }
+      finalDailyLesson: ProjectedDailyLesson
     }
   | { status: 'unauthenticated' }
   | { status: 'invalid-selection' }

@@ -3,6 +3,8 @@ import { expect, test } from '@playwright/test'
 test('edit mode shows projected transitions, including identical and removal drafts', async ({
   page,
 }, testInfo) => {
+  const customLessonName = '地域横断型のとても長い探究プロジェクト演習'
+  const noteBody = `removal-note-${testInfo.project.name}`
   await page.goto('/')
   const mondayIndex = testInfo.project.name === 'webkit-iphone' ? 1 : 0
   await page.locator('.date-cell').filter({
@@ -48,6 +50,34 @@ test('edit mode shows projected transitions, including identical and removal dra
   await layerDialog.getByRole('button', {
     name: /^3組の時間割を編集/,
   }).click()
+  await editor.getByRole('combobox', { name: '授業名' }).fill(customLessonName)
+  await editor.getByRole('button', { name: '下書きを保存' }).click()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+  await expect(transition).toContainText(customLessonName)
+  await expect(transition.locator('.lesson-reference')).toHaveCount(1)
+  if (testInfo.project.name === 'webkit-iphone') {
+    const beforeBox = await transition.locator('.lesson-transition-before')
+      .boundingBox()
+    const destinationBox = await transition
+      .locator('.lesson-transition-destination').boundingBox()
+    expect(beforeBox).not.toBeNull()
+    expect(destinationBox).not.toBeNull()
+    expect(destinationBox!.y).toBeGreaterThan(beforeBox!.y)
+  }
+
+  await firstPeriod.getByRole('button', { name: /^1限/ }).click()
+  await layerDialog.getByRole('button', {
+    name: /^3組の時間割を編集/,
+  }).click()
+  await editor.getByRole('button', { name: '★', exact: true }).click()
+  await editor.getByRole('button', { name: '下書きを保存' }).click()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+  await expect(transition).toHaveText('数Ⅱβ（月1）▶自走（★）')
+
+  await firstPeriod.getByRole('button', { name: /^1限/ }).click()
+  await layerDialog.getByRole('button', {
+    name: /^3組の時間割を編集/,
+  }).click()
   await editor.getByRole('button', { name: '月3', exact: true }).click()
   await editor.getByRole('button', { name: '下書きを保存' }).click()
   await layerDialog.getByRole('button', { name: '閉じる' }).click()
@@ -59,6 +89,8 @@ test('edit mode shows projected transitions, including identical and removal dra
     name: /^3組の時間割を編集/,
   }).click()
   await editor.getByRole('checkbox', { name: '削除予定にする' }).check()
+  await editor.getByRole('button', { name: '＋ノートを追加' }).click()
+  await editor.getByRole('textbox', { name: 'ノート本文 1' }).fill(noteBody)
   await editor.getByRole('button', { name: '下書きを保存' }).click()
   await layerDialog.getByRole('button', { name: '閉じる' }).click()
 
@@ -71,6 +103,11 @@ test('edit mode shows projected transitions, including identical and removal dra
   await expect(firstPeriod.getByRole('button', {
     name: /時間割変更の削除予定。/,
   })).toBeVisible()
+  const note = firstPeriod.locator('.daily-lesson-note-list .note-item')
+    .filter({ hasText: noteBody })
+  await expect(note).toBeVisible()
+  await expect(note).not.toHaveClass(/note-removal-draft/)
+  await expect(note).not.toHaveCSS('background-color', 'rgb(251, 232, 232)')
 })
 
 async function applyCurrentDraft(page: import('@playwright/test').Page) {

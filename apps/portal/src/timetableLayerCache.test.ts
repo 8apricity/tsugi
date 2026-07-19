@@ -49,4 +49,18 @@ describe("TimetableLayerMemoryCache", () => {
     });
     expect(cache.get("2026-07-08", 1)).toBeUndefined();
   });
+
+  it("retains projected Layer state for dates with Timetable Change drafts", () => {
+    const cache = new TimetableLayerMemoryCache();
+    cache.store([state("2026-07-08", 1), state("2026-07-15", 1)]);
+
+    cache.selectWindow(
+      "2026-07-15",
+      "2026-04-01",
+      "2027-03-31",
+      ["2026-07-08"],
+    );
+
+    expect(cache.get("2026-07-08", 1)).toEqual(state("2026-07-08", 1));
+  });
 });

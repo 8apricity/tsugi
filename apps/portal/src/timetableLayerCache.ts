@@ -35,12 +35,17 @@ export class TimetableLayerMemoryCache<
     selectedDate: string,
     minimumDate: string,
     maximumDate: string,
+    retainedDates: readonly string[] = [],
   ): DateRange & { missingRanges: DateRange[] } {
     const startDate = maxDate(shiftSchoolDate(selectedDate, -2), minimumDate);
     const endDate = minDate(shiftSchoolDate(selectedDate, 2), maximumDate);
 
+    const retainedDateSet = new Set(retainedDates);
     for (const [key, state] of this.states) {
-      if (state.schoolDate < startDate || state.schoolDate > endDate) {
+      if (
+        (state.schoolDate < startDate || state.schoolDate > endDate) &&
+        !retainedDateSet.has(state.schoolDate)
+      ) {
         this.states.delete(key);
       }
     }

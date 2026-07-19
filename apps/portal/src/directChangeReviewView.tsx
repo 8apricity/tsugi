@@ -1,4 +1,5 @@
 import type { DirectChangeReviewSummary } from './directChangeReview'
+import { DestructiveConfirmationDialog } from './editorLifecycleView'
 
 export function DirectChangeReviewDialog({
   summary,
@@ -100,28 +101,21 @@ export function DraftExitConfirmationDialog({
   onExit: () => void
 }) {
   return (
-    <section
-      className="timetable-editor-dialog draft-exit-dialog"
+    <DestructiveConfirmationDialog
+      title="下書きを削除して編集を終了しますか？"
+      titleId="draft-exit-title"
+      descriptionId="draft-exit-description"
       role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="draft-exit-title"
-      aria-describedby="draft-exit-description"
+      className="draft-exit-dialog"
+      cancelLabel="編集を続ける"
+      confirmLabel="下書きを削除して終了"
+      onCancel={onContinue}
+      onConfirm={onExit}
     >
-      <header className="editor-dialog-header">
-        <h2 id="draft-exit-title">下書きを削除して編集を終了しますか？</h2>
-      </header>
       <p id="draft-exit-description">
         保存中の下書き{draftCount}件はこの端末から削除され、復元できません。
       </p>
-      <footer className="editor-dialog-actions">
-        <button className="button-secondary" type="button" onClick={onContinue}>
-          編集を続ける
-        </button>
-        <button className="button-danger" type="button" onClick={onExit}>
-          下書きを削除して終了
-        </button>
-      </footer>
-    </section>
+    </DestructiveConfirmationDialog>
   )
 }
 

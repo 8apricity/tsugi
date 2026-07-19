@@ -1,5 +1,6 @@
 import { NoteCard } from './noteCard'
 import { taskRemovalCascadeDetails } from './taskNoteCopy'
+import { DestructiveConfirmationDialog } from './editorLifecycleView'
 
 export type TaskNoteListItem = {
   noteId: string
@@ -60,46 +61,24 @@ export function TaskRemovalConfirmationDialog({
   const details = taskRemovalCascadeDetails(notes)
 
   return (
-    <div className="editor-dialog-backdrop" role="presentation">
-      <section
-        className="timetable-editor-dialog task-removal-confirmation-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="task-removal-confirmation-title"
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape' || event.defaultPrevented) return
-          event.preventDefault()
-          onCancel()
-        }}
-      >
-        <header className="editor-dialog-header">
-          <h2 id="task-removal-confirmation-title">タスクを削除予定にしますか？</h2>
-        </header>
-        <div className="task-removal-confirmation-content">
-          <p className="task-removal-confirmation-title">{taskTitle}</p>
-          <p>{details.consequence}</p>
-          {details.previews.length > 0 ? (
-            <ul className="task-removal-confirmation-notes" aria-label="削除予定のノート">
-              {details.previews.map((preview, index) => (
-                <li key={`${index}:${preview}`}>{preview}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-        <div className="editor-dialog-actions task-removal-confirmation-actions">
-          <button
-            autoFocus
-            className="button-secondary"
-            type="button"
-            onClick={onCancel}
-          >
-            キャンセル
-          </button>
-          <button className="button-danger" type="button" onClick={onConfirm}>
-            削除予定にする
-          </button>
-        </div>
-      </section>
-    </div>
+    <DestructiveConfirmationDialog
+      title="タスクを削除予定にしますか？"
+      titleId="task-removal-confirmation-title"
+      className="task-removal-confirmation-dialog"
+      cancelLabel="キャンセル"
+      confirmLabel="削除予定にする"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    >
+      <p className="task-removal-confirmation-title">{taskTitle}</p>
+      <p>{details.consequence}</p>
+      {details.previews.length > 0 ? (
+        <ul className="task-removal-confirmation-notes" aria-label="削除予定のノート">
+          {details.previews.map((preview, index) => (
+            <li key={`${index}:${preview}`}>{preview}</li>
+          ))}
+        </ul>
+      ) : null}
+    </DestructiveConfirmationDialog>
   )
 }

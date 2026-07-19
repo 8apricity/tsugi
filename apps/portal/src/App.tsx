@@ -3993,13 +3993,11 @@ function App() {
           ) : null}
 
           {draftExitConfirmationOpen ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <DraftExitConfirmationDialog
-                draftCount={timetableEditor.draftCount}
-                onContinue={() => setDraftExitConfirmationOpen(false)}
-                onExit={finishLeavingTimetableEditing}
-              />
-            </div>
+            <DraftExitConfirmationDialog
+              draftCount={timetableEditor.draftCount}
+              onContinue={() => setDraftExitConfirmationOpen(false)}
+              onExit={finishLeavingTimetableEditing}
+            />
           ) : null}
 
           {referencePickerOpen ? (

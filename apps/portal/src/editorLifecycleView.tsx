@@ -108,6 +108,65 @@ export function DiscardConfirmationDialog({
   )
 }
 
+export function DestructiveConfirmationDialog({
+  title,
+  titleId,
+  descriptionId,
+  role = 'dialog',
+  className = '',
+  cancelLabel,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+  children,
+}: {
+  title: string
+  titleId: string
+  descriptionId?: string
+  role?: 'dialog' | 'alertdialog'
+  className?: string
+  cancelLabel: string
+  confirmLabel: string
+  onCancel(): void
+  onConfirm(): void
+  children: ReactNode
+}) {
+  return (
+    <div className="editor-dialog-backdrop" role="presentation">
+      <section
+        className={`timetable-editor-dialog destructive-confirmation-dialog${className ? ` ${className}` : ''}`}
+        role={role}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        {...(descriptionId ? { 'aria-describedby': descriptionId } : {})}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || event.defaultPrevented) return
+          event.preventDefault()
+          onCancel()
+        }}
+      >
+        <header className="editor-dialog-header">
+          <h2 id={titleId}>{title}</h2>
+        </header>
+        <div className="destructive-confirmation-content">{children}</div>
+        <div className="editor-dialog-actions destructive-confirmation-actions">
+          <button
+            autoFocus
+            className="button-secondary"
+            type="button"
+            onClick={onCancel}
+          >
+            {cancelLabel}
+          </button>
+          <button className="button-danger" type="button" onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export function ImmutableFieldNotice({
   kind,
   onNotify,

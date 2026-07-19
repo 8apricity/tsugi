@@ -69,6 +69,7 @@ describe('Task Note view', () => {
     )
 
     expect(html).toContain('タスクを削除予定にしますか？')
+    expect(html).toContain('destructive-confirmation-dialog')
     expect(html).toContain('関連するノート2件も削除予定になります。')
     expect(html).toContain('あ'.repeat(80))
     expect(html).toContain('短いノート')

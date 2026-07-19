@@ -1415,26 +1415,26 @@ body.page-scroll-locked {
   padding: 0 22px 22px;
 }
 
-.task-removal-confirmation-dialog {
+.destructive-confirmation-dialog {
   width: min(520px, 100%);
 }
 
-.task-removal-confirmation-dialog .editor-dialog-header,
-.task-removal-confirmation-content,
-.task-removal-confirmation-actions {
+.destructive-confirmation-dialog .editor-dialog-header,
+.destructive-confirmation-content,
+.destructive-confirmation-actions {
   padding: 18px 22px;
 }
 
-.task-removal-confirmation-dialog .editor-dialog-header {
+.destructive-confirmation-dialog .editor-dialog-header {
   border-bottom: 1px solid var(--color-border);
 }
 
-.task-removal-confirmation-content {
+.destructive-confirmation-content {
   display: grid;
   gap: 10px;
 }
 
-.task-removal-confirmation-content p {
+.destructive-confirmation-content p {
   margin: 0;
 }
 
@@ -1451,7 +1451,7 @@ body.page-scroll-locked {
   color: var(--color-muted);
 }
 
-.task-removal-confirmation-actions {
+.destructive-confirmation-actions {
   justify-content: flex-end;
   border-top: 1px solid var(--color-border);
 }

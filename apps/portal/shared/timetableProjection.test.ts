@@ -35,29 +35,15 @@ describe('Timetable Projection', () => {
           state: 'active',
           origin: 'active',
           replacement: { type: 'lesson_name', lessonName: '体育' },
-          effectiveLessonName: '体育',
-          effectiveLessonSource: null,
         },
-        {
-          targetScopeType: 'class',
-          state: 'unchanged',
-          effectiveLessonName: '体育',
-          effectiveLessonSource: null,
-        },
+        { targetScopeType: 'class', state: 'unchanged' },
         {
           targetScopeType: 'track',
           state: 'active',
           origin: 'active',
           replacement: { type: 'lesson_name', lessonName: '化学' },
-          effectiveLessonName: '化学',
-          effectiveLessonSource: null,
         },
-        {
-          targetScopeType: 'student',
-          state: 'unchanged',
-          effectiveLessonName: '化学',
-          effectiveLessonSource: null,
-        },
+        { targetScopeType: 'student', state: 'unchanged' },
       ],
       finalDailyLesson: {
         lessonName: '化学',
@@ -140,119 +126,23 @@ describe('Timetable Projection', () => {
         state: 'active',
         origin: 'active',
         replacement: { type: 'lesson_name', lessonName: '体育' },
-        effectiveLessonName: '体育',
-        effectiveLessonSource: null,
       },
       {
         targetScopeType: 'class',
         state: 'active',
         origin: 'desired',
         replacement: { type: 'lesson_name', lessonName: '化学' },
-        effectiveLessonName: '化学',
-        effectiveLessonSource: null,
       },
       {
         targetScopeType: 'track',
         state: 'unchanged',
         origin: 'desired',
         desiredChange: 'remove',
-        effectiveLessonName: '化学',
-        effectiveLessonSource: null,
       },
-      {
-        targetScopeType: 'student',
-        state: 'unchanged',
-        effectiveLessonName: '化学',
-        effectiveLessonSource: null,
-      },
+      { targetScopeType: 'student', state: 'unchanged' },
     ])
     expect(result.finalDailyLesson).toEqual({
       lessonName: '化学',
-      timetableChangeState: 'resolved',
-    })
-  })
-
-  it('keeps each layer effective lesson and its non-custom source in broad-to-narrow order', () => {
-    const result = projectTimetableSlot({
-      standardTimetable: {
-        type: 'selected',
-        lessonName: '数学',
-        source: { type: 'period_reference', weekday: 1, periodNumber: 1 },
-      },
-      activeLayers: [
-        {
-          targetScopeType: 'grade',
-          replacement: { type: 'period_reference', weekday: 1, periodNumber: 2 },
-        },
-        {
-          targetScopeType: 'class',
-          replacement: {
-            type: 'floating_lesson_reference',
-            floatingLessonReferenceLabelId: 'star',
-            referenceLabel: '★',
-          },
-        },
-        {
-          targetScopeType: 'track',
-          replacement: { type: 'lesson_name', lessonName: '英語' },
-        },
-      ],
-      desiredLayers: [{ targetScopeType: 'student', change: 'remove' }],
-      resolveReference: (reference) =>
-        reference.type === 'period_reference' ? '英語' : '英語',
-    })
-
-    expect(result.standardTimetable).toEqual({
-      lessonName: '数学',
-      source: { type: 'period_reference', weekday: 1, periodNumber: 1 },
-    })
-    expect(result.layers).toEqual([
-      {
-        targetScopeType: 'grade',
-        state: 'active',
-        origin: 'active',
-        replacement: { type: 'period_reference', weekday: 1, periodNumber: 2 },
-        effectiveLessonName: '英語',
-        effectiveLessonSource: {
-          type: 'period_reference',
-          weekday: 1,
-          periodNumber: 2,
-        },
-      },
-      {
-        targetScopeType: 'class',
-        state: 'active',
-        origin: 'active',
-        replacement: {
-          type: 'floating_lesson_reference',
-          floatingLessonReferenceLabelId: 'star',
-          referenceLabel: '★',
-        },
-        effectiveLessonName: '英語',
-        effectiveLessonSource: {
-          type: 'floating_lesson_reference',
-          referenceLabel: '★',
-        },
-      },
-      {
-        targetScopeType: 'track',
-        state: 'active',
-        origin: 'active',
-        replacement: { type: 'lesson_name', lessonName: '英語' },
-        effectiveLessonName: '英語',
-        effectiveLessonSource: null,
-      },
-      {
-        targetScopeType: 'student',
-        state: 'unchanged',
-        origin: 'desired',
-        desiredChange: 'remove',
-        effectiveLessonName: '英語',
-        effectiveLessonSource: null,
-      },
-    ])
-    expect(result.finalDailyLesson).toEqual({
-      lessonName: '英語',
       timetableChangeState: 'resolved',
     })
   })

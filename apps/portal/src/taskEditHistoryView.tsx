@@ -8,7 +8,6 @@ import {
   targetScopeLabel,
   type TargetScopeDisplayContext,
 } from './uiCopy'
-import { DialogBody } from './dialogFoundation'
 
 export type TaskEditHistoryState =
   | { status: 'loading' }
@@ -66,8 +65,7 @@ export function TaskEditHistoryDialog({
             ×
           </button>
         </header>
-        <DialogBody>
-          {state.status === 'loading' ? (
+        {state.status === 'loading' ? (
           <p className="layer-dialog-status" aria-live="polite">
             編集履歴を読み込んでいます…
           </p>
@@ -130,8 +128,7 @@ export function TaskEditHistoryDialog({
               ))}
             </ol>
           </>
-          )}
-        </DialogBody>
+        )}
       </section>
     </div>
   )

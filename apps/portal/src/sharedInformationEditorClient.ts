@@ -3,7 +3,6 @@ import {
   timetableReplacementsEqual,
   type DesiredTimetableLayer,
   type TargetScopeType as ProjectionTargetScopeType,
-  type TimetableLessonSource as ProjectionTimetableLessonSource,
   type TimetableReference as ProjectionTimetableReference,
   type TimetableReplacement as ProjectionTimetableReplacement,
 } from '../shared/timetableProjection'
@@ -11,7 +10,6 @@ import { isTargetScopeType } from '../shared/targetScope'
 
 export type TargetScopeType = ProjectionTargetScopeType
 export type TimetableReference = ProjectionTimetableReference
-export type TimetableLessonSource = ProjectionTimetableLessonSource
 export type TimetableReplacement =
   | Exclude<
       ProjectionTimetableReplacement,
@@ -172,8 +170,6 @@ export type TimetableLayerState = {
     | {
         targetScopeType: TargetScopeType
         state: 'unchanged'
-        effectiveLessonName?: string
-        effectiveLessonSource?: TimetableLessonSource | null
         notes?: Array<{
           noteId: string
           latestChangeId: string
@@ -189,8 +185,6 @@ export type TimetableLayerState = {
     | {
         targetScopeType: TargetScopeType
         state: 'active'
-        effectiveLessonName?: string
-        effectiveLessonSource?: TimetableLessonSource | null
         sharedInformationItemId: string
         latestChangeId: string
         replacement: TimetableReplacement
@@ -622,189 +616,6 @@ export function createSharedInformationEditorClient({
     }
   }
 
-  function appendTaskNoteDrafts(
-    taskId: string,
-    targetScopeType: TargetScopeType,
-    noteBodies: readonly string[],
-  ) {
-    const sourceIds: string[] = []
-    for (const body of noteBodies) {
-      const sourceId = createId()
-      sourceIds.push(sourceId)
-      noteDrafts.push({
-        kind: 'note',
-        changeKind: 'add',
-        sourceId,
-        body,
-        schoolDate: null,
-        targetScopeType,
-        relatedTaskItemId: taskId,
-      })
-    }
-    return sourceIds
-  }
-
-  function removeAddedTaskNoteDrafts(taskId: string) {
-    const removed = noteDrafts.filter(
-      (draft) => draft.changeKind === 'add' && draft.relatedTaskItemId === taskId,
-    )
-    if (removed.length === 0) return 0
-    const removedSourceIds = new Set(removed.map((draft) => draft.sourceId))
-    noteDrafts = noteDrafts.filter(
-      (draft) => !removedSourceIds.has(draft.sourceId),
-    )
-    removedSourceIds.forEach((sourceId) => noteConflictSourceIds.delete(sourceId))
-    return removed.length
-  }
-
-  function saveTaskDraftWithNotes(
-    input: NewTaskDraftForm,
-    requestedNoteBodies: readonly string[],
-  ) {
-    if (submitting) return { status: 'submission-in-progress' as const }
-    const snapshot = normalizeTaskSnapshot(input)
-    const noteBodies = normalizeNoteBodies(requestedNoteBodies)
-    if (!input.targetScopeType || !snapshot) {
-      return { status: 'invalid-task' as const }
-    }
-    if (noteBodies === null) return { status: 'invalid-note' as const }
-    if (totalDraftCount() + 1 + noteBodies.length > maximumDraftKeys) {
-      return { status: 'limit-reached' as const }
-    }
-
-    const sourceId = createId()
-    taskDrafts.push({
-      sourceId,
-      changeKind: 'add',
-      ...snapshot,
-      targetScopeType: input.targetScopeType,
-    })
-    const noteSourceIds = appendTaskNoteDrafts(
-      sourceId,
-      input.targetScopeType,
-      noteBodies,
-    )
-    lastTargetScopeType = input.targetScopeType
-    editing = true
-    lastCommitFailed = false
-    publish()
-    return { status: 'saved' as const, sourceId, noteSourceIds }
-  }
-
-  function saveTaskUpdateDraftWithNotes(
-    activeTask: ActiveTaskForEditing,
-    input: TaskSnapshotDraft,
-    requestedNoteBodies: readonly string[],
-  ) {
-    if (submitting) return { status: 'submission-in-progress' as const }
-    const snapshot = normalizeTaskSnapshot(input)
-    const noteBodies = normalizeNoteBodies(requestedNoteBodies)
-    if (!snapshot) return { status: 'invalid-task' as const }
-    if (noteBodies === null) return { status: 'invalid-note' as const }
-
-    const existing = taskDrafts.find(
-      (draft) =>
-        draft.changeKind !== 'add' &&
-        draft.sharedInformationItemId === activeTask.taskId,
-    )
-    const existingAddedNoteCount = noteDrafts.filter(
-      (draft) =>
-        draft.changeKind === 'add' &&
-        draft.relatedTaskItemId === activeTask.taskId,
-    ).length
-    const taskChanged = !taskSnapshotsEqual(snapshot, activeTask)
-    if (
-      !taskChanged &&
-      !existing &&
-      existingAddedNoteCount === 0 &&
-      noteBodies.length === 0
-    ) {
-      return { status: 'removed-noop' as const }
-    }
-    if (
-      totalDraftCount() - (existing ? 1 : 0) +
-        (taskChanged ? 1 : 0) - existingAddedNoteCount +
-        noteBodies.length > maximumDraftKeys
-    ) {
-      return { status: 'limit-reached' as const }
-    }
-
-    const sourceId = existing?.sourceId ?? (taskChanged ? createId() : undefined)
-    if (existing) {
-      taskDrafts = taskDrafts.filter((draft) => draft.sourceId !== existing.sourceId)
-      taskConflictSourceIds.delete(existing.sourceId)
-      if (existing.changeKind === 'remove') restoreDependentNoteDrafts(existing)
-    }
-    removeAddedTaskNoteDrafts(activeTask.taskId)
-    if (taskChanged && sourceId) {
-      taskDrafts.push({
-        sourceId,
-        changeKind: 'update',
-        sharedInformationItemId: activeTask.taskId,
-        expectedLatestChangeId: activeTask.latestChangeId,
-        baseTask: taskBaseSnapshot(activeTask),
-        targetScopeType: activeTask.targetScopeType,
-        ...snapshot,
-      })
-      taskConflictSourceIds.delete(sourceId)
-    }
-    const noteSourceIds = appendTaskNoteDrafts(
-      activeTask.taskId,
-      activeTask.targetScopeType,
-      noteBodies,
-    )
-    editing = true
-    lastCommitFailed = false
-    publish()
-    return {
-      status: 'saved' as const,
-      ...(sourceId ? { sourceId } : {}),
-      noteSourceIds,
-    }
-  }
-
-  function updateTaskDraftWithNotes(
-    sourceId: string,
-    input: NewTaskDraftForm,
-    requestedNoteBodies: readonly string[],
-  ) {
-    if (submitting) return { status: 'submission-in-progress' as const }
-    const snapshot = normalizeTaskSnapshot(input)
-    const noteBodies = normalizeNoteBodies(requestedNoteBodies)
-    const existing = taskDrafts.find((draft) => draft.sourceId === sourceId)
-    if (
-      !existing ||
-      existing.changeKind !== 'add' ||
-      !input.targetScopeType ||
-      !snapshot
-    ) return { status: 'invalid-task' as const }
-    if (noteBodies === null) return { status: 'invalid-note' as const }
-    const existingAddedNoteCount = noteDrafts.filter(
-      (draft) =>
-        draft.changeKind === 'add' && draft.relatedTaskItemId === sourceId,
-    ).length
-    if (totalDraftCount() - existingAddedNoteCount + noteBodies.length > maximumDraftKeys) {
-      return { status: 'limit-reached' as const }
-    }
-
-    removeAddedTaskNoteDrafts(sourceId)
-    taskDrafts = taskDrafts.map((draft) =>
-      draft.sourceId === sourceId
-        ? { ...draft, ...snapshot, targetScopeType: input.targetScopeType! }
-        : draft,
-    )
-    const noteSourceIds = appendTaskNoteDrafts(
-      sourceId,
-      input.targetScopeType,
-      noteBodies,
-    )
-    lastTargetScopeType = input.targetScopeType
-    editing = true
-    lastCommitFailed = false
-    publish()
-    return { status: 'saved' as const, sourceId, noteSourceIds }
-  }
-
   return {
     subscribe(listener: () => void) {
       listeners.add(listener)
@@ -915,15 +726,13 @@ export function createSharedInformationEditorClient({
       schoolDate,
       periodNumber,
       replacement,
-      noteBodies,
-      removeTimetableChange = false,
+      noteBody,
     }: {
       targetScopeType: TargetScopeType
       schoolDate: string
       periodNumber: number
       replacement: TimetableReplacement | null
-      noteBodies?: readonly string[]
-      removeTimetableChange?: boolean
+      noteBody: string
     }) {
       if (submitting) return { status: 'submission-in-progress' as const }
       if (
@@ -933,15 +742,14 @@ export function createSharedInformationEditorClient({
         periodNumber > 7
       ) return { status: 'invalid-note' as const }
 
-      const normalizedNoteBodies = normalizeNoteBodies(noteBodies ?? [])
-      if (normalizedNoteBodies === null) {
+      const trimmedNoteBody = noteBody.trim()
+      const noteBodyValue = trimmedNoteBody.length === 0
+        ? null
+        : normalizeNoteBody(noteBody)
+      if (trimmedNoteBody.length > 0 && noteBodyValue === null) {
         return { status: 'invalid-note' as const }
       }
-      if (
-        replacement === null &&
-        !removeTimetableChange &&
-        normalizedNoteBodies.length === 0
-      ) {
+      if (replacement === null && noteBodyValue === null) {
         return { status: 'empty' as const }
       }
 
@@ -955,49 +763,19 @@ export function createSharedInformationEditorClient({
       const serverLayer = loadedServerLayers.get(key)
       const serverReplacement = existing?.serverReplacement ??
         (serverLayer?.state === 'active' ? serverLayer.replacement : undefined)
-      if (
-        removeTimetableChange &&
-        serverLayer?.state !== 'active' &&
-        existing?.changeKind !== 'remove'
-      ) {
-        return { status: 'not-active' as const }
-      }
       const timetableNoop = replacement !== null && serverReplacement !== undefined &&
         timetableReplacementsEqual(replacement, serverReplacement)
-      const willWriteTimetable = removeTimetableChange ||
-        (replacement !== null && !timetableNoop)
-      const existingTimetableDraftAdjustment = Boolean(
-        existing &&
-        (removeTimetableChange || (replacement !== null && timetableNoop)),
-      )
+      const willWriteTimetable = replacement !== null && !timetableNoop
       const nextCount = totalDraftCount() -
-        (existingTimetableDraftAdjustment ? 1 : 0) +
+        (timetableNoop && existing ? 1 : 0) +
         (!existing && willWriteTimetable ? 1 : 0) +
-        normalizedNoteBodies.length
+        (noteBodyValue === null ? 0 : 1)
       if (nextCount > maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
 
       let timetableSourceId: string | undefined
-      if (removeTimetableChange) {
-        if (existing?.changeKind === 'remove') {
-          timetableSourceId = existing.sourceId
-        } else {
-          timetableSourceId = existing?.sourceId ?? createId()
-          const operation = serverLayer?.state === 'active'
-            ? {
-                changeKind: 'remove' as const,
-                sharedInformationItemId: serverLayer.sharedInformationItemId,
-                expectedLatestChangeId: serverLayer.latestChangeId,
-                serverReplacement: serverLayer.replacement,
-              }
-            : null
-          if (!operation) return { status: 'not-active' as const }
-          drafts = drafts.filter((draft) => draftKey(draft) !== key)
-          drafts.push({ ...keyInput, ...operation, sourceId: timetableSourceId })
-          reconciledKeys.add(key)
-        }
-      } else if (replacement !== null) {
+      if (replacement !== null) {
         if (timetableNoop) {
           if (removeDraftByKey(key)) {
             conflictKeys.delete(key)
@@ -1028,15 +806,14 @@ export function createSharedInformationEditorClient({
         }
       }
 
-      const noteSourceIds: string[] = []
-      for (const normalizedNoteBody of normalizedNoteBodies) {
-        const noteSourceId = createId()
-        noteSourceIds.push(noteSourceId)
+      let noteSourceId: string | undefined
+      if (noteBodyValue !== null) {
+        noteSourceId = createId()
         noteDrafts.push({
           kind: 'note',
           changeKind: 'add',
           sourceId: noteSourceId,
-          body: normalizedNoteBody,
+          body: noteBodyValue,
           schoolDate,
           periodNumber,
           targetScopeType,
@@ -1049,10 +826,9 @@ export function createSharedInformationEditorClient({
       return {
         status: 'saved' as const,
         savedTimetable: willWriteTimetable,
-        savedNote: normalizedNoteBodies.length > 0,
-        savedNotes: normalizedNoteBodies.length,
+        savedNote: noteBodyValue !== null,
         ...(timetableSourceId ? { timetableSourceId } : {}),
-        ...(noteSourceIds.length > 0 ? { noteSourceIds } : {}),
+        ...(noteSourceId ? { noteSourceId } : {}),
       }
     },
     saveTaskDraft(input: NewTaskDraftForm) {
@@ -1077,7 +853,6 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
-    saveTaskDraftWithNotes,
     saveNoteDraft(input: NewNoteDraftForm) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const body = normalizeNoteBody(input.body)
@@ -1353,7 +1128,6 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
-    saveTaskUpdateDraftWithNotes,
     updateTaskDraft(sourceId: string, input: NewTaskDraftForm) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const snapshot = normalizeTaskSnapshot(input)
@@ -1381,7 +1155,6 @@ export function createSharedInformationEditorClient({
       publish()
       return { status: 'saved' as const, sourceId }
     },
-    updateTaskDraftWithNotes,
     saveTaskRemoveDraft(activeTask: ActiveTaskForEditing) {
       if (submitting) return { status: 'submission-in-progress' as const }
       const existing = taskDrafts.find(
@@ -1543,14 +1316,7 @@ export function createSharedInformationEditorClient({
       )
       const projection = projectTimetableSlot({
         standardTimetable: state.standardTimetable
-          ? {
-              type: 'selected',
-              lessonName: state.standardTimetable.lessonName,
-              source: {
-                type: 'period_reference',
-                ...state.standardTimetable.periodReference,
-              },
-            }
+          ? { type: 'selected', lessonName: state.standardTimetable.lessonName }
           : null,
         activeLayers: state.layers.flatMap((layer) =>
           layer.state === 'active'
@@ -1580,8 +1346,6 @@ export function createSharedInformationEditorClient({
           return {
             targetScopeType: layer.targetScopeType,
             state: 'unchanged' as const,
-            effectiveLessonName: projectedLayer.effectiveLessonName,
-            effectiveLessonSource: projectedLayer.effectiveLessonSource,
             notes: layer.notes,
             desired: true,
             removalPlanned: true,
@@ -1595,31 +1359,17 @@ export function createSharedInformationEditorClient({
               ? layer.replacement
               : undefined
           if (!replacement) {
-            return {
-              ...layer,
-              effectiveLessonName: projectedLayer.effectiveLessonName,
-              effectiveLessonSource: projectedLayer.effectiveLessonSource,
-              desired: false,
-              conflicted: false,
-            }
+            return { ...layer, desired: false, conflicted: false }
           }
           return {
             ...layer,
             state: 'active' as const,
             replacement,
-            effectiveLessonName: projectedLayer.effectiveLessonName,
-            effectiveLessonSource: projectedLayer.effectiveLessonSource,
             desired: !!draft,
             conflicted: draft ? conflictKeys.has(draftKey(draft)) : false,
           }
         }
-        return {
-          ...layer,
-          effectiveLessonName: projectedLayer?.effectiveLessonName,
-          effectiveLessonSource: projectedLayer?.effectiveLessonSource,
-          desired: false,
-          conflicted: false,
-        }
+        return { ...layer, desired: false, conflicted: false }
       })
       return {
         ...state,
@@ -2184,17 +1934,6 @@ function restoreTaskNoteSnapshot(value: unknown): TaskNoteSnapshot | null {
 function normalizeNoteBody(body: string) {
   const trimmed = body.trim()
   return trimmed.length >= 1 && trimmed.length <= 1000 ? trimmed : null
-}
-
-function normalizeNoteBodies(noteBodies: readonly string[]) {
-  const normalized: string[] = []
-  for (const noteBody of noteBodies) {
-    if (noteBody.trim().length === 0) continue
-    const body = normalizeNoteBody(noteBody)
-    if (body === null) return null
-    normalized.push(body)
-  }
-  return normalized
 }
 
 function isTaskRelatedLessonName(value: unknown): value is TaskRelatedLessonName {

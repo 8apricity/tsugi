@@ -56,9 +56,6 @@ export function NoteCard({
   onEdit,
   onRemove,
   onOpenHistory,
-  onOpenDetail,
-  wholeCardDetailTarget = false,
-  related = false,
 }: {
   noteId: string
   body: string
@@ -71,9 +68,6 @@ export function NoteCard({
   onEdit?: () => void
   onRemove?: () => void
   onOpenHistory?: () => void
-  onOpenDetail?: () => void
-  wholeCardDetailTarget?: boolean
-  related?: boolean
 }) {
   const generatedId = useId()
   const bodyId = `note-body-${generatedId.replace(/:/g, '')}`
@@ -93,65 +87,31 @@ export function NoteCard({
     return () => observer?.disconnect()
   }, [body, expanded])
 
-  const removalSurface = draft && changeKind === 'remove' &&
-    removalReason !== 'task-cascade'
-
-  const canUseWholeCardDetailTarget = wholeCardDetailTarget && onOpenDetail &&
-    !onCancelDraft && !onEdit && !onRemove && !onOpenHistory
-
-  if (canUseWholeCardDetailTarget && !onCancelDraft && !onEdit && !onRemove && !onOpenHistory) {
-    return (
-      <button
-        className="note-item note-detail-card note-detail-card-whole"
-        type="button"
-        aria-label="ノートの詳細を開く"
-        data-note-id={noteId}
-        onClick={onOpenDetail}
-      >
-        <span className="note-detail-card-body">{body}</span>
-      </button>
-    )
-  }
-
   return (
     <article
-      className={`note-item${related ? ' note-item-related' : ''}${draft ? ' note-draft' : ''}${removalSurface ? ' note-removal-draft' : ''}`}
+      className={`note-item${draft ? ' note-draft' : ''}`}
       data-note-id={noteId}
     >
-      {onOpenDetail ? (
-        <button
-          className="note-detail-card"
-          type="button"
-          aria-label="ノートの詳細を開く"
-          onClick={onOpenDetail}
-        >
-          <span className="note-detail-card-body">{body}</span>
-        </button>
-      ) : (
-        <NoteBodyView
-          body={body}
-          bodyId={bodyId}
-          expanded={expanded}
-          overflowing={overflowing}
-          onExpand={() => setExpanded(true)}
-          bodyRef={bodyRef}
-        />
-      )}
-      {removalSurface ? <RemovalGlyph /> : null}
+      <NoteBodyView
+        body={body}
+        bodyId={bodyId}
+        expanded={expanded}
+        overflowing={overflowing}
+        onExpand={() => setExpanded(true)}
+        bodyRef={bodyRef}
+      />
       <div className="note-meta">
         {targetScopeLabel ? (
-          <span className={related ? 'note-related-scope' : 'task-scope-badge'}>
-            {targetScopeLabel}
-          </span>
+          <span className="task-scope-badge">{targetScopeLabel}</span>
         ) : null}
-        {draft && !removalSurface ? (
-          <span className={`lifecycle-summary${related ? ' sr-only' : ''}`}>
+        {draft ? (
+          <span className="lifecycle-summary">
             <LifecycleIcon kind={changeKind} conflicted={conflicted} />
             <small>{lifecycleLabel(changeKind, conflicted)}</small>
           </span>
         ) : null}
         {removalReason === 'task-cascade' ? (
-          <small className="note-cascade-removal sr-only">
+          <small className="note-cascade-removal">
             タスクの削除に伴い削除予定
           </small>
         ) : null}
@@ -188,23 +148,5 @@ export function NoteCard({
         ) : null}
       </div>
     </article>
-  )
-}
-
-export function RemovalGlyph({
-  label = '削除対象のノート',
-}: {
-  label?: string
-}) {
-  return (
-    <span
-      className="note-removal-glyph"
-      role="img"
-      aria-label={label}
-    >
-      <svg viewBox="0 0 24 24" focusable="false">
-        <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7" />
-      </svg>
-    </span>
   )
 }

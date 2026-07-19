@@ -53,23 +53,8 @@ describe('Task Note view', () => {
 
     expect(html).toContain('削除予定')
     expect(html).toContain('タスクの削除に伴い削除予定')
-    expect(html).toContain('note-cascade-removal sr-only')
     expect(html).not.toContain('ノートの削除を取り消す')
     expect(html).not.toContain('削除予定にする</button>')
-  })
-
-  it('does not render a zero-note cascade confirmation', () => {
-    const html = renderToStaticMarkup(
-      <TaskRemovalConfirmationDialog
-        taskTitle="ノートなしのタスク"
-        notes={[]}
-        onCancel={() => undefined}
-        onConfirm={() => undefined}
-      />,
-    )
-
-    expect(html).not.toContain('このタスクだけが削除予定になります。')
-    expect(html).not.toContain('関連するノート')
   })
 
   it('restores Task Note actions when the parent removal is cancelled', () => {

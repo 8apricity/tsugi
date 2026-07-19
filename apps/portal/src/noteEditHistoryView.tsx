@@ -4,7 +4,6 @@ import type {
   NoteHistorySnapshot,
 } from '../shared/noteEditHistory'
 import { targetScopeLabel, type TargetScopeDisplayContext } from './uiCopy'
-import { DialogBody } from './dialogFoundation'
 
 export type NoteEditHistoryState =
   | { status: 'loading' }
@@ -14,13 +13,11 @@ export type NoteEditHistoryState =
 export function NoteEditHistoryDialog({
   state,
   targetScopeContext,
-  onBack,
   onClose,
   onRetry,
 }: {
   state: NoteEditHistoryState
   targetScopeContext?: TargetScopeDisplayContext
-  onBack?: () => void
   onClose: () => void
   onRetry: () => void
 }) {
@@ -33,16 +30,6 @@ export function NoteEditHistoryDialog({
         aria-labelledby="note-history-title"
       >
         <header className="editor-dialog-header">
-          {onBack ? (
-            <button
-              className="icon-button dialog-back-button"
-              type="button"
-              aria-label="ノートの詳細に戻る"
-              onClick={onBack}
-            >
-              ‹
-            </button>
-          ) : null}
           <h2 id="note-history-title">ノートの編集履歴</h2>
           <button
             className="icon-button"
@@ -53,8 +40,7 @@ export function NoteEditHistoryDialog({
             ×
           </button>
         </header>
-        <DialogBody>
-          {state.status === 'loading' ? (
+        {state.status === 'loading' ? (
           <p className="layer-dialog-status" aria-live="polite">
             編集履歴を読み込んでいます…
           </p>
@@ -112,8 +98,7 @@ export function NoteEditHistoryDialog({
               ))}
             </ol>
           </>
-          )}
-        </DialogBody>
+        )}
       </section>
     </div>
   )

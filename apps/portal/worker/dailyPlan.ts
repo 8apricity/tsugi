@@ -509,15 +509,7 @@ async function projectDailyPlanLessons(
         selectedTrackId: affiliation.trackId,
         candidates: standardTimetableEntries.filter(
           (entry) => entry.periodNumber === periodNumber,
-        ).map((entry) => ({
-          trackId: entry.trackId,
-          lessonName: entry.lessonName,
-          source: {
-            type: 'period_reference' as const,
-            weekday: entry.weekday,
-            periodNumber: entry.periodNumber,
-          },
-        })),
+        ),
       },
       activeLayers,
       resolveReference,

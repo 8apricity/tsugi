@@ -25,7 +25,11 @@ export function DailyLessonNoteList({
   return (
     <div className={className} aria-label="この時限のノート">
       {notes.map((note) => (
-        <NoteCard key={note.noteId} {...note} />
+        <NoteCard
+          key={note.noteId}
+          {...note}
+          showChevron={Boolean(note.onOpen)}
+        />
       ))}
     </div>
   )

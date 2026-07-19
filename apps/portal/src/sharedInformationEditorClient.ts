@@ -994,13 +994,15 @@ export function createSharedInformationEditorClient({
       schoolDate,
       periodNumber,
       replacement,
-      noteBody,
+      removeTimetableChange = false,
+      noteBodies: requestedNoteBodies,
     }: {
       targetScopeType: TargetScopeType
       schoolDate: string
       periodNumber: number
       replacement: TimetableReplacement | null
-      noteBody: string
+      removeTimetableChange?: boolean
+      noteBodies: readonly string[]
     }) {
       if (submitting) return { status: 'submission-in-progress' as const }
       if (
@@ -1010,14 +1012,9 @@ export function createSharedInformationEditorClient({
         periodNumber > 7
       ) return { status: 'invalid-note' as const }
 
-      const trimmedNoteBody = noteBody.trim()
-      const noteBodyValue = trimmedNoteBody.length === 0
-        ? null
-        : normalizeNoteBody(noteBody)
-      if (trimmedNoteBody.length > 0 && noteBodyValue === null) {
-        return { status: 'invalid-note' as const }
-      }
-      if (replacement === null && noteBodyValue === null) {
+      const noteBodies = normalizeNoteBodies(requestedNoteBodies)
+      if (noteBodies === null) return { status: 'invalid-note' as const }
+      if (replacement === null && noteBodies.length === 0) {
         return { status: 'empty' as const }
       }
 
@@ -1031,19 +1028,48 @@ export function createSharedInformationEditorClient({
       const serverLayer = loadedServerLayers.get(key)
       const serverReplacement = existing?.serverReplacement ??
         (serverLayer?.state === 'active' ? serverLayer.replacement : undefined)
-      const timetableNoop = replacement !== null && serverReplacement !== undefined &&
+      if (removeTimetableChange && serverReplacement === undefined) {
+        return { status: 'not-active' as const }
+      }
+      const timetableNoop = !removeTimetableChange && replacement !== null &&
+        serverReplacement !== undefined &&
         timetableReplacementsEqual(replacement, serverReplacement)
-      const willWriteTimetable = replacement !== null && !timetableNoop
+      const willWriteTimetable = removeTimetableChange ||
+        (replacement !== null && !timetableNoop)
       const nextCount = totalDraftCount() -
         (timetableNoop && existing ? 1 : 0) +
         (!existing && willWriteTimetable ? 1 : 0) +
-        (noteBodyValue === null ? 0 : 1)
+        noteBodies.length
       if (nextCount > maximumDraftKeys) {
         return { status: 'limit-reached' as const }
       }
 
       let timetableSourceId: string | undefined
-      if (replacement !== null) {
+      if (removeTimetableChange) {
+        timetableSourceId = existing?.sourceId ?? createId()
+        const active = existing && existing.changeKind !== 'add'
+          ? {
+              sharedInformationItemId: existing.sharedInformationItemId,
+              expectedLatestChangeId: existing.expectedLatestChangeId,
+              serverReplacement: existing.serverReplacement,
+            }
+          : serverLayer?.state === 'active'
+            ? {
+                sharedInformationItemId: serverLayer.sharedInformationItemId,
+                expectedLatestChangeId: serverLayer.latestChangeId,
+                serverReplacement: serverLayer.replacement,
+              }
+            : null
+        if (!active) return { status: 'not-active' as const }
+        drafts = drafts.filter((draft) => draftKey(draft) !== key)
+        drafts.push({
+          ...keyInput,
+          changeKind: 'remove',
+          sourceId: timetableSourceId,
+          ...active,
+        })
+        if (serverLayer) reconciledKeys.add(key)
+      } else if (replacement !== null) {
         if (timetableNoop) {
           if (removeDraftByKey(key)) {
             conflictKeys.delete(key)
@@ -1074,14 +1100,15 @@ export function createSharedInformationEditorClient({
         }
       }
 
-      let noteSourceId: string | undefined
-      if (noteBodyValue !== null) {
-        noteSourceId = createId()
+      const noteSourceIds: string[] = []
+      for (const body of noteBodies) {
+        const noteSourceId = createId()
+        noteSourceIds.push(noteSourceId)
         noteDrafts.push({
           kind: 'note',
           changeKind: 'add',
           sourceId: noteSourceId,
-          body: noteBodyValue,
+          body,
           schoolDate,
           periodNumber,
           targetScopeType,
@@ -1094,9 +1121,9 @@ export function createSharedInformationEditorClient({
       return {
         status: 'saved' as const,
         savedTimetable: willWriteTimetable,
-        savedNote: noteBodyValue !== null,
+        savedNotes: noteSourceIds.length,
         ...(timetableSourceId ? { timetableSourceId } : {}),
-        ...(noteSourceId ? { noteSourceId } : {}),
+        noteSourceIds,
       }
     },
     saveTaskDraft(input: NewTaskDraftForm) {

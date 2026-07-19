@@ -167,7 +167,8 @@ type TimetableEditorForm = TimetableLayerKey & {
   replacement: TimetableReplacement;
   sourceId?: string;
   includeTimetableChange: boolean;
-  noteBody: string;
+  removalPlanned: boolean;
+  noteBodies: string[];
 };
 
 type TaskEditorForm = Omit<NewTaskDraftForm, "relatedLessonName"> & {
@@ -2263,6 +2264,27 @@ function App() {
     );
   }
 
+  function updateTimetableNoteBody(index: number, body: string) {
+    setTimetableEditorForm((current) =>
+      current
+        ? {
+            ...current,
+            noteBodies: current.noteBodies.map((value, noteIndex) =>
+              noteIndex === index ? body : value
+            ),
+          }
+        : current
+    );
+  }
+
+  function addTimetableNoteBody() {
+    setTimetableEditorForm((current) =>
+      current
+        ? { ...current, noteBodies: [...current.noteBodies, ""] }
+        : current
+    );
+  }
+
   function openTaskDetail(item: VisibleTaskListItem) {
     if (!timetableEditor.editing) {
       setTaskDetail(item);
@@ -2386,7 +2408,8 @@ function App() {
             periodNumber: existing.periodNumber,
             sourceId: existing.sourceId,
             includeTimetableChange: true,
-            noteBody: "",
+            removalPlanned: existing.changeKind === "remove",
+            noteBodies: [""],
             replacement:
               existing.changeKind === "remove"
                 ? existing.serverReplacement
@@ -2399,7 +2422,8 @@ function App() {
               changeDate: timetableLayerDialog.schoolDate,
               periodNumber: timetableLayerDialog.periodNumber,
               includeTimetableChange: true,
-              noteBody: "",
+              removalPlanned: false,
+              noteBodies: [""],
               replacement: serverLayer.replacement,
             }
           : {
@@ -2407,7 +2431,8 @@ function App() {
               changeDate: timetableLayerDialog.schoolDate,
               periodNumber: timetableLayerDialog.periodNumber,
               includeTimetableChange: false,
-              noteBody: "",
+              removalPlanned: false,
+              noteBodies: [""],
               replacement: { type: "lesson_name", lessonName: "" },
             });
     editorInitialFormsRef.current.timetable = form;
@@ -2489,29 +2514,6 @@ function App() {
     } else {
       setTimetableEditorMessage(null);
     }
-  }
-
-  function planTimetableRemoval() {
-    if (!timetableEditorForm || timetableEditor.submitting) return;
-    const result = timetableEditorClient.removeDesiredState({
-      targetScopeType: timetableEditorForm.targetScopeType,
-      changeDate: timetableEditorForm.changeDate,
-      periodNumber: timetableEditorForm.periodNumber,
-    });
-    if (result.status === "not-active") {
-      setTimetableEditorMessage(
-        NO_ACTIVE_TIMETABLE_CHANGE_MESSAGE,
-      );
-      return;
-    }
-    if (result.status === "limit-reached") {
-      setTimetableEditorMessage(
-        "下書きは50件までです。既存の下書きを変更または取り消してください。",
-      );
-      return;
-    }
-    closeTimetableFormAfterDraftSave();
-    setTimetableEditorMessage(null);
   }
 
   function closeTimetableDialogFlow() {
@@ -2645,10 +2647,12 @@ function App() {
       targetScopeType: timetableEditorForm.targetScopeType,
       schoolDate: timetableEditorForm.changeDate,
       periodNumber: timetableEditorForm.periodNumber,
-      replacement: timetableEditorForm.includeTimetableChange
+      replacement: timetableEditorForm.includeTimetableChange &&
+          !timetableEditorForm.removalPlanned
         ? replacement
         : null,
-      noteBody: timetableEditorForm.noteBody,
+      removeTimetableChange: timetableEditorForm.removalPlanned,
+      noteBodies: timetableEditorForm.noteBodies,
     });
     if (result.status === "empty") {
       setTimetableEditorMessage(
@@ -2658,6 +2662,10 @@ function App() {
     }
     if (result.status === "invalid-note") {
       setTimetableEditorMessage("ノートの本文を確認してください。");
+      return;
+    }
+    if (result.status === "not-active") {
+      setTimetableEditorMessage(NO_ACTIVE_TIMETABLE_CHANGE_MESSAGE);
       return;
     }
     if (result.status === "limit-reached") {
@@ -4603,52 +4611,25 @@ function App() {
               onBack={() => requestTimetableEditorClose("back")}
             >
                 <form id="timetable-editor-form" onSubmit={saveTimetableDraft}>
-                  <ImmutableFieldNotice
-                    kind="timetable"
-                    active={Boolean(
-                      timetableEditorForm.sourceId ||
-                      loadedLayerState?.layers.some(
-                        (layer) =>
-                          layer.targetScopeType ===
-                            timetableEditorForm.targetScopeType &&
-                          layer.state === "active",
-                      ),
-                    )}
-                    onNotify={setTimetableEditorMessage}
-                  >
-                  <div className="editor-fields">
-                    <label className="immutable-field">
-                      変更対象日
-                      <input
-                        type="date"
-                        value={timetableEditorForm.changeDate}
-                        disabled
-                      />
-                    </label>
-                    <label className="immutable-field">
-                      時限
-                      <input
-                        type="text"
-                        value={`${timetableEditorForm.periodNumber}限`}
-                        disabled
-                      />
-                    </label>
-                    <label className="editor-field-wide immutable-field">
-                      変更適用範囲
-                      <select
-                        value={timetableEditorForm.targetScopeType}
-                        disabled
-                      >
-                        <option value={timetableEditorForm.targetScopeType}>
-                          {scopeLabel(
-                            timetableEditorForm.targetScopeType,
-                            targetScopeContext,
-                          )}
-                        </option>
-                      </select>
-                    </label>
-                  </div>
-                  </ImmutableFieldNotice>
+                  <dl className="detail-list timetable-editor-context">
+                    <div>
+                      <dt>変更対象日</dt>
+                      <dd>{timetableEditorForm.changeDate}</dd>
+                    </div>
+                    <div>
+                      <dt>時限</dt>
+                      <dd>{timetableEditorForm.periodNumber}限</dd>
+                    </div>
+                    <div>
+                      <dt>変更適用範囲</dt>
+                      <dd>
+                        {scopeLabel(
+                          timetableEditorForm.targetScopeType,
+                          targetScopeContext,
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
 
                   <label className="timetable-change-toggle">
                     <input
@@ -4658,6 +4639,9 @@ function App() {
                         setTimetableEditorForm({
                           ...timetableEditorForm,
                           includeTimetableChange: event.target.checked,
+                          removalPlanned: event.target.checked
+                            ? timetableEditorForm.removalPlanned
+                            : false,
                         })
                       }
                     />
@@ -4666,7 +4650,10 @@ function App() {
 
                   <fieldset
                     className="replacement-options"
-                    disabled={!timetableEditorForm.includeTimetableChange}
+                    disabled={
+                      !timetableEditorForm.includeTimetableChange ||
+                      timetableEditorForm.removalPlanned
+                    }
                   >
                     <legend className="replacement-section-label">
                       時間割変更
@@ -4890,24 +4877,34 @@ function App() {
                     </div>
                   </fieldset>
 
-                  <label className="daily-lesson-note-field">
-                    <span>ノートを書く</span>
-                    <textarea
-                      maxLength={1000}
-                      rows={5}
-                      placeholder="この日・時限・変更適用範囲に残す内容"
-                      value={timetableEditorForm.noteBody}
-                      onChange={(event) =>
-                        setTimetableEditorForm({
-                          ...timetableEditorForm,
-                          noteBody: event.target.value,
-                        })
-                      }
-                    />
-                    <small className="note-character-count">
-                      {timetableEditorForm.noteBody.length} / 1000
-                    </small>
-                  </label>
+                  {timetableEditorForm.includeTimetableChange &&
+                  loadedLayerState?.layers.some(
+                    (layer) =>
+                      layer.targetScopeType ===
+                        timetableEditorForm.targetScopeType &&
+                      layer.state === "active",
+                  ) ? (
+                    <label className="task-removal-checkbox timetable-removal-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={timetableEditorForm.removalPlanned}
+                        onChange={(event) =>
+                          setTimetableEditorForm({
+                            ...timetableEditorForm,
+                            removalPlanned: event.target.checked,
+                          })
+                        }
+                      />
+                      <span>削除予定にする</span>
+                    </label>
+                  ) : null}
+
+                  <TaskNoteFields
+                    noteBodies={timetableEditorForm.noteBodies}
+                    onBodyChange={updateTimetableNoteBody}
+                    onAddNote={addTimetableNoteBody}
+                    addDisabled={timetableEditor.atLimit}
+                  />
 
                   <footer className="editor-dialog-actions">
                     {timetableEditorClient.findDraft(
@@ -4930,23 +4927,6 @@ function App() {
                         }}
                       >
                         下書きを取り消す
-                      </button>
-                    ) : null}
-                    {timetableEditorForm.includeTimetableChange &&
-                    timetableLayerDialog?.state.status === "ready" &&
-                    timetableLayerDialog.state.layers.some(
-                      (layer) =>
-                        layer.targetScopeType ===
-                          timetableEditorForm.targetScopeType &&
-                        layer.state === "active",
-                    ) ? (
-                      <button
-                        className="replacement-remove-button"
-                        type="button"
-                        disabled={timetableEditor.submitting}
-                        onClick={planTimetableRemoval}
-                      >
-                        {editorActionLabel("remove")}
                       </button>
                     ) : null}
                   </footer>

@@ -86,11 +86,10 @@ describe('Shared Information editor client', () => {
     expect(restored.getSnapshot().draftCount).toBe(1)
   })
 
-  it('saves zero or one Timetable Change and zero or one Daily Lesson Note from one dialog', () => {
+  it('saves multiple Daily Lesson Notes without a Timetable Change and inherits the dialog context', () => {
     const ids = [
       '33000000-0000-4000-8000-000000000001',
       '33000000-0000-4000-8000-000000000002',
-      '33000000-0000-4000-8000-000000000003',
     ]
     const storage = memoryStorage()
     const editor = createTimetableEditorClient({
@@ -103,7 +102,7 @@ describe('Shared Information editor client', () => {
       schoolDate: '2026-07-10',
       periodNumber: 2,
       replacement: null,
-      noteBody: '   ',
+      noteBodies: ['   '],
     })).toEqual({ status: 'empty' })
     expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
 
@@ -112,43 +111,102 @@ describe('Shared Information editor client', () => {
       schoolDate: '2026-07-10',
       periodNumber: 2,
       replacement: null,
-      noteBody: '  空欄でも残るノート  ',
-    })).toMatchObject({ status: 'saved', savedNote: true, savedTimetable: false })
-    expect(editor.getSnapshot()).toMatchObject({
-      draftCount: 1,
-      drafts: [],
-      noteDrafts: [{
-        sourceId: '33000000-0000-4000-8000-000000000001',
-        changeKind: 'add',
-        body: '空欄でも残るノート',
-        schoolDate: '2026-07-10',
-        periodNumber: 2,
-        targetScopeType: 'track',
-      }],
+      noteBodies: [
+        '  1件目のノート  ',
+        '   ',
+        '2件目のノート',
+      ],
+    })).toMatchObject({
+      status: 'saved',
+      savedNotes: 2,
+      savedTimetable: false,
+      noteSourceIds: [
+        '33000000-0000-4000-8000-000000000001',
+        '33000000-0000-4000-8000-000000000002',
+      ],
     })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 2,
+      drafts: [],
+      noteDrafts: [
+        {
+          sourceId: '33000000-0000-4000-8000-000000000001',
+          changeKind: 'add',
+          body: '1件目のノート',
+          schoolDate: '2026-07-10',
+          periodNumber: 2,
+          targetScopeType: 'track',
+        },
+        {
+          sourceId: '33000000-0000-4000-8000-000000000002',
+          changeKind: 'add',
+          body: '2件目のノート',
+          schoolDate: '2026-07-10',
+          periodNumber: 2,
+          targetScopeType: 'track',
+        },
+      ],
+    })
+  })
+
+  it('saves Timetable Change removal and Daily Lesson Notes from the same dialog', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000011',
+      '33000000-0000-4000-8000-000000000012',
+      '33000000-0000-4000-8000-000000000013',
+    ]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+    })
+    editor.reconcileLayerState(layerState([{
+      targetScopeType: 'track',
+      state: 'active',
+      sharedInformationItemId: '33000000-0000-4000-8000-000000000010',
+      latestChangeId: '33000000-0000-4000-8000-000000000010:change',
+      replacement: { type: 'lesson_name', lessonName: '数学' },
+      changedAt: 1,
+    }]))
 
     expect(editor.saveDailyLessonDialogDraft({
-      targetScopeType: 'class',
+      targetScopeType: 'track',
       schoolDate: '2026-07-10',
       periodNumber: 2,
-      replacement: { type: 'cancelled' },
-      noteBody: '休講の案内',
-    })).toMatchObject({ status: 'saved', savedNote: true, savedTimetable: true })
+      replacement: null,
+      removeTimetableChange: true,
+      noteBodies: ['削除後も残る1件目', ' ', '削除後も残る2件目'],
+    })).toMatchObject({
+      status: 'saved',
+      savedTimetable: true,
+      savedNotes: 2,
+      timetableSourceId: '33000000-0000-4000-8000-000000000011',
+      noteSourceIds: [
+        '33000000-0000-4000-8000-000000000012',
+        '33000000-0000-4000-8000-000000000013',
+      ],
+    })
     expect(editor.getSnapshot()).toMatchObject({
       draftCount: 3,
       drafts: [{
-        sourceId: '33000000-0000-4000-8000-000000000002',
-        targetScopeType: 'class',
-        changeKind: 'add',
-        replacement: { type: 'cancelled' },
+        sourceId: '33000000-0000-4000-8000-000000000011',
+        changeKind: 'remove',
+        sharedInformationItemId: '33000000-0000-4000-8000-000000000010',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 2,
       }],
       noteDrafts: [
-        expect.anything(),
         expect.objectContaining({
-          sourceId: '33000000-0000-4000-8000-000000000003',
-          body: '休講の案内',
+          body: '削除後も残る1件目',
+          schoolDate: '2026-07-10',
           periodNumber: 2,
-          targetScopeType: 'class',
+          targetScopeType: 'track',
+        }),
+        expect.objectContaining({
+          body: '削除後も残る2件目',
+          schoolDate: '2026-07-10',
+          periodNumber: 2,
+          targetScopeType: 'track',
         }),
       ],
     })
@@ -1763,7 +1821,7 @@ describe('Shared Information editor client', () => {
       schoolDate: '2026-07-10',
       periodNumber: 2,
       replacement: { type: 'cancelled' },
-      noteBody: '時間割と同時に追加するノート',
+      noteBodies: ['時間割と同時に追加するノート'],
     })
     const options = {
       confirmSubmission: () => true,

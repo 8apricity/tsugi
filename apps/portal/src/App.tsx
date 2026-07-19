@@ -3250,6 +3250,7 @@ function App() {
                           draft
                           changeKind={note.changeKind}
                           conflicted={note.conflicted}
+                          showChevron
                           onOpen={() => openNoteDraftEditor(
                             note,
                             item.activeNote
@@ -3269,6 +3270,7 @@ function App() {
                               note.targetScopeType,
                               targetScopeContext,
                             )}
+                            showChevron
                             onOpen={() => openNoteUpdateEditor(note)}
                           />
                         );

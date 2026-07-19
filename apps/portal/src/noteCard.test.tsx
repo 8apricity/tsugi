@@ -79,12 +79,25 @@ describe('School Date Note body', () => {
         body="本文"
         targetScopeLabel="文科"
         onOpen={() => undefined}
+        showChevron
       />,
     )
     expect(viewMode).toContain('role="button"')
+    expect(viewMode).toContain('note-detail-chevron')
+    expect(viewMode).toContain('aria-hidden="true"')
+    expect(viewMode).toContain('›')
     expect(viewMode).not.toContain('編集履歴')
     expect(viewMode).not.toContain('>編集<')
     expect(viewMode).not.toContain('>削除<')
+
+    const relatedNote = renderToStaticMarkup(
+      <NoteCard
+        noteId="related-note"
+        body="関連ノート"
+        onOpen={() => undefined}
+      />,
+    )
+    expect(relatedNote).not.toContain('note-detail-chevron')
   })
 
   it('measures NoteCard overflow and expands through its native button', async () => {

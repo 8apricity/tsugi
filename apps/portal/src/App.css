@@ -588,6 +588,22 @@ button.period-inspect-button:active {
   cursor: pointer;
 }
 
+.note-with-chevron {
+  padding-right: 40px;
+}
+
+.note-detail-chevron {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: 14px;
+  color: var(--color-primary);
+  font-size: 22px;
+  line-height: 1;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 .note-detail-target:focus-visible {
   border-color: var(--color-accent);
   outline: 2px solid var(--color-accent);
@@ -606,6 +622,7 @@ button.period-inspect-button:active {
 
 .note-removal-mark {
   position: absolute;
+  z-index: 1;
   inset: 0;
   display: grid;
   place-items: center;

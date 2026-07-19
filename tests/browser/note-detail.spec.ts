@@ -32,6 +32,7 @@ test.describe('authenticated Daily Plan Note detail', () => {
 
     const noteCard = page.locator('.note-item').filter({ hasText: originalBody })
     await expect(noteCard).toHaveAttribute('role', 'button')
+    await expect(noteCard.locator('.note-detail-chevron')).toHaveText('›')
     await noteCard.click()
 
     const readOnlyDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
@@ -139,6 +140,7 @@ test.describe('authenticated Daily Plan Note detail', () => {
       hasText: noteBody,
     })
     await expect(relatedNote).toHaveAttribute('role', 'button')
+    await expect(relatedNote.locator('.note-detail-chevron')).toHaveCount(0)
     await relatedNote.click()
 
     const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })

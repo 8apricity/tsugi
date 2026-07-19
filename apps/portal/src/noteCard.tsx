@@ -55,6 +55,7 @@ export function NoteCard({
   changeKind = 'add',
   conflicted = false,
   removalReason,
+  showChevron = false,
   onOpen,
   onCancelDraft,
   onEdit,
@@ -68,6 +69,7 @@ export function NoteCard({
   changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean
   removalReason?: 'task-cascade'
+  showChevron?: boolean
   onOpen?: () => void
   onCancelDraft?: () => void
   onEdit?: () => void
@@ -99,7 +101,9 @@ export function NoteCard({
     <article
       className={`note-item${draft ? ' note-draft' : ''}${
         individuallyRemoved ? ' note-removal-draft' : ''
-      }${onOpen ? ' note-detail-target' : ''}`}
+      }${onOpen ? ' note-detail-target' : ''}${
+        showChevron ? ' note-with-chevron' : ''
+      }`}
       data-note-id={noteId}
       role={onOpen ? 'button' : undefined}
       tabIndex={onOpen ? 0 : undefined}
@@ -160,6 +164,9 @@ export function NoteCard({
           </button>
         ) : null}
       </div>
+      {showChevron ? (
+        <span className="note-detail-chevron" aria-hidden="true">›</span>
+      ) : null}
       {individuallyRemoved ? (
         <span
           className="note-removal-mark"

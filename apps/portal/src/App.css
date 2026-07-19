@@ -543,13 +543,6 @@ button.period-inspect-button:active {
 
 .task-removal-draft {
   position: relative;
-  min-height: 74px;
-  border-color: #e3b4b4;
-  background: #fdecec;
-}
-
-.task-removal-draft > :not(.task-removal-mark) {
-  opacity: 0.48;
 }
 
 .task-draft-actions {
@@ -668,13 +661,15 @@ button.period-inspect-button:active {
   outline-offset: 2px;
 }
 
-.note-removal-draft {
+.note-removal-draft,
+.task-removal-draft {
   min-height: 74px;
   border-color: #e3b4b4;
   background: #fdecec;
 }
 
-.note-removal-draft > :not(.note-removal-mark) {
+.note-removal-draft > :not(.note-removal-mark),
+.task-removal-draft > :not(.task-removal-mark) {
   opacity: 0.48;
 }
 

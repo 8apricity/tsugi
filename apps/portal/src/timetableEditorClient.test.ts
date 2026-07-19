@@ -503,7 +503,7 @@ describe('Shared Information editor client', () => {
       submitDirectTimetableChanges: async () => ({
         status: 'remote-conflict',
         conflictingKeys: [],
-        conflictingSourceIds: [updatedNoteSourceId],
+        conflictingSourceIds: [addedNoteSourceId, updatedNoteSourceId],
       }),
     })
     const activeTask = {
@@ -544,11 +544,11 @@ describe('Shared Information editor client', () => {
     })
     expect(editor.getSnapshot()).toMatchObject({
       noteDrafts: [
-        { sourceId: addedNoteSourceId, changeKind: 'add' },
+        { sourceId: addedNoteSourceId, changeKind: 'add', conflicted: true },
         { sourceId: updatedNoteSourceId, changeKind: 'update', conflicted: true },
         { sourceId: removedNoteSourceId, changeKind: 'remove' },
       ],
-      conflictCount: 1,
+      conflictCount: 2,
     })
 
     expect(editor.saveTaskRemoveDraft(activeTask)).toEqual({
@@ -561,8 +561,14 @@ describe('Shared Information editor client', () => {
     })
 
     const restored = createTimetableEditorClient({ storage })
-    expect(restored.removeTaskDraft(taskRemovalSourceId)).toEqual({
-      status: 'removed',
+    expect(restored.saveTaskUpdateDraftWithNotes(
+      activeTask,
+      activeTask,
+      ['追加ノート'],
+    )).toEqual({
+      status: 'saved',
+      sourceId: taskRemovalSourceId,
+      noteSourceIds: [addedNoteSourceId],
     })
     expect(restored.getSnapshot()).toMatchObject({
       taskDrafts: [],
@@ -571,6 +577,7 @@ describe('Shared Information editor client', () => {
           sourceId: addedNoteSourceId,
           changeKind: 'add',
           body: '追加ノート',
+          conflicted: true,
         },
         {
           sourceId: updatedNoteSourceId,
@@ -584,7 +591,7 @@ describe('Shared Information editor client', () => {
           body: '削除する元のノート',
         },
       ],
-      conflictCount: 1,
+      conflictCount: 2,
     })
   })
 

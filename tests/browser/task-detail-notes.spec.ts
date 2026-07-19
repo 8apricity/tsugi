@@ -139,8 +139,10 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
 
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
 
-  const zeroTask = page.locator('.task-entry').filter({ hasText: zeroTitle })
-  await zeroTask.locator('.task-item').click()
+  const zeroTask = page.getByRole('article').filter({
+    has: page.getByRole('button', { name: new RegExp(zeroTitle) }),
+  })
+  await zeroTask.getByRole('button', { name: new RegExp(zeroTitle) }).click()
   const zeroRemovalEditor = page.getByRole('dialog', { name: 'タスクを編集' })
   await zeroRemovalEditor
     .getByRole('checkbox', { name: '削除予定にする' })
@@ -149,8 +151,9 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await expect(page.getByRole('dialog', {
     name: 'タスクを削除予定にしますか？',
   })).toHaveCount(0)
-  const zeroRemovalDraft = page.locator('.task-entry').filter({
-    hasText: zeroTitle,
+  const zeroRemovalDraft = page.getByRole('article', {
+    name: '削除予定のタスク',
+    exact: true,
   })
   await expect(zeroRemovalDraft.getByRole('img', {
     name: '削除予定のタスク',
@@ -158,7 +161,8 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   })).toHaveCount(1)
   await expect(zeroRemovalDraft)
     .not.toContainText('このタスクだけが削除予定になります。')
-  await zeroRemovalDraft.locator('.task-item').click()
+  await zeroRemovalDraft.getByRole('button', { name: new RegExp(zeroTitle) })
+    .click()
   const savedZeroRemovalEditor = page.getByRole('dialog', {
     name: 'タスクを編集',
   })
@@ -224,21 +228,22 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await removalConfirmation.getByRole('button', { name: '削除予定にする' })
     .click()
 
-  const removalDraftTask = page.locator('.task-entry').filter({
-    hasText: updatedTitle,
+  const removalDraftTask = page.getByRole('article', {
+    name: '削除予定のタスク。関連するノート3件も削除予定です',
   })
-  const removalTaskButton = removalDraftTask.locator('.task-item')
+  const removalTaskButton = removalDraftTask.getByRole('button', {
+    name: new RegExp(updatedTitle),
+  })
   await expect(removalTaskButton).toBeFocused()
   await expect(removalDraftTask.getByRole('img', {
     name: '削除予定のタスク。関連するノート3件も削除予定です',
   })).toHaveCount(1)
-  await expect(removalDraftTask.locator('.task-note-list .note-item'))
-    .toHaveCount(3)
-  await expect(removalDraftTask).toHaveCSS(
-    'background-color',
-    'rgb(253, 236, 236)',
-  )
-  await expect(removalDraftTask.locator('.note-removal-mark')).toHaveCount(0)
+  await expect(removalDraftTask.getByRole('button', {
+    name: /複数ノートの[12]件目|編集時の追加ノート/,
+  })).toHaveCount(0)
+  await expect(removalDraftTask).toContainText('複数ノートの1件目')
+  await expect(removalDraftTask).toContainText('複数ノートの2件目')
+  await expect(removalDraftTask).toContainText('編集時の追加ノート')
   await expect(removalDraftTask).not.toContainText('タスクに伴い削除予定')
   await expect(removalDraftTask).not.toContainText('削除予定')
 
@@ -270,23 +275,43 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await expect(page.getByRole('button', { name: '変更内容（0）' })).toBeVisible()
 
   await updatedTask.locator('.task-item').click()
-  await page
-    .getByRole('dialog', { name: 'タスクを編集' })
+  const updateBeforeRemoval = page.getByRole('dialog', { name: 'タスクを編集' })
+  const updateDraftTitle = `${updatedTitle}-下書き`
+  await updateBeforeRemoval.getByRole('textbox', { name: 'タイトル' })
+    .fill(updateDraftTitle)
+  await updateBeforeRemoval.getByRole('button', { name: '下書きを保存' })
+    .click()
+  await page.getByRole('button', { name: '変更内容（1）' }).click()
+  await page.getByRole('dialog', { name: '変更内容' })
+    .getByRole('button', { name: new RegExp(updateDraftTitle) })
+    .click()
+  const changeContentTaskEditor = page.getByRole('dialog', {
+    name: 'タスクを編集',
+  })
+  await changeContentTaskEditor
     .getByRole('checkbox', { name: '削除予定にする' })
     .check()
-  await page
-    .getByRole('dialog', { name: 'タスクを編集' })
+  await changeContentTaskEditor
     .getByRole('button', { name: '下書きを保存' })
     .click()
-  await page
-    .getByRole('dialog', { name: 'タスクを削除予定にしますか？' })
+  const changeContentRemovalConfirmation = page.getByRole('dialog', {
+    name: 'タスクを削除予定にしますか？',
+  })
+  await expect(changeContentRemovalConfirmation).toContainText(updatedTitle)
+  await expect(changeContentRemovalConfirmation).not.toContainText(updateDraftTitle)
+  await changeContentRemovalConfirmation
     .getByRole('button', { name: '削除予定にする' })
     .click()
+  await expect(page.getByRole('dialog', { name: '変更内容' })).toHaveCount(0)
 
-  const finalRemovalDraftTask = page.locator('.task-entry.task-draft').filter({
-    hasText: updatedTitle,
+  const finalRemovalDraftTask = page.getByRole('article', {
+    name: '削除予定のタスク。関連するノート3件も削除予定です',
   })
-  await finalRemovalDraftTask.locator('.task-item').click()
+  const finalRemovalTaskButton = finalRemovalDraftTask.getByRole('button', {
+    name: new RegExp(updatedTitle),
+  })
+  await expect(finalRemovalTaskButton).toBeFocused()
+  await finalRemovalTaskButton.click()
   const directRemovalEditor = page.getByRole('dialog', {
     name: 'タスクを編集',
   })

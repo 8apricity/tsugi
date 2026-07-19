@@ -702,6 +702,17 @@ export function createSharedInformationEditorClient({
         draft.changeKind !== 'add' &&
         draft.sharedInformationItemId === activeTask.taskId,
     )
+    const suspendedDependentNoteDrafts = existing?.changeKind === 'remove'
+      ? existing.suspendedDependentNoteDrafts ?? []
+      : []
+    const suspendedAddedNoteDrafts = suspendedDependentNoteDrafts.filter(
+      (draft) => draft.changeKind === 'add',
+    )
+    const restoreSuspendedAdditions = existing?.changeKind === 'remove' &&
+      suspendedAddedNoteDrafts.length === noteBodies.length &&
+      suspendedAddedNoteDrafts.every(
+        (draft, index) => draft.body === noteBodies[index],
+      )
     const existingAddedNoteCount = noteDrafts.filter(
       (draft) =>
         draft.changeKind === 'add' &&
@@ -717,7 +728,10 @@ export function createSharedInformationEditorClient({
       return { status: 'removed-noop' as const }
     }
     const nextCount = totalDraftCount() - (existing ? 1 : 0) +
-      (taskChanged ? 1 : 0) - existingAddedNoteCount + noteBodies.length
+      (taskChanged ? 1 : 0) - existingAddedNoteCount + noteBodies.length +
+      suspendedDependentNoteDrafts.filter(
+        (draft) => draft.changeKind !== 'add',
+      ).length
     if (nextCount > maximumDraftKeys) {
       return { status: 'limit-reached' as const }
     }
@@ -730,7 +744,9 @@ export function createSharedInformationEditorClient({
       taskConflictSourceIds.delete(existing.sourceId)
       if (existing.changeKind === 'remove') restoreDependentNoteDrafts(existing)
     }
-    removeAddedTaskNoteDrafts(activeTask.taskId)
+    if (!restoreSuspendedAdditions) {
+      removeAddedTaskNoteDrafts(activeTask.taskId)
+    }
     if (taskChanged && sourceId) {
       taskDrafts.push({
         sourceId,
@@ -743,11 +759,13 @@ export function createSharedInformationEditorClient({
       })
       taskConflictSourceIds.delete(sourceId)
     }
-    const noteSourceIds = appendTaskNoteDrafts(
-      activeTask.taskId,
-      activeTask.targetScopeType,
-      noteBodies,
-    )
+    const noteSourceIds = restoreSuspendedAdditions
+      ? suspendedAddedNoteDrafts.map((draft) => draft.sourceId)
+      : appendTaskNoteDrafts(
+          activeTask.taskId,
+          activeTask.targetScopeType,
+          noteBodies,
+        )
     editing = true
     lastCommitFailed = false
     publish()

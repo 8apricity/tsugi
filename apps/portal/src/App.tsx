@@ -1532,7 +1532,10 @@ function App() {
     };
   }
 
-  function visibleTaskFromChangeItem(item: ChangeContentTaskItem): VisibleTask {
+  function visibleTaskFromChangeItem(
+    item: ChangeContentTaskItem,
+    activeTask?: DailyPlanTaskForCache,
+  ): VisibleTask {
     const baseTask = item.draft && item.draft.changeKind !== "add"
       ? item.draft.baseTask
       : undefined;
@@ -1544,7 +1547,7 @@ function App() {
         ? { relatedLessonName: item.task.relatedLessonName }
         : {}),
       targetScopeType: item.task.targetScopeType,
-      notes: baseTask?.notes ?? [],
+      notes: activeTask?.notes ?? baseTask?.notes ?? [],
     };
   }
 
@@ -1571,13 +1574,15 @@ function App() {
       openTaskDraftEditor(item.draft);
       return;
     }
-    const editingTask = taskEditingSnapshotFromChangeItem(item);
-    if (!editingTask) return;
-    const visibleTask = visibleTaskFromChangeItem(item);
     const activeTask = dailyPlanClient
       .getCachedDailyPlans()
       .flatMap((plan) => plan.tasks)
-      .find((task) => task.taskId === editingTask.taskId);
+      .find((task) => task.taskId === item.task.taskId);
+    const editingTask = activeTask
+      ? editableTask(activeTask)
+      : taskEditingSnapshotFromChangeItem(item);
+    if (!editingTask) return;
+    const visibleTask = visibleTaskFromChangeItem(item, activeTask);
     setTaskDetail({
       type: "draft",
       task: visibleTask,
@@ -2141,7 +2146,7 @@ function App() {
   function saveTaskDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskEditorForm || timetableEditor.submitting) return;
-    const savedTaskRemoval = Boolean(
+    const taskRemovalRequested = Boolean(
       taskEditorForm.editingTask && taskEditorForm.removalPlanned,
     );
     const existingTaskRemoval = taskEditorForm.editingTask
@@ -2152,7 +2157,7 @@ function App() {
         )
       : false;
     if (
-      savedTaskRemoval &&
+      taskRemovalRequested &&
       !existingTaskRemoval &&
       (taskEditorForm.editingTask?.notes?.length ?? 0) > 0
     ) {
@@ -2236,7 +2241,7 @@ function App() {
     }
     closeTaskEditorFlow();
     if (wasTaskDetailOpen) setTaskDetail(null);
-    if (savedTaskRemoval && taskEditorForm.editingTask) {
+    if (taskRemovalRequested && taskEditorForm.editingTask) {
       setDailyPlanTaskFocusRequestId(taskEditorForm.editingTask.taskId);
     }
     setTimetableEditorMessage(null);
@@ -2441,26 +2446,6 @@ function App() {
     );
   }
 
-  function planTaskRemoval(task: DailyPlanTaskForCache) {
-    if (timetableEditor.submitting) return;
-    if (task.notes.length === 0) {
-      const result = timetableEditorClient.saveTaskRemoveDraft(editableTask(task));
-      if (result.status === "limit-reached") {
-        setTimetableEditorMessage("下書きは合計50件までです。");
-        return;
-      }
-      if (result.status === "submission-in-progress") return;
-      setTaskDetail(null);
-      setDailyPlanTaskFocusRequestId(task.taskId);
-      return;
-    }
-    setTaskRemovalConfirmation({
-      task: editableTask(task),
-      returnTaskDetail: { type: "active", task },
-    });
-    setTaskDetail(null);
-  }
-
   function cancelTaskRemovalConfirmation() {
     const confirmation = taskRemovalConfirmation;
     setTaskRemovalConfirmation(null);
@@ -2486,6 +2471,7 @@ function App() {
       return;
     }
     setTaskRemovalConfirmation(null);
+    changeContentReturnRef.current = false;
     closeTaskEditorFlow();
     setTimetableEditorMessage(null);
     setDailyPlanTaskFocusRequestId(taskId);
@@ -3599,8 +3585,14 @@ function App() {
                       const task = item.task;
                       const taskRemovalPlanned = item.type === "draft" &&
                         item.draft.changeKind === "remove";
+                      const taskRemovalLabel = taskRemovalPlanned
+                        ? task.notes.length === 0
+                          ? "削除予定のタスク"
+                          : `削除予定のタスク。関連するノート${task.notes.length}件も削除予定です`
+                        : undefined;
                       return (
                       <article
+                        aria-label={taskRemovalLabel}
                         className={`task-entry ${
                           item.type === "draft" ? "task-draft" : ""
                         }${taskRemovalPlanned ? " task-removal-draft" : ""}`}
@@ -3653,9 +3645,7 @@ function App() {
                         {taskRemovalPlanned ? (
                           <RemovalMark
                             className="task-removal-mark"
-                            label={task.notes.length === 0
-                              ? "削除予定のタスク"
-                              : `削除予定のタスク。関連するノート${task.notes.length}件も削除予定です`}
+                            label={taskRemovalLabel!}
                           />
                         ) : null}
                       </article>
@@ -4319,9 +4309,6 @@ function App() {
                   timetableEditorClient.removeTaskDraft(taskDetail.draft.sourceId);
                   setTaskDetail(null);
                 }
-                : undefined}
-              onRemove={timetableEditor.editing && taskDetail.type === "active"
-                ? () => planTaskRemoval(taskDetail.task)
                 : undefined}
             />
           ) : null}

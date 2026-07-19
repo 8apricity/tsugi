@@ -2169,6 +2169,10 @@ function App() {
       setTaskDetail(null);
       return;
     }
+    if (taskRemovalRequested) {
+      saveTaskRemovalTransition(taskEditorForm.editingTask!, false);
+      return;
+    }
     const wasTaskDetailOpen = taskDetail !== null;
     const lessonInput = taskEditorForm.relatedLessonInput.trim();
     const resolvedLesson = lessonInput
@@ -2200,9 +2204,7 @@ function App() {
           : lessonInput
             ? { lessonName: lessonInput }
             : null;
-    const result = taskEditorForm.editingTask && taskEditorForm.removalPlanned
-      ? timetableEditorClient.saveTaskRemoveDraft(taskEditorForm.editingTask)
-      : taskEditorForm.editingDraft
+    const result = taskEditorForm.editingDraft
       ? timetableEditorClient.updateTaskDraftWithNotes(
           taskEditorForm.editingDraft.sourceId,
           {
@@ -2241,9 +2243,6 @@ function App() {
     }
     closeTaskEditorFlow();
     if (wasTaskDetailOpen) setTaskDetail(null);
-    if (taskRemovalRequested && taskEditorForm.editingTask) {
-      setDailyPlanTaskFocusRequestId(taskEditorForm.editingTask.taskId);
-    }
     setTimetableEditorMessage(null);
   }
 
@@ -2457,24 +2456,33 @@ function App() {
 
   function confirmTaskRemoval() {
     if (!taskRemovalConfirmation) return;
-    const taskId = taskRemovalConfirmation.task.taskId;
-    const result = timetableEditorClient.saveTaskRemoveDraft(
-      taskRemovalConfirmation.task,
-    );
+    saveTaskRemovalTransition(taskRemovalConfirmation.task, true);
+  }
+
+  function saveTaskRemovalTransition(
+    task: ActiveTaskForEditing,
+    fromConfirmation: boolean,
+  ) {
+    const result = timetableEditorClient.saveTaskRemoveDraft(task);
     if (result.status === "limit-reached") {
       setTimetableEditorMessage("下書きは合計50件までです。");
-      cancelTaskRemovalConfirmation();
+      if (fromConfirmation) cancelTaskRemovalConfirmation();
       return;
     }
     if (result.status === "submission-in-progress") {
-      cancelTaskRemovalConfirmation();
+      if (fromConfirmation) cancelTaskRemovalConfirmation();
       return;
     }
-    setTaskRemovalConfirmation(null);
-    changeContentReturnRef.current = false;
+    if (fromConfirmation) {
+      setTaskRemovalConfirmation(null);
+      changeContentReturnRef.current = false;
+    }
+    const returningToChangeContent = changeContentReturnRef.current;
     closeTaskEditorFlow();
     setTimetableEditorMessage(null);
-    setDailyPlanTaskFocusRequestId(taskId);
+    if (!returningToChangeContent) {
+      setDailyPlanTaskFocusRequestId(task.taskId);
+    }
   }
 
   function openTimetableEditor(periodNumber: number) {

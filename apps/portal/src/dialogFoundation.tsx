@@ -45,8 +45,9 @@ export function EditorDialogShell({
             type="submit"
             form={formId}
             disabled={saveDisabled}
+            aria-label="下書きを保存"
           >
-            下書きを保存
+            保存
           </button>
         </header>
         <div className="editor-dialog-body">{children}</div>

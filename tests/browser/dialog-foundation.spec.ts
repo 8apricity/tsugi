@@ -18,6 +18,7 @@ function readPageScrollY(page: Page) {
 test.describe('authenticated Daily Plan dialog foundation', () => {
   test('guards Task editor exits and restores Daily Plan scroll', async ({
     page,
+    isMobile,
   }) => {
     await page.goto('/')
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
@@ -30,9 +31,13 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
     const header = editor.locator('.editor-dialog-header')
 
     await expect(header.getByRole('button', { name: '戻る' })).toBeVisible()
-    await expect(
-      header.getByRole('button', { name: '下書きを保存' }),
-    ).toBeVisible()
+    const saveButton = header.getByRole('button', { name: '下書きを保存' })
+    await expect(saveButton).toBeVisible()
+    await expect(saveButton).toHaveText('保存')
+    if (isMobile) {
+      await expect(saveButton).toHaveCSS('padding-left', '0px')
+      await expect(saveButton).toHaveCSS('padding-right', '0px')
+    }
     await expect(editor.getByRole('button', { name: '閉じる' })).toHaveCount(0)
     await expect(
       editor.locator('.editor-dialog-actions .button-primary'),

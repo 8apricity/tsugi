@@ -2338,7 +2338,9 @@ function App() {
         return {
           noteId: note.sourceId,
           body: note.body,
-          targetScopeLabel: scopeLabel(note.targetScopeType, scopeContext),
+          targetScopeLabel: targetScopeType
+            ? undefined
+            : scopeLabel(note.targetScopeType, scopeContext),
           draft: true,
           changeKind: note.changeKind,
           conflicted: note.conflicted,
@@ -2354,7 +2356,9 @@ function App() {
       return {
         noteId: note.noteId,
         body: note.body,
-        targetScopeLabel: scopeLabel(note.targetScopeType, scopeContext),
+        targetScopeLabel: targetScopeType
+          ? undefined
+          : scopeLabel(note.targetScopeType, scopeContext),
         onOpen: notesOpenDetail
           ? () => openNoteUpdateEditor(note)
           : undefined,
@@ -2419,7 +2423,7 @@ function App() {
             sourceId: existing.sourceId,
             includeTimetableChange: true,
             removalPlanned: existing.changeKind === "remove",
-            noteBodies: [""],
+            noteBodies: [],
             replacement:
               existing.changeKind === "remove"
                 ? existing.serverReplacement
@@ -2433,7 +2437,7 @@ function App() {
               periodNumber: timetableLayerDialog.periodNumber,
               includeTimetableChange: true,
               removalPlanned: false,
-              noteBodies: [""],
+              noteBodies: [],
               replacement: serverLayer.replacement,
             }
           : {
@@ -2442,7 +2446,7 @@ function App() {
               periodNumber: timetableLayerDialog.periodNumber,
               includeTimetableChange: false,
               removalPlanned: false,
-              noteBodies: [""],
+              noteBodies: [],
               replacement: { type: "lesson_name", lessonName: "" },
             });
     editorInitialFormsRef.current.timetable = form;

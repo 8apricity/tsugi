@@ -23,6 +23,9 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   let layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
   await openLayerEditor(layerDialog, '文科')
   let timetableEditor = page.getByRole('dialog', { name: '時間割変更' })
+  await expect(
+    timetableEditor.getByRole('textbox', { name: /ノート本文/ }),
+  ).toHaveCount(0)
   const includeTimetableChange = timetableEditor.getByRole('checkbox', {
     name: '時間割も変更する',
   })
@@ -98,6 +101,7 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
   const noteCard = noteButton(layerDialog, noteOnlyBodies[0])
   await expect(noteCard).toHaveCount(1)
+  await expect(noteCard.getByText('3組', { exact: true })).toHaveCount(0)
   await expect(noteCard).toHaveCSS('background-color', 'rgb(248, 250, 251)')
   await expect(noteCard).toHaveCSS('border-top-width', '1px')
   await expect(noteCard).toContainText('›')
@@ -155,9 +159,7 @@ async function fillNoteBodies(
   bodies: string[],
 ) {
   for (const [index, body] of bodies.entries()) {
-    if (index > 0) {
-      await dialog.getByRole('button', { name: '＋ノートを追加' }).click()
-    }
+    await dialog.getByRole('button', { name: '＋ノートを追加' }).click()
     await dialog.getByRole('textbox', { name: `ノート本文 ${index + 1}` })
       .fill(body)
   }

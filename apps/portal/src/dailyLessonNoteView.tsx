@@ -3,7 +3,7 @@ import { NoteCard } from './noteCard'
 export type DailyLessonNoteListItem = {
   noteId: string
   body: string
-  targetScopeLabel: string
+  targetScopeLabel?: string
   draft?: boolean
   changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean

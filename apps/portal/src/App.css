@@ -1195,14 +1195,16 @@ body.page-scroll-locked {
   padding: 0;
 }
 
-.note-detail-dialog form .note-removal-checkbox {
+.note-detail-dialog form .note-removal-checkbox,
+.task-detail-dialog form .task-removal-checkbox {
   display: flex;
   align-items: center;
   gap: 9px;
   min-height: 42px;
 }
 
-.note-detail-dialog form .note-removal-checkbox input {
+.note-detail-dialog form .note-removal-checkbox input,
+.task-detail-dialog form .task-removal-checkbox input {
   width: 18px;
   height: 18px;
   margin: 0;

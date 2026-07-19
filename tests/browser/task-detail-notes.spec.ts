@@ -103,6 +103,60 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await updatedTask.locator('.task-item').click()
   const updatedDetail = page.getByRole('dialog', { name: 'タスクの詳細' })
   await expect(updatedDetail).toContainText('編集時の追加ノート')
+  await updatedDetail.getByRole('button', { name: '閉じる' }).click()
+
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await updatedTask.locator('.task-item').click()
+  const removalEditor = page.getByRole('dialog', { name: 'タスクを編集' })
+  const removalCheckbox = removalEditor.getByRole('checkbox', {
+    name: '削除予定にする',
+  })
+  await expect(removalCheckbox).toBeVisible()
+  await removalCheckbox.check()
+  await expect(removalEditor.getByRole('textbox', { name: 'タイトル' }))
+    .toBeDisabled()
+  await expect(removalEditor.getByRole('button', { name: '＋ノートを追加' }))
+    .toBeDisabled()
+  await removalEditor.getByRole('button', { name: '下書きを保存' }).click()
+
+  await page.getByRole('button', { name: '変更内容（1）' }).click()
+  await page
+    .getByRole('dialog', { name: '変更内容' })
+    .getByRole('button', { name: new RegExp(updatedTitle) })
+    .click()
+  const reflectedRemovalEditor = page.getByRole('dialog', {
+    name: 'タスクを編集',
+  })
+  const reflectedRemovalCheckbox = reflectedRemovalEditor.getByRole(
+    'checkbox',
+    { name: '削除予定にする' },
+  )
+  await expect(reflectedRemovalCheckbox).toBeChecked()
+  await reflectedRemovalCheckbox.uncheck()
+  await expect(
+    reflectedRemovalEditor.getByRole('textbox', { name: 'タイトル' }),
+  ).toBeEnabled()
+  await reflectedRemovalEditor
+    .getByRole('button', { name: '下書きを保存' })
+    .click()
+  const emptyChangeContent = page.getByRole('dialog', { name: '変更内容' })
+  await expect(emptyChangeContent).toContainText('変更内容はありません。')
+  await emptyChangeContent
+    .getByRole('button', { name: '変更内容を閉じる' })
+    .click()
+  await expect(page.getByRole('button', { name: '変更内容（0）' })).toBeVisible()
+
+  await updatedTask.locator('.task-item').click()
+  await page
+    .getByRole('dialog', { name: 'タスクを編集' })
+    .getByRole('checkbox', { name: '削除予定にする' })
+    .check()
+  await page
+    .getByRole('dialog', { name: 'タスクを編集' })
+    .getByRole('button', { name: '下書きを保存' })
+    .click()
+  await applyCurrentDrafts(page, 1)
+  await expect(updatedTask).toHaveCount(0)
 })
 
 async function addTask(page: Page, title: string, noteBodies: string[]) {

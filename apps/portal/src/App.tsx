@@ -173,6 +173,7 @@ type TimetableEditorForm = TimetableLayerKey & {
 type TaskEditorForm = Omit<NewTaskDraftForm, "relatedLessonName"> & {
   relatedLessonInput: string;
   noteBodies: string[];
+  removalPlanned: boolean;
   editingTask: ActiveTaskForEditing | null;
   editingDraft: TaskDraft | null;
 };
@@ -1825,6 +1826,7 @@ function App() {
       targetScopeType: initial.targetScopeType,
       relatedLessonInput: "",
       noteBodies: [],
+      removalPlanned: false,
       editingTask: null,
       editingDraft: null,
     });
@@ -2051,19 +2053,29 @@ function App() {
     setTaskLessonNamesExpanded(false);
     setTaskLessonNameListOpen(false);
     setActiveTaskLessonNameOption(-1);
+    const existingDraft = timetableEditor.taskDrafts.find(
+      (draft) =>
+        draft.changeKind !== "add" &&
+        draft.sharedInformationItemId === task.taskId,
+    );
+    const removalPlanned = existingDraft?.changeKind === "remove";
+    const noteDrafts = removalPlanned
+      ? existingDraft.suspendedDependentNoteDrafts ?? []
+      : timetableEditor.noteDrafts;
     openTaskEditorForm({
       title: projectedTask?.title ?? task.title,
       dueDate: projectedTask?.dueDate ?? task.dueDate,
       targetScopeType: task.targetScopeType,
       relatedLessonInput: projectedTask?.relatedLessonName ??
         task.relatedLessonName?.lessonName ?? "",
-      noteBodies: timetableEditor.noteDrafts
+      noteBodies: noteDrafts
         .filter(
           (note) =>
             note.changeKind === "add" &&
             note.relatedTaskItemId === task.taskId,
         )
         .map((note) => note.body),
+      removalPlanned,
       editingTask: task,
       editingDraft: null,
     });
@@ -2086,6 +2098,7 @@ function App() {
             note.relatedTaskItemId === draft.sourceId,
         )
         .map((note) => note.body),
+      removalPlanned: false,
       editingTask: null,
       editingDraft: draft,
     });
@@ -2126,7 +2139,9 @@ function App() {
           : lessonInput
             ? { lessonName: lessonInput }
             : null;
-    const result = taskEditorForm.editingDraft
+    const result = taskEditorForm.editingTask && taskEditorForm.removalPlanned
+      ? timetableEditorClient.saveTaskRemoveDraft(taskEditorForm.editingTask)
+      : taskEditorForm.editingDraft
       ? timetableEditorClient.updateTaskDraftWithNotes(
           taskEditorForm.editingDraft.sourceId,
           {
@@ -2890,7 +2905,7 @@ function App() {
         lessonNameComboboxSnapshot.hasAdditionalOptions,
     });
     const taskLessonNameOptionsPopoverOpen = shouldShowLessonNameOptions({
-      listOpen: taskLessonNameListOpen,
+      listOpen: taskLessonNameListOpen && !taskEditorForm?.removalPlanned,
       optionCount: taskLessonNameSnapshot.options.length,
       expandedToAll: taskLessonNamesExpanded,
       hasAdditionalOptions: taskLessonNameSnapshot.hasAdditionalOptions,
@@ -2964,6 +2979,7 @@ function App() {
             autoFocus
             required
             maxLength={120}
+            disabled={taskEditorForm.removalPlanned}
             value={taskEditorForm.title}
             onChange={(event) =>
               setTaskEditorForm((current) =>
@@ -2979,6 +2995,7 @@ function App() {
               type="date"
               min={schoolYearRange?.startsOn}
               max={schoolYearRange?.endsOn}
+              disabled={taskEditorForm.removalPlanned}
               value={taskEditorForm.dueDate ?? ""}
               onChange={(event) =>
                 setTaskEditorForm((current) =>
@@ -2992,7 +3009,9 @@ function App() {
               type="button"
               aria-label="期限をクリア"
               title="期限をクリア"
-              disabled={!taskEditorForm.dueDate}
+              disabled={
+                taskEditorForm.removalPlanned || !taskEditorForm.dueDate
+              }
               onClick={() =>
                 setTaskEditorForm((current) =>
                   current ? { ...current, dueDate: null } : current
@@ -3030,6 +3049,7 @@ function App() {
                     )
                   : undefined
               }
+              disabled={taskEditorForm.removalPlanned}
               value={taskEditorForm.relatedLessonInput}
               onFocus={() => setTaskLessonNameListOpen(true)}
               onChange={(event) => {
@@ -3114,7 +3134,7 @@ function App() {
             ) : null}
           </div>
         </div>
-        {taskLessonResolution?.custom &&
+        {!taskEditorForm.removalPlanned && taskLessonResolution?.custom &&
         !(
           taskEditorForm.editingTask?.relatedLessonName
             ?.registeredLessonNameId &&
@@ -4105,6 +4125,13 @@ function App() {
                 : () => setTaskDetail(null)}
               onSave={taskEditorForm?.editingTask ? saveTaskDraft : undefined}
               onNoteBodyChange={updateTaskNoteBody}
+              onRemovalPlannedChange={(removalPlanned) => {
+                setTaskLessonNameListOpen(false);
+                setActiveTaskLessonNameOption(-1);
+                setTaskEditorForm((current) =>
+                  current ? { ...current, removalPlanned } : current
+                );
+              }}
               onOpenHistory={taskDetail.type === "active"
                 ? () => openTaskHistory(taskDetail.task)
                 : taskDetail.activeTask

@@ -52,6 +52,7 @@ describe('Task detail dialog', () => {
         mode="edit"
         editForm={{
           noteBodies: ['', '補足'],
+          removalPlanned: false,
         }}
         editorFields={
           <>
@@ -75,6 +76,7 @@ describe('Task detail dialog', () => {
         onClose={() => undefined}
         onSave={() => undefined}
         onNoteBodyChange={() => undefined}
+        onRemovalPlannedChange={() => undefined}
         onAddNote={() => undefined}
         onOpenHistory={() => undefined}
       />,
@@ -92,6 +94,8 @@ describe('Task detail dialog', () => {
     expect(markup).not.toContain('task-scope-badge')
     expect(markup).toContain('編集履歴')
     expect(markup).not.toContain('>編集</button>')
-    expect(markup).not.toContain('削除予定にする')
+    expect(markup).toContain('削除予定にする')
+    expect(markup).toContain('type="checkbox"')
+    expect(markup).not.toContain('checked=""')
   })
 })

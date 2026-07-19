@@ -18,6 +18,7 @@ export function TaskDetailDialog({
   onClose,
   onSave,
   onNoteBodyChange,
+  onRemovalPlannedChange,
   onOpenHistory,
   onAddNote,
   onEdit,
@@ -30,6 +31,7 @@ export function TaskDetailDialog({
   mode?: 'view' | 'edit'
   editForm?: {
     noteBodies: string[]
+    removalPlanned: boolean
   }
   editorFields?: ReactNode
   draftLifecycle?: { kind: LifecycleKind; conflicted: boolean }
@@ -38,6 +40,7 @@ export function TaskDetailDialog({
   onClose: () => void
   onSave?: (event: FormEvent<HTMLFormElement>) => void
   onNoteBodyChange?: (index: number, body: string) => void
+  onRemovalPlannedChange?: (removalPlanned: boolean) => void
   onOpenHistory?: () => void
   onAddNote?: () => void
   onEdit?: () => void
@@ -60,6 +63,7 @@ export function TaskDetailDialog({
             noteBodies={editForm.noteBodies}
             onBodyChange={onNoteBodyChange}
             onAddNote={onAddNote}
+            disabled={editForm.removalPlanned}
             addDisabled={addNoteDisabled}
           />
           {onOpenHistory ? (
@@ -73,6 +77,15 @@ export function TaskDetailDialog({
               </button>
             </div>
           ) : null}
+          <label className="task-removal-checkbox">
+            <input
+              type="checkbox"
+              checked={editForm.removalPlanned}
+              onChange={(event) =>
+                onRemovalPlannedChange?.(event.target.checked)}
+            />
+            <span>削除予定にする</span>
+          </label>
         </form>
       </EditorDialogShell>
     )

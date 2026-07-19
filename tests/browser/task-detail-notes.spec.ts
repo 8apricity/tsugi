@@ -155,6 +155,21 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
     .getByRole('dialog', { name: 'タスクを編集' })
     .getByRole('button', { name: '下書きを保存' })
     .click()
+
+  const removalDraftTask = page.locator('.task-entry.task-draft').filter({
+    hasText: updatedTitle,
+  })
+  await removalDraftTask.locator('.task-item').click()
+  const directRemovalEditor = page.getByRole('dialog', {
+    name: 'タスクを編集',
+  })
+  await expect(page.getByRole('dialog', { name: 'タスクの詳細' }))
+    .toHaveCount(0)
+  await expect(
+    directRemovalEditor.getByRole('checkbox', { name: '削除予定にする' }),
+  ).toBeChecked()
+  await directRemovalEditor.getByRole('button', { name: '戻る' }).click()
+
   await applyCurrentDrafts(page, 1)
   await expect(updatedTask).toHaveCount(0)
 })

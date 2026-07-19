@@ -89,12 +89,9 @@ test('draft lifecycle protects Task input and renders immutable scope as text', 
     '追加予定の下書き',
   )
   await draftCard.locator('.task-item').click()
-  await page
-    .getByRole('dialog', { name: 'タスクの詳細' })
-    .getByRole('button', { name: '編集' })
-    .click()
-
   const savedDraftDialog = page.getByRole('dialog', { name: 'タスクを追加' })
+  await expect(page.getByRole('dialog', { name: 'タスクの詳細' }))
+    .toHaveCount(0)
   await expect(
     savedDraftDialog.getByRole('button', { name: '下書きを保存' }),
   ).toBeVisible()

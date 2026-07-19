@@ -2264,18 +2264,25 @@ function App() {
   }
 
   function openTaskDetail(item: VisibleTaskListItem) {
-    setTaskDetail(item);
-    if (!timetableEditor.editing) return;
+    if (!timetableEditor.editing) {
+      setTaskDetail(item);
+      return;
+    }
     if (item.type === "active") {
+      setTaskDetail(item);
       openTaskUpdateEditor(editableTask(item.task), item.task);
       return;
     }
-    if (
-      item.draft.changeKind === "update" &&
-      item.editingTask
-    ) {
-      openTaskUpdateEditor(item.editingTask, item.task);
+    if (item.draft.changeKind === "add") {
+      openTaskDraftEditor(item.draft);
+      return;
     }
+    if (item.editingTask) {
+      setTaskDetail(item);
+      openTaskUpdateEditor(item.editingTask, item.task);
+      return;
+    }
+    setTaskDetail(item);
   }
 
   function dailyLessonNoteList(

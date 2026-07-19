@@ -12,7 +12,11 @@ export type TimetableReplacement =
       registeredLessonNameId?: string
     }
   | { type: 'period_reference'; weekday: number; periodNumber: number }
-  | { type: 'floating_lesson_reference'; floatingLessonReferenceLabelId: string }
+  | {
+      type: 'floating_lesson_reference'
+      floatingLessonReferenceLabelId: string
+      referenceLabel?: string
+    }
   | { type: 'cancelled' }
 
 export type TimetableReference = Extract<
@@ -50,6 +54,10 @@ export type ProjectedDailyLesson = {
     | 'unresolved-reference'
 }
 
+export type TimetableLessonSource =
+  | { type: 'period_reference'; weekday: number; periodNumber: number }
+  | { type: 'floating_lesson_reference'; referenceLabel: string | null }
+
 export type DesiredTimetableLayer =
   | {
       targetScopeType: TargetScopeType
@@ -62,18 +70,27 @@ export type DesiredTimetableLayer =
     }
 
 export type ProjectedTimetableLayer =
-  | { targetScopeType: TargetScopeType; state: 'unchanged' }
+  | {
+      targetScopeType: TargetScopeType
+      state: 'unchanged'
+      effectiveLessonName: string
+      effectiveLessonSource: TimetableLessonSource | null
+    }
   | {
       targetScopeType: TargetScopeType
       state: 'unchanged'
       origin: 'desired'
       desiredChange: 'remove'
+      effectiveLessonName: string
+      effectiveLessonSource: TimetableLessonSource | null
     }
   | {
       targetScopeType: TargetScopeType
       state: 'active'
       origin: 'active' | 'desired'
       replacement: TimetableReplacement
+      effectiveLessonName: string
+      effectiveLessonSource: TimetableLessonSource | null
     }
 
 export type StandardTimetableProjectionInput =
@@ -83,9 +100,10 @@ export type StandardTimetableProjectionInput =
       candidates: readonly {
         trackId: string | null
         lessonName: string
+        source?: TimetableLessonSource
       }[]
     }
-  | { type: 'selected'; lessonName: string }
+  | { type: 'selected'; lessonName: string; source?: TimetableLessonSource }
   | null
 
 export function projectTimetableSlot({
@@ -115,6 +133,10 @@ export function projectTimetableSlot({
     lessonName: standardTimetable?.lessonName ?? '',
     timetableChangeState: 'unchanged',
   }
+  let effectiveLesson = {
+    lessonName: standardTimetable?.lessonName ?? '',
+    source: standardTimetable?.source ?? null,
+  }
   const layers: ProjectedTimetableLayer[] = []
   for (const targetScopeType of targetScopeTypesBroadToNarrow) {
     const desiredLayer = desiredLayersByScope.get(targetScopeType)
@@ -124,6 +146,8 @@ export function projectTimetableSlot({
         state: 'unchanged',
         origin: 'desired',
         desiredChange: 'remove',
+        effectiveLessonName: effectiveLesson.lessonName,
+        effectiveLessonSource: effectiveLesson.source,
       })
       continue
     }
@@ -132,15 +156,26 @@ export function projectTimetableSlot({
       ? desiredLayer.replacement
       : activeLayer?.replacement
     if (!replacement) {
-      layers.push({ targetScopeType, state: 'unchanged' })
+      layers.push({
+        targetScopeType,
+        state: 'unchanged',
+        effectiveLessonName: effectiveLesson.lessonName,
+        effectiveLessonSource: effectiveLesson.source,
+      })
       continue
     }
     finalDailyLesson = resolveReplacement(replacement, resolveReference)
+    effectiveLesson = {
+      lessonName: finalDailyLesson.lessonName,
+      source: replacementSource(replacement),
+    }
     layers.push({
       targetScopeType,
       replacement,
       state: 'active',
       origin: desiredLayer ? 'desired' : 'active',
+      effectiveLessonName: effectiveLesson.lessonName,
+      effectiveLessonSource: effectiveLesson.source,
     })
   }
 
@@ -153,10 +188,15 @@ export function projectTimetableSlot({
 
 function selectStandardTimetable(
   input: StandardTimetableProjectionInput,
-): { lessonName: string } | null {
+): { lessonName: string; source?: TimetableLessonSource } | null {
   if (!input) return null
   if (input.type === 'selected') {
-    return input.lessonName === '' ? null : { lessonName: input.lessonName }
+    return input.lessonName === ''
+      ? null
+      : {
+          lessonName: input.lessonName,
+          ...(input.source ? { source: input.source } : {}),
+        }
   }
   const candidates = input.candidates.filter(
     (candidate) => candidate.lessonName !== '',
@@ -164,7 +204,31 @@ function selectStandardTimetable(
   const selected = candidates.find(
     (candidate) => candidate.trackId === input.selectedTrackId,
   ) ?? candidates.find((candidate) => candidate.trackId === null)
-  return selected ? { lessonName: selected.lessonName } : null
+  return selected
+    ? {
+        lessonName: selected.lessonName,
+        ...(selected.source ? { source: selected.source } : {}),
+      }
+    : null
+}
+
+function replacementSource(
+  replacement: TimetableReplacement,
+): TimetableLessonSource | null {
+  if (replacement.type === 'period_reference') {
+    return {
+      type: 'period_reference',
+      weekday: replacement.weekday,
+      periodNumber: replacement.periodNumber,
+    }
+  }
+  if (replacement.type === 'floating_lesson_reference') {
+    return {
+      type: 'floating_lesson_reference',
+      referenceLabel: replacement.referenceLabel ?? null,
+    }
+  }
+  return null
 }
 
 function resolveReplacement(

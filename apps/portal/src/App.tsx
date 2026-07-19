@@ -34,6 +34,7 @@ import {
   type TargetScopeType,
   type TimetableLayerState,
   type TimetableLayerKey,
+  type TimetableLessonSource,
   type TimetableReference,
   type TimetableReplacement,
 } from "./sharedInformationEditorClient";
@@ -43,7 +44,7 @@ import type {
   DailyPlanNoteForCache,
   DailyPlanTaskForCache,
 } from "./dailyPlanCache";
-import { NoteCard } from "./noteCard";
+import { NoteCard, RemovalGlyph } from "./noteCard";
 import {
   buildVisibleDailyLessonNoteList,
   buildVisibleNoteList,
@@ -78,7 +79,7 @@ import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
 } from "./taskEditHistoryView";
-import { TaskDetailDialog } from "./taskDetailView";
+import { TaskDetailDialog, TaskNoteFields } from "./taskDetailView";
 import {
   NoteEditHistoryDialog,
   type NoteEditHistoryState,
@@ -107,6 +108,8 @@ import {
   StaleDirectChangeRefreshAction,
 } from "./directChangeReviewView";
 import { buildDirectChangeReviewSummary } from "./directChangeReview";
+import { DialogBody, DialogHeader, DialogSurface } from "./dialogFoundation";
+import { NoteDetailDialog } from "./noteDetailView";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -164,13 +167,16 @@ type TimetableEditorForm = TimetableLayerKey & {
   replacement: TimetableReplacement;
   sourceId?: string;
   includeTimetableChange: boolean;
-  noteBody: string;
+  noteBodies: string[];
+  removalPlanned: boolean;
 };
 
 type TaskEditorForm = Omit<NewTaskDraftForm, "relatedLessonName"> & {
   relatedLessonInput: string;
+  noteBodies: string[];
   editingTask: ActiveTaskForEditing | null;
   editingDraft: TaskDraft | null;
+  removalPlanned: boolean;
 };
 
 type TimetableLayerDialog = {
@@ -233,18 +239,31 @@ type TaskHistoryDialog = {
 
 type NoteEditorForm = NewNoteDraftForm & {
   editingNote: DailyPlanNoteForCache | null;
-  editingDraft: NoteDraft | null;
+  editingDraft: (NoteDraft & { conflicted?: boolean }) | null;
+  removalPlanned: boolean;
   relatedTask: {
     taskId: string;
     title: string;
     targetScopeType: TargetScopeType;
   } | null;
+  detailParent: NoteDetailParent | null;
+};
+
+type NoteDetailParent =
+  | { type: "daily-plan" }
+  | { type: "task"; task: VisibleTaskListItem }
+  | { type: "timetable"; dialog: TimetableLayerDialog };
+
+type NoteDetailState = {
+  note: DailyPlanNoteForCache;
+  parent: NoteDetailParent;
 };
 
 type NoteHistoryDialog = {
   note: DailyPlanNoteForCache;
   requestId: number;
   state: NoteEditHistoryState;
+  fromDetail: boolean;
 };
 
 type PendingEditorDismissal = {
@@ -504,7 +523,7 @@ function App() {
   const [noteEditorForm, setNoteEditorForm] =
     useState<NoteEditorForm | null>(null);
   const [taskRemovalConfirmation, setTaskRemovalConfirmation] =
-    useState<DailyPlanTaskForCache | null>(null);
+    useState<ActiveTaskForEditing | null>(null);
   const editorInitialFormsRef = useRef<EditorInitialForms>({
     timetable: null,
     task: null,
@@ -525,8 +544,19 @@ function App() {
   >(() => undefined);
   const [taskDetail, setTaskDetail] =
     useState<VisibleTaskListItem | null>(null);
+  const [noteDetail, setNoteDetail] = useState<NoteDetailState | null>(null);
   const [taskHistoryDialog, setTaskHistoryDialog] =
     useState<TaskHistoryDialog | null>(null);
+  const taskDetailEditReturnRef = useRef<{
+    task: VisibleTaskListItem;
+    form: TaskEditorForm;
+    initialForm: TaskEditorForm | null;
+  } | null>(null);
+  const taskHistoryEditReturnRef = useRef<{
+    task: VisibleTaskListItem;
+    form: TaskEditorForm;
+    initialForm: TaskEditorForm | null;
+  } | null>(null);
   const [noteHistoryDialog, setNoteHistoryDialog] =
     useState<NoteHistoryDialog | null>(null);
   const [taskLessonNamesExpanded, setTaskLessonNamesExpanded] =
@@ -561,14 +591,77 @@ function App() {
   const timetableDialogOpen = Boolean(
     timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
       taskEditorForm || noteEditorForm || taskRemovalConfirmation || taskDetail || taskHistoryDialog ||
-      noteHistoryDialog || referencePickerOpen || changeContentOpen ||
+      noteDetail || noteHistoryDialog || referencePickerOpen || changeContentOpen ||
       directChangeReviewOpen || logoutConfirmationOpen,
   );
+  const dialogOpenRef = useRef(timetableDialogOpen);
+  const dialogHistoryActiveRef = useRef(false);
+  const ignoreDialogPopStateRef = useRef(false);
+  const browserBackHandlerRef = useRef<() => boolean>(() => false);
+  const [dialogHistoryRevision, setDialogHistoryRevision] = useState(0);
 
   useEffect(() => {
     if (!timetableDialogOpen) return;
 
     return lockPageScroll(document);
+  }, [timetableDialogOpen]);
+
+  useEffect(() => {
+    dialogOpenRef.current = timetableDialogOpen;
+  }, [timetableDialogOpen]);
+
+  useEffect(() => {
+    if (!timetableDialogOpen) {
+      const shouldRemoveHistoryEntry =
+        dialogHistoryActiveRef.current && window.history.state?.tsugiDialog;
+      dialogHistoryActiveRef.current = false;
+      if (shouldRemoveHistoryEntry) {
+        ignoreDialogPopStateRef.current = true;
+        window.history.back();
+      }
+      return;
+    }
+    if (dialogHistoryActiveRef.current) return;
+    window.history.pushState(
+      {
+        ...(window.history.state && typeof window.history.state === "object"
+          ? window.history.state
+          : {}),
+        tsugiDialog: true,
+      },
+      "",
+      window.location.href,
+    );
+    dialogHistoryActiveRef.current = true;
+  }, [dialogHistoryRevision, timetableDialogOpen]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (ignoreDialogPopStateRef.current) {
+        ignoreDialogPopStateRef.current = false;
+        return;
+      }
+      if (!dialogOpenRef.current) return;
+      dialogHistoryActiveRef.current = false;
+      browserBackHandlerRef.current();
+      setDialogHistoryRevision((revision) => revision + 1);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (!timetableDialogOpen) return;
+
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      browserBackHandlerRef.current();
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
   }, [timetableDialogOpen]);
 
   useEffect(() => {
@@ -1295,6 +1388,9 @@ function App() {
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
     setTaskDetail(null);
+    taskDetailEditReturnRef.current = null;
+    taskHistoryEditReturnRef.current = null;
+    setNoteDetail(null);
     setTaskHistoryDialog(null);
     setNoteHistoryDialog(null);
     setTimetableLayerDialog(null);
@@ -1324,6 +1420,9 @@ function App() {
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     setNoteEditorForm(null);
+    taskDetailEditReturnRef.current = null;
+    taskHistoryEditReturnRef.current = null;
+    setNoteDetail(null);
     setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
@@ -1360,9 +1459,20 @@ function App() {
     setTaskEditorForm(form);
   }
 
-  function openNoteEditorForm(form: NoteEditorForm) {
-    editorInitialFormsRef.current.note = form;
-    setNoteEditorForm(form);
+  function openNoteEditorForm(
+    form: Omit<NoteEditorForm, "detailParent" | "removalPlanned"> & {
+      detailParent?: NoteDetailParent | null;
+      removalPlanned?: boolean;
+    },
+  ) {
+    const nextForm: NoteEditorForm = {
+      ...form,
+      removalPlanned: form.removalPlanned ??
+        form.editingDraft?.changeKind === "remove",
+      detailParent: form.detailParent ?? null,
+    };
+    editorInitialFormsRef.current.note = nextForm;
+    setNoteEditorForm(nextForm);
   }
 
   function clearEditorInitialForms() {
@@ -1417,11 +1527,36 @@ function App() {
     returnToChangeContentIfNeeded();
   }
 
+  function restoreNoteDetailParent(parent: NoteDetailParent) {
+    if (parent.type === "task") {
+      setTaskDetail(parent.task);
+      const taskEditReturn = taskDetailEditReturnRef.current;
+      if (taskEditReturn) {
+        taskDetailEditReturnRef.current = null;
+        setTaskEditorForm(taskEditReturn.form);
+        editorInitialFormsRef.current.task = taskEditReturn.initialForm;
+      }
+    } else if (parent.type === "timetable") {
+      setTimetableLayerDialog(parent.dialog);
+    }
+  }
+
+  function closeNoteDetailFlow() {
+    const parent = noteDetail?.parent;
+    setNoteDetail(null);
+    if (parent) restoreNoteDetailParent(parent);
+  }
+
   function closeNoteEditorFlow() {
+    const detailParent = noteEditorForm?.detailParent;
     setNoteEditorForm(null);
     editorInitialFormsRef.current.note = null;
     setLessonNameListOpen(false);
     setActiveLessonNameOption(-1);
+    if (detailParent) {
+      restoreNoteDetailParent(detailParent);
+      return;
+    }
     returnToChangeContentIfNeeded();
   }
 
@@ -1548,7 +1683,7 @@ function App() {
     if (item.kind === "timetable") {
       const replacement = item.replacement ?? item.serverReplacement;
       const value = item.changeKind === "remove"
-        ? "削除予定"
+        ? "変更後: なし"
         : replacement
           ? replacementLabel(replacement)
           : "変更内容";
@@ -1581,7 +1716,7 @@ function App() {
                 <span>{value}</span>
               )}
             </span>
-            <span className="change-content-status">
+            <span className="change-content-status sr-only">
               {changeContentStatus(item.changeKind, item.conflicted)}
             </span>
             <span aria-hidden="true">›</span>
@@ -1764,8 +1899,10 @@ function App() {
       dueDate: initial.dueDate,
       targetScopeType: initial.targetScopeType,
       relatedLessonInput: "",
+      noteBodies: [],
       editingTask: null,
       editingDraft: null,
+      removalPlanned: false,
     });
   }
 
@@ -1845,16 +1982,66 @@ function App() {
       : null;
   }
 
-  function openNoteUpdateEditor(note: DailyPlanNoteForCache) {
-    openNoteEditorForm({
-      body: note.body,
-      schoolDate: noteSchoolDate(note),
-      periodNumber: notePeriodNumber(note),
-      targetScopeType: note.targetScopeType,
-      editingNote: note,
-      editingDraft: null,
-      relatedTask: null,
-    });
+  function noteRelatedContextLabel(
+    note: DailyPlanNoteForCache,
+    parent: NoteDetailParent,
+  ) {
+    const context = note.relatedContext;
+    if (!context) return "なし";
+    if (context.type === "school-date") {
+      return formatUiSchoolDate(context.schoolDate, {
+        referenceSchoolDate: selectedSchoolDate,
+      });
+    }
+    if (context.type === "daily-lesson") {
+      return `${formatUiSchoolDate(context.schoolDate, {
+        referenceSchoolDate: selectedSchoolDate,
+      })}・${context.periodNumber}限`;
+    }
+    if (parent.type === "task") {
+      return `タスク: ${parent.task.task.title}`;
+    }
+    return "タスク内";
+  }
+
+  function openNoteDetail(
+    note: DailyPlanNoteForCache,
+    parent: NoteDetailParent,
+    draft?: NoteDraft,
+  ) {
+    if (parent.type === "task") {
+      if (taskEditorForm && taskDetail) {
+        taskDetailEditReturnRef.current = {
+          task: taskDetail,
+          form: taskEditorForm,
+          initialForm: editorInitialFormsRef.current.task,
+        };
+        setTaskEditorForm(null);
+        editorInitialFormsRef.current.task = null;
+      }
+      setTaskDetail(null);
+    }
+    if (parent.type === "timetable") setTimetableLayerDialog(null);
+    if (timetableEditor.editing) {
+      openNoteEditorForm({
+        body: draft?.body ?? note.body,
+        schoolDate: noteSchoolDate(note),
+        periodNumber: notePeriodNumber(note),
+        targetScopeType: note.targetScopeType,
+        editingNote: note,
+        editingDraft: draft ?? null,
+        relatedTask: parent.type === "task"
+          ? {
+              taskId: parent.task.task.taskId,
+              title: parent.task.task.title,
+              targetScopeType: parent.task.task.targetScopeType,
+            }
+          : null,
+        detailParent: parent,
+      });
+      return;
+    }
+    setNoteDetail({ note, parent });
   }
 
   function openNoteDraftEditor(draft: NoteDraft) {
@@ -1873,7 +2060,21 @@ function App() {
     task: { taskId: string; title: string; targetScopeType: TargetScopeType },
     note?: DailyPlanNoteForCache,
     draft?: NoteDraft,
+    detailParent?: NoteDetailParent,
   ) {
+    if (
+      detailParent?.type === "task" &&
+      taskEditorForm &&
+      taskDetail
+    ) {
+      taskDetailEditReturnRef.current = {
+        task: taskDetail,
+        form: taskEditorForm,
+        initialForm: editorInitialFormsRef.current.task,
+      };
+      setTaskEditorForm(null);
+      editorInitialFormsRef.current.task = null;
+    }
     if (taskDetail?.task.taskId === task.taskId) setTaskDetail(null);
     openNoteEditorForm({
       body: note?.body ?? draft?.body ?? "",
@@ -1883,38 +2084,51 @@ function App() {
       editingNote: note ?? null,
       editingDraft: draft ?? null,
       relatedTask: task,
+      detailParent,
     });
   }
 
-  function saveNoteRemoveDraft(note: DailyPlanNoteForCache) {
-    const result = timetableEditorClient.saveNoteRemoveDraft({
-      noteId: note.noteId,
-      latestChangeId: note.latestChangeId,
-      body: note.body,
-      schoolDate: noteSchoolDate(note),
-      periodNumber: notePeriodNumber(note),
-      targetScopeType: note.targetScopeType,
-      ...(note.relatedContext?.type === "task"
-        ? { relatedTaskItemId: note.relatedContext.taskId }
-        : {}),
-    });
-    if (result.status === "limit-reached") {
-      setTimetableEditorMessage("下書きは合計50件までです。");
-    }
-  }
-
-  function openNoteHistory(note: DailyPlanNoteForCache) {
+  function openNoteHistoryFrom(note: DailyPlanNoteForCache, fromDetail: boolean) {
     setNoteHistoryDialog({
       note,
       requestId: Date.now(),
       state: { status: "loading" },
+      fromDetail,
     });
   }
 
   function saveNoteDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!noteEditorForm || timetableEditor.submitting) return;
-    const result = noteEditorForm.editingDraft
+    const activeNote = noteEditorForm.editingNote;
+    const result = noteEditorForm.detailParent && activeNote
+      ? noteEditorForm.removalPlanned
+        ? timetableEditorClient.saveNoteRemoveDraft({
+            noteId: activeNote.noteId,
+            latestChangeId: activeNote.latestChangeId,
+            body: activeNote.body,
+            schoolDate: noteSchoolDate(activeNote),
+            periodNumber: notePeriodNumber(activeNote),
+            targetScopeType: activeNote.targetScopeType,
+            ...(activeNote.relatedContext?.type === "task"
+              ? { relatedTaskItemId: activeNote.relatedContext.taskId }
+              : {}),
+          })
+        : timetableEditorClient.saveNoteUpdateDraft(
+            {
+              noteId: activeNote.noteId,
+              latestChangeId: activeNote.latestChangeId,
+              body: activeNote.body,
+              schoolDate: noteSchoolDate(activeNote),
+              periodNumber: notePeriodNumber(activeNote),
+              targetScopeType: activeNote.targetScopeType,
+              ...(activeNote.relatedContext?.type === "task"
+                ? { relatedTaskItemId: activeNote.relatedContext.taskId }
+                : {}),
+            },
+            noteEditorForm.body,
+          )
+      : noteEditorForm.editingDraft
       ? timetableEditorClient.updateNoteDraft(
           noteEditorForm.editingDraft.sourceId,
           noteEditorForm,
@@ -1970,10 +2184,17 @@ function App() {
       targetScopeType: task.targetScopeType,
       relatedLessonInput: projectedTask?.relatedLessonName ??
         task.relatedLessonName?.lessonName ?? "",
+      noteBodies: timetableEditor.noteDrafts
+        .filter(
+          (note) =>
+            note.changeKind === "add" &&
+            note.relatedTaskItemId === task.taskId,
+        )
+        .map((note) => note.body),
       editingTask: task,
       editingDraft: null,
+      removalPlanned: false,
     });
-    setTaskDetail(null);
   }
 
   function openTaskDraftEditor(draft: TaskDraft) {
@@ -1986,8 +2207,16 @@ function App() {
       dueDate: draft.dueDate,
       targetScopeType: draft.targetScopeType,
       relatedLessonInput: draft.relatedLessonName?.lessonName ?? "",
+      noteBodies: timetableEditor.noteDrafts
+        .filter(
+          (note) =>
+            note.changeKind === "add" &&
+            note.relatedTaskItemId === draft.sourceId,
+        )
+        .map((note) => note.body),
       editingTask: null,
       editingDraft: draft,
+      removalPlanned: false,
     });
     setTaskDetail(null);
   }
@@ -1995,6 +2224,21 @@ function App() {
   function saveTaskDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskEditorForm || timetableEditor.submitting) return;
+    const wasTaskDetailOpen = taskDetail !== null;
+    if (taskEditorForm.removalPlanned && taskEditorForm.editingTask) {
+      const result = timetableEditorClient.saveTaskRemoveDraft(
+        taskEditorForm.editingTask,
+      );
+      if (result.status === "limit-reached") {
+        setTimetableEditorMessage("下書きは合計50件までです。");
+        return;
+      }
+      if (result.status === "submission-in-progress") return;
+      closeTaskEditorFlow();
+      if (wasTaskDetailOpen) setTaskDetail(null);
+      setTimetableEditorMessage(null);
+      return;
+    }
     const lessonInput = taskEditorForm.relatedLessonInput.trim();
     const resolvedLesson = lessonInput
       ? createLessonNameComboboxClient({
@@ -2026,7 +2270,7 @@ function App() {
             ? { lessonName: lessonInput }
             : null;
     const result = taskEditorForm.editingDraft
-      ? timetableEditorClient.updateTaskDraft(
+      ? timetableEditorClient.updateTaskDraftWithNotes(
           taskEditorForm.editingDraft.sourceId,
           {
             title: taskEditorForm.title,
@@ -2034,23 +2278,25 @@ function App() {
             targetScopeType: taskEditorForm.targetScopeType,
             relatedLessonName,
           },
+          taskEditorForm.noteBodies,
         )
       : taskEditorForm.editingTask
-      ? timetableEditorClient.saveTaskUpdateDraft(
+      ? timetableEditorClient.saveTaskUpdateDraftWithNotes(
           taskEditorForm.editingTask,
           {
             title: taskEditorForm.title,
             dueDate: taskEditorForm.dueDate,
             relatedLessonName,
           },
+          taskEditorForm.noteBodies,
         )
-      : timetableEditorClient.saveTaskDraft({
+      : timetableEditorClient.saveTaskDraftWithNotes({
           title: taskEditorForm.title,
           dueDate: taskEditorForm.dueDate,
           targetScopeType: taskEditorForm.targetScopeType,
           relatedLessonName,
-        });
-    if (result.status === "invalid-task") {
+        }, taskEditorForm.noteBodies);
+    if (result.status === "invalid-task" || result.status === "invalid-note") {
       setTimetableEditorMessage(
         "タイトル、期限、関連する授業、変更適用範囲を確認してください。",
       );
@@ -2061,6 +2307,7 @@ function App() {
       return;
     }
     closeTaskEditorFlow();
+    if (wasTaskDetailOpen) setTaskDetail(null);
     setTimetableEditorMessage(null);
   }
 
@@ -2072,7 +2319,12 @@ function App() {
     },
     activeNotes: DailyPlanNoteForCache[],
     taskRemovalPlanned = false,
+    detailParent?: NoteDetailParent,
+    presentation: "daily-plan" | "parent" = detailParent
+      ? "parent"
+      : "daily-plan",
   ) {
+    const related = presentation === "daily-plan";
     const items = buildVisibleTaskNoteList(
       activeNotes,
       timetableEditor.noteDrafts,
@@ -2087,14 +2339,23 @@ function App() {
           draft: true,
           changeKind: note.changeKind,
           conflicted: note.conflicted,
-          onCancelDraft: () =>
-            timetableEditorClient.removeNoteDraft(note.sourceId),
-          onEdit: note.changeKind === "remove"
+          onCancelDraft: detailParent?.type === "task"
             ? undefined
-            : () => openTaskNoteEditor(task, undefined, note),
-          onOpenHistory: item.activeNote
-            ? () => openNoteHistory(item.activeNote!)
-          : undefined,
+            : () => timetableEditorClient.removeNoteDraft(note.sourceId),
+          onEdit: undefined,
+          onOpenHistory: undefined,
+          onOpenDetail: detailParent?.type === "task"
+            ? () => openTaskNoteEditor(
+                detailParent.task.task,
+                item.activeNote,
+                note,
+                detailParent,
+              )
+            : detailParent && item.activeNote
+              ? () => openNoteDetail(item.activeNote!, detailParent, note)
+              : undefined,
+          wholeCardDetailTarget: detailParent?.type === "task",
+          related,
         };
       }
       if (item.type === "cascade-removal") {
@@ -2105,20 +2366,22 @@ function App() {
           draft: true,
           changeKind: "remove" as const,
           removalReason: "task-cascade" as const,
-          onOpenHistory: () => openNoteHistory(note),
+          onOpenHistory: undefined,
+          related,
         };
       }
       const note = item.note;
       return {
         noteId: note.noteId,
         body: note.body,
-        onEdit: timetableEditor.editing
-          ? () => openTaskNoteEditor(task, note)
+        onEdit: undefined,
+        onRemove: undefined,
+        onOpenHistory: undefined,
+        onOpenDetail: detailParent
+          ? () => openNoteDetail(note, detailParent)
           : undefined,
-        onRemove: timetableEditor.editing
-          ? () => saveNoteRemoveDraft(note)
-          : undefined,
-        onOpenHistory: () => openNoteHistory(note),
+        wholeCardDetailTarget: detailParent?.type === "task",
+        related,
       };
     });
     return <TaskNoteList notes={items} />;
@@ -2131,6 +2394,7 @@ function App() {
     scopeContext: TargetScopeDisplayContext | undefined,
     targetScopeType?: TargetScopeType,
     className?: string,
+    detailParent?: NoteDetailParent,
   ) {
     const items = buildVisibleDailyLessonNoteList(
       activeNotes,
@@ -2150,12 +2414,13 @@ function App() {
           conflicted: note.conflicted,
           onCancelDraft: () =>
             timetableEditorClient.removeNoteDraft(note.sourceId),
-          onEdit: note.changeKind === "remove"
-            ? undefined
-            : () => openNoteDraftEditor(note),
-          onOpenHistory: item.activeNote
-            ? () => openNoteHistory(item.activeNote!)
+          onEdit: undefined,
+          onOpenHistory: undefined,
+          onOpenDetail: detailParent && item.activeNote
+            ? () => openNoteDetail(item.activeNote!, detailParent, note)
             : undefined,
+          wholeCardDetailTarget: detailParent?.type === "timetable",
+          related: !detailParent,
         };
       }
       const note = item.note;
@@ -2163,40 +2428,41 @@ function App() {
         noteId: note.noteId,
         body: note.body,
         targetScopeLabel: scopeLabel(note.targetScopeType, scopeContext),
-        onEdit: timetableEditor.editing
-          ? () => openNoteUpdateEditor(note)
+        onEdit: undefined,
+        onRemove: undefined,
+        onOpenHistory: undefined,
+        onOpenDetail: detailParent
+          ? () => openNoteDetail(note, detailParent)
           : undefined,
-        onRemove: timetableEditor.editing
-          ? () => saveNoteRemoveDraft(note)
-          : undefined,
-        onOpenHistory: () => openNoteHistory(note),
+        wholeCardDetailTarget: detailParent?.type === "timetable",
+        related: !detailParent,
       };
     });
     return <DailyLessonNoteList notes={items} className={className} />;
   }
 
-  function planTaskRemoval(task: DailyPlanTaskForCache) {
-    if (timetableEditor.submitting) return;
-    setTaskRemovalConfirmation(task);
-    setTaskDetail(null);
+  function setTaskRemovalPlanned(removalPlanned: boolean) {
+    const form = taskEditorForm;
+    if (!form?.editingTask || timetableEditor.submitting) return;
+    setTaskEditorForm((current) =>
+      current ? { ...current, removalPlanned } : current,
+    );
+    if (removalPlanned && (form.editingTask.notes?.length ?? 0) > 0) {
+      setTaskRemovalConfirmation(form.editingTask);
+    } else if (!removalPlanned) {
+      setTaskRemovalConfirmation(null);
+    }
   }
 
   function cancelTaskRemovalConfirmation() {
-    const task = taskRemovalConfirmation;
     setTaskRemovalConfirmation(null);
-    if (task) setTaskDetail({ type: "active", task });
+    setTaskEditorForm((current) =>
+      current ? { ...current, removalPlanned: false } : current,
+    );
   }
 
   function confirmTaskRemoval() {
     if (!taskRemovalConfirmation) return;
-    const result = timetableEditorClient.saveTaskRemoveDraft(
-      editableTask(taskRemovalConfirmation),
-    );
-    if (result.status === "limit-reached") {
-      setTimetableEditorMessage("下書きは合計50件までです。");
-      return;
-    }
-    if (result.status === "submission-in-progress") return;
     setTaskRemovalConfirmation(null);
   }
 
@@ -2230,7 +2496,8 @@ function App() {
             periodNumber: existing.periodNumber,
             sourceId: existing.sourceId,
             includeTimetableChange: true,
-            noteBody: "",
+            noteBodies: [""],
+            removalPlanned: existing.changeKind === "remove",
             replacement:
               existing.changeKind === "remove"
                 ? existing.serverReplacement
@@ -2243,7 +2510,8 @@ function App() {
               changeDate: timetableLayerDialog.schoolDate,
               periodNumber: timetableLayerDialog.periodNumber,
               includeTimetableChange: true,
-              noteBody: "",
+              noteBodies: [""],
+              removalPlanned: false,
               replacement: serverLayer.replacement,
             }
           : {
@@ -2251,7 +2519,8 @@ function App() {
               changeDate: timetableLayerDialog.schoolDate,
               periodNumber: timetableLayerDialog.periodNumber,
               includeTimetableChange: false,
-              noteBody: "",
+              noteBodies: [""],
+              removalPlanned: false,
               replacement: { type: "lesson_name", lessonName: "" },
             });
     editorInitialFormsRef.current.timetable = form;
@@ -2273,12 +2542,35 @@ function App() {
   }
 
   function openTaskHistory(task: DailyPlanTaskForCache) {
+    if (taskEditorForm && taskDetail) {
+      taskHistoryEditReturnRef.current = {
+        task: taskDetail,
+        form: taskEditorForm,
+        initialForm: editorInitialFormsRef.current.task,
+      };
+      setTaskEditorForm(null);
+      editorInitialFormsRef.current.task = null;
+    } else {
+      taskHistoryEditReturnRef.current = null;
+    }
     setTaskDetail(null);
     setTaskHistoryDialog({
       task,
       requestId: 0,
       state: { status: "loading" },
     });
+  }
+
+  function restoreTaskHistoryEdit() {
+    const taskEditReturn = taskHistoryEditReturnRef.current;
+    taskHistoryEditReturnRef.current = null;
+    if (taskEditReturn) {
+      setTaskDetail(taskEditReturn.task);
+      setTaskEditorForm(taskEditReturn.form);
+      editorInitialFormsRef.current.task = taskEditReturn.initialForm;
+      return true;
+    }
+    return false;
   }
 
   async function openDirectChangeDetail(sharedInformationChangeId: string) {
@@ -2331,29 +2623,6 @@ function App() {
     }
   }
 
-  function planTimetableRemoval() {
-    if (!timetableEditorForm || timetableEditor.submitting) return;
-    const result = timetableEditorClient.removeDesiredState({
-      targetScopeType: timetableEditorForm.targetScopeType,
-      changeDate: timetableEditorForm.changeDate,
-      periodNumber: timetableEditorForm.periodNumber,
-    });
-    if (result.status === "not-active") {
-      setTimetableEditorMessage(
-        NO_ACTIVE_TIMETABLE_CHANGE_MESSAGE,
-      );
-      return;
-    }
-    if (result.status === "limit-reached") {
-      setTimetableEditorMessage(
-        "下書きは50件までです。既存の下書きを変更または取り消してください。",
-      );
-      return;
-    }
-    closeTimetableFormAfterDraftSave();
-    setTimetableEditorMessage(null);
-  }
-
   function closeTimetableDialogFlow() {
     setTimetableEditorForm(null);
     editorInitialFormsRef.current.timetable = null;
@@ -2386,6 +2655,105 @@ function App() {
     if (destination === "close") closeTimetableDialogFlow();
     else closeTimetableEditorBack();
   }
+
+  function handleBrowserBack() {
+    if (pendingEditorDismissal) return true;
+
+    if (noteHistoryDialog) {
+      setNoteHistoryDialog(null);
+      return noteHistoryDialog.fromDetail;
+    }
+
+    if (noteEditorForm) {
+      const returnsToChangeContent = changeContentReturnRef.current;
+      if (requestEditorDismissal("note", "back")) return true;
+      closeNoteEditorFlow();
+      return Boolean(noteEditorForm.detailParent) || returnsToChangeContent;
+    }
+
+    if (taskEditorForm) {
+      const returnsToChangeContent = changeContentReturnRef.current;
+      const returnsToTaskDetail = Boolean(taskDetail);
+      if (requestEditorDismissal("task", "back")) return true;
+      closeTaskEditorFlow();
+      return returnsToChangeContent || returnsToTaskDetail;
+    }
+
+    if (timetableEditorForm) {
+      const hadParentDialog = Boolean(timetableLayerDialog || timetableHistoryDialog);
+      if (requestEditorDismissal("timetable", "back")) return true;
+      closeTimetableEditorBack();
+      return hadParentDialog || changeContentReturnRef.current;
+    }
+
+    if (taskRemovalConfirmation) {
+      setTaskRemovalConfirmation(null);
+      return Boolean(taskDetail);
+    }
+
+    if (taskHistoryDialog) {
+      if (restoreTaskHistoryEdit()) {
+        setTaskHistoryDialog(null);
+        return true;
+      }
+      setTaskDetail({ type: "active", task: taskHistoryDialog.task });
+      setTaskHistoryDialog(null);
+      return true;
+    }
+
+    if (timetableHistoryDialog) {
+      if (timetableHistoryDialog.detail) {
+        setTimetableHistoryDialog((current) =>
+          current ? { ...current, detail: null } : current,
+        );
+        return true;
+      }
+      setTimetableHistoryDialog(null);
+      return Boolean(timetableLayerDialog);
+    }
+
+    if (timetableLayerDialog) {
+      const returnsToChangeContent = changeContentReturnRef.current;
+      closeTimetableDialogFlow();
+      return returnsToChangeContent;
+    }
+
+    if (taskDetail) {
+      setTaskDetail(null);
+      return false;
+    }
+
+    if (noteDetail) {
+      const hasParent = noteDetail.parent.type !== "daily-plan";
+      closeNoteDetailFlow();
+      return hasParent;
+    }
+
+    if (referencePickerOpen) {
+      setReferencePickerOpen(false);
+      return false;
+    }
+
+    if (directChangeReviewOpen) {
+      setDirectChangeReviewOpen(false);
+      setChangeContentOpen(true);
+      return true;
+    }
+
+    if (changeContentOpen) {
+      setChangeContentOpen(false);
+      return false;
+    }
+
+    if (logoutConfirmationOpen) {
+      setLogoutConfirmationOpen(false);
+      return false;
+    }
+
+    return false;
+  }
+
+  browserBackHandlerRef.current = handleBrowserBack;
 
   function discardUnsavedEditorInput() {
     const pending = pendingEditorDismissal;
@@ -2435,6 +2803,7 @@ function App() {
     if (!timetableEditorForm || timetableEditor.submitting) return;
     let replacement = timetableEditorForm.replacement;
     if (timetableEditorForm.includeTimetableChange &&
+      !timetableEditorForm.removalPlanned &&
       replacement.type === "lesson_name") {
       const normalizedReplacement = normalizeDirectLessonReplacement(
         replacement.lessonName,
@@ -2467,6 +2836,7 @@ function App() {
     }
     if (
       timetableEditorForm.includeTimetableChange &&
+      !timetableEditorForm.removalPlanned &&
       replacement.type === "floating_lesson_reference" &&
       !replacement.floatingLessonReferenceLabelId
     ) {
@@ -2480,9 +2850,10 @@ function App() {
       schoolDate: timetableEditorForm.changeDate,
       periodNumber: timetableEditorForm.periodNumber,
       replacement: timetableEditorForm.includeTimetableChange
-        ? replacement
+        ? timetableEditorForm.removalPlanned ? null : replacement
         : null,
-      noteBody: timetableEditorForm.noteBody,
+      noteBodies: timetableEditorForm.noteBodies,
+      removeTimetableChange: timetableEditorForm.removalPlanned,
     });
     if (result.status === "empty") {
       setTimetableEditorMessage(
@@ -2492,6 +2863,10 @@ function App() {
     }
     if (result.status === "invalid-note") {
       setTimetableEditorMessage("ノートの本文を確認してください。");
+      return;
+    }
+    if (result.status === "not-active") {
+      setTimetableEditorMessage(NO_ACTIVE_TIMETABLE_CHANGE_MESSAGE);
       return;
     }
     if (result.status === "limit-reached") {
@@ -2781,6 +3156,15 @@ function App() {
       referenceBasePeriods !== null;
     const referencePlanError =
       referencePlanMatchesSelection && referenceDailyPlan?.status === "error";
+    const timetableChangeCanBeRemoved = Boolean(
+      timetableEditorForm?.removalPlanned ||
+      (timetableLayerDialog?.state.status === "ready" &&
+        timetableLayerDialog.state.layers.some(
+          (layer) =>
+            layer.targetScopeType === timetableEditorForm?.targetScopeType &&
+            layer.state === "active",
+        )),
+    );
 
     return (
       <main className="app-page daily-plan-page">
@@ -3053,14 +3437,28 @@ function App() {
                     {visibleTasks.map((item) => {
                       const task = item.task;
                       return (
-                      <article
-                        className={`task-entry ${
-                          item.type === "draft" ? "task-draft" : ""
-                        }`}
-                        key={item.type === "draft"
-                          ? item.draft.sourceId
-                          : task.taskId}
-                      >
+                        <article
+                          className={`task-entry ${
+                            item.type === "draft" ? "task-draft" : ""
+                          }${item.type === "draft" && item.draft.changeKind === "remove" ? " task-removal-cascade-surface" : ""}`}
+                          {...(item.type === "draft" && item.draft.changeKind === "remove"
+                            ? {
+                                role: "group",
+                                "aria-label": "タスクと関連ノートはタスクの削除に伴い削除予定です",
+                              }
+                            : {})}
+                          key={item.type === "draft"
+                            ? item.draft.sourceId
+                            : task.taskId}
+                        >
+                          {item.type === "draft" && item.draft.changeKind === "remove" ? (
+                            <>
+                              <RemovalGlyph label="削除対象のタスクと関連ノート" />
+                              <span className="task-removal-cascade-assistive sr-only">
+                                タスクと関連ノートはタスクの削除に伴い削除予定です
+                              </span>
+                            </>
+                          ) : null}
                         <button
                           className="task-item"
                           type="button"
@@ -3157,11 +3555,15 @@ function App() {
                           onCancelDraft={() =>
                             timetableEditorClient.removeNoteDraft(note.sourceId)
                           }
-                          onEdit={note.changeKind === "remove"
+                          onEdit={item.activeNote || note.changeKind === "remove"
                             ? undefined
                             : () => openNoteDraftEditor(note)}
-                          onOpenHistory={item.activeNote
-                            ? () => openNoteHistory(item.activeNote!)
+                          onOpenDetail={item.activeNote
+                            ? () => openNoteDetail(
+                                item.activeNote!,
+                                { type: "daily-plan" },
+                                note,
+                              )
                             : undefined}
                         />
                           );
@@ -3176,13 +3578,8 @@ function App() {
                               note.targetScopeType,
                               targetScopeContext,
                             )}
-                            onEdit={timetableEditor.editing
-                              ? () => openNoteUpdateEditor(note)
-                              : undefined}
-                            onRemove={timetableEditor.editing
-                              ? () => saveNoteRemoveDraft(note)
-                              : undefined}
-                            onOpenHistory={() => openNoteHistory(note)}
+                            onOpenDetail={() =>
+                              openNoteDetail(note, { type: "daily-plan" })}
                           />
                         );
                       });
@@ -3303,34 +3700,36 @@ function App() {
                     ×
                   </button>
                 </header>
-                {changeContentItems.length === 0 ? (
-                  <p className="change-content-empty">
-                    変更内容はありません。
-                  </p>
-                ) : (
-                  <ol className="change-content-list" aria-label="変更内容一覧">
-                    {changeContentItems.map(changeContentItemView)}
-                  </ol>
-                )}
-                {timetableEditor.conflictCount > 0 ? (
-                  <p className="change-content-conflict-notice" role="alert">
-                    ほかの変更と重なっている下書きがあります。確認してから編集し直してください。
-                  </p>
-                ) : null}
-                <footer className="editor-dialog-actions change-content-actions">
-                  <button
-                    className="button-secondary"
-                    type="button"
-                    disabled={
-                      timetableEditor.submitting ||
-                      timetableEditor.draftCount === 0 ||
-                      timetableEditor.conflictCount > 0
-                    }
-                    onClick={openDirectChangeReview}
-                  >
-                    反映を確認
-                  </button>
-                </footer>
+                <DialogBody>
+                  {changeContentItems.length === 0 ? (
+                    <p className="change-content-empty">
+                      変更内容はありません。
+                    </p>
+                  ) : (
+                    <ol className="change-content-list" aria-label="変更内容一覧">
+                      {changeContentItems.map(changeContentItemView)}
+                    </ol>
+                  )}
+                  {timetableEditor.conflictCount > 0 ? (
+                    <p className="change-content-conflict-notice" role="alert">
+                      ほかの変更と重なっている下書きがあります。確認してから編集し直してください。
+                    </p>
+                  ) : null}
+                  <footer className="editor-dialog-actions change-content-actions">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      disabled={
+                        timetableEditor.submitting ||
+                        timetableEditor.draftCount === 0 ||
+                        timetableEditor.conflictCount > 0
+                      }
+                      onClick={openDirectChangeReview}
+                    >
+                      反映を確認
+                    </button>
+                  </footer>
+                </DialogBody>
               </section>
             </div>
           ) : null}
@@ -3383,88 +3782,137 @@ function App() {
                     ×
                   </button>
                 </header>
-                {referenceScopeOptions?.status === "loading" ||
-                referenceScopeOptions === null ? (
-                  <p className="reference-scope-dialog-status" role="status">
-                    選べる範囲を読み込んでいます…
-                  </p>
-                ) : referenceScopeOptions.status === "error" ? (
-                  <div className="reference-scope-dialog-status" role="alert">
-                    <p>選べる範囲を読み込めませんでした。</p>
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={() => void loadReferenceScopeOptions()}
-                    >
-                      再読み込み
-                    </button>
-                  </div>
-                ) : (
-                  <form onSubmit={selectReferenceScope}>
-                    <label>
-                      <span>参照する変更適用範囲</span>
-                      <select
-                        value={referencePickerScopeKey}
-                        onChange={(event) =>
-                          setReferencePickerScopeKey(event.target.value)}
-                        disabled={referenceScopeOptions.options.length === 0}
-                      >
-                        {referenceScopeOptions.options.map((option) => (
-                          <option
-                            key={referenceScopeKey(option)}
-                            value={referenceScopeKey(option)}
-                          >
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {referenceScopeOptions.options.length === 0 ? (
-                      <p className="empty-state">参照できる範囲はありません。</p>
-                    ) : null}
-                    <div className="editor-dialog-actions">
+                <DialogBody>
+                  {referenceScopeOptions?.status === "loading" ||
+                  referenceScopeOptions === null ? (
+                    <p className="reference-scope-dialog-status" role="status">
+                      選べる範囲を読み込んでいます…
+                    </p>
+                  ) : referenceScopeOptions.status === "error" ? (
+                    <div className="reference-scope-dialog-status" role="alert">
+                      <p>選べる範囲を読み込めませんでした。</p>
                       <button
-                        className="button-primary"
-                        type="submit"
-                        disabled={referenceScopeOptions.options.length === 0}
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => void loadReferenceScopeOptions()}
                       >
-                        参照する
+                        再読み込み
                       </button>
                     </div>
-                  </form>
-                )}
+                  ) : (
+                    <form onSubmit={selectReferenceScope}>
+                      <label>
+                        <span>参照する変更適用範囲</span>
+                        <select
+                          value={referencePickerScopeKey}
+                          onChange={(event) =>
+                            setReferencePickerScopeKey(event.target.value)}
+                          disabled={referenceScopeOptions.options.length === 0}
+                        >
+                          {referenceScopeOptions.options.map((option) => (
+                            <option
+                              key={referenceScopeKey(option)}
+                              value={referenceScopeKey(option)}
+                            >
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {referenceScopeOptions.options.length === 0 ? (
+                        <p className="empty-state">参照できる範囲はありません。</p>
+                      ) : null}
+                      <div className="editor-dialog-actions">
+                        <button
+                          className="button-primary"
+                          type="submit"
+                          disabled={referenceScopeOptions.options.length === 0}
+                        >
+                          参照する
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </DialogBody>
               </section>
             </div>
           ) : null}
 
-          {noteEditorForm ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className={`timetable-editor-dialog note-editor-dialog${
-                  noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
-                }`}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="note-editor-title"
-              >
-                <header className="editor-dialog-header">
-                  <h2 id="note-editor-title">
-                    {noteEditorForm.relatedTask
+          {noteEditorForm?.detailParent && noteEditorForm.editingNote ? (
+            <NoteDetailDialog
+              mode="edit"
+              body={noteEditorForm.body}
+              targetScopeLabel={scopeLabel(
+                noteEditorForm.editingNote.targetScopeType,
+                targetScopeContext,
+              )}
+              relatedContextLabel={noteRelatedContextLabel(
+                noteEditorForm.editingNote,
+                noteEditorForm.detailParent,
+              )}
+              draftLifecycle={noteEditorForm.editingDraft
+                ? {
+                    kind: noteEditorForm.editingDraft.changeKind,
+                    conflicted: Boolean(noteEditorForm.editingDraft.conflicted),
+                  }
+                : undefined}
+              removalPlanned={noteEditorForm.removalPlanned}
+              saveLabel={noteEditorForm.editingDraft?.changeKind === "add"
+                ? editorActionLabel("add")
+                : editorActionLabel("update")}
+              onBack={requestNoteEditorClose}
+              onBodyChange={(body) => setNoteEditorForm((current) =>
+                current ? { ...current, body } : current)}
+              onRemovalChange={(removalPlanned) =>
+                setNoteEditorForm((current) =>
+                  current ? { ...current, removalPlanned } : current)}
+              onOpenHistory={() =>
+                openNoteHistoryFrom(noteEditorForm.editingNote!, true)}
+              onSave={saveNoteDraft}
+            />
+          ) : noteEditorForm ? (
+            <DialogSurface
+              className={`editor-dialog-form-surface note-editor-dialog${
+                noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
+              }`}
+              labelledBy="note-editor-title"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                requestNoteEditorClose();
+              }}
+            >
+              <form className="editor-dialog-form" onSubmit={saveNoteDraft}>
+                <DialogHeader
+                  title={
+                    noteEditorForm.relatedTask
                       ? "ノートを書く"
                       : noteEditorForm.editingNote || noteEditorForm.editingDraft
-                      ? "ノートを編集"
-                      : "ノートを追加"}
-                  </h2>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    onClick={requestNoteEditorClose}
-                  >
-                    ×
-                  </button>
-                </header>
-                <form onSubmit={saveNoteDraft}>
+                        ? "ノートを編集"
+                        : "ノートを追加"
+                  }
+                  titleId="note-editor-title"
+                  onBack={requestNoteEditorClose}
+                  actionLabel={noteEditorForm.editingDraft?.changeKind === "remove"
+                    ? "削除予定を取り消す"
+                    : editorActionLabel(
+                        noteEditorForm.editingNote || noteEditorForm.editingDraft
+                          ? "update"
+                          : "add",
+                      )}
+                  actionType={noteEditorForm.editingDraft?.changeKind === "remove"
+                    ? "button"
+                    : "submit"}
+                  onAction={noteEditorForm.editingDraft?.changeKind === "remove"
+                    ? () => {
+                        timetableEditorClient.removeNoteDraft(
+                          noteEditorForm.editingDraft!.sourceId,
+                        );
+                        closeNoteEditorFlow();
+                      }
+                    : undefined}
+                />
+                <div className="editor-dialog-body">
                   <label>
                     <span>本文</span>
                     <textarea
@@ -3639,66 +4087,35 @@ function App() {
                       </label>
                     </ImmutableFieldNotice>
                   )}
-                  <div className="editor-dialog-actions">
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={requestNoteEditorClose}
-                    >
-                      キャンセル
-                    </button>
-                    {noteEditorForm.editingDraft?.changeKind === "remove" ? (
-                      <button
-                        className="button-secondary"
-                        type="button"
-                        onClick={() => {
-                          timetableEditorClient.removeNoteDraft(
-                            noteEditorForm.editingDraft!.sourceId,
-                          );
-                          closeNoteEditorFlow();
-                        }}
-                      >
-                        削除予定を取り消す
-                      </button>
-                    ) : (
-                      <button className="button-primary" type="submit">
-                        {editorActionLabel(
-                          noteEditorForm.editingNote || noteEditorForm.editingDraft
-                            ? "update"
-                            : "add",
-                        )}
-                      </button>
-                    )}
-                  </div>
-                </form>
-              </section>
-            </div>
+                </div>
+              </form>
+            </DialogSurface>
           ) : null}
 
-          {taskEditorForm ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className="timetable-editor-dialog task-editor-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="task-editor-title"
-              >
-                <header className="editor-dialog-header">
-                  <h2 id="task-editor-title">
-                    {taskEditorForm.editingTask
-                      ? "タスクを編集"
-                      : "タスクを追加"}
-                  </h2>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    onClick={requestTaskEditorClose}
-                  >
-                    ×
-                  </button>
-                </header>
-                <form onSubmit={saveTaskDraft}>
+          {taskEditorForm && !taskDetail ? (
+            <DialogSurface
+              className="editor-dialog-form-surface task-editor-dialog"
+              labelledBy="task-editor-title"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                requestTaskEditorClose();
+              }}
+            >
+              <form className="editor-dialog-form" onSubmit={saveTaskDraft}>
+                <DialogHeader
+                  title={taskEditorForm.editingTask ? "タスクを編集" : "タスクを追加"}
+                  titleId="task-editor-title"
+                  onBack={requestTaskEditorClose}
+                  actionLabel={editorActionLabel(
+                    taskEditorForm.removalPlanned
+                      ? "remove"
+                      : taskEditorForm.editingTask || taskEditorForm.editingDraft
+                        ? "update"
+                        : "add",
+                  )}
+                />
+                <div className="editor-dialog-body">
                   <label>
                     <span>タイトル</span>
                     <input
@@ -3706,6 +4123,7 @@ function App() {
                       required
                       maxLength={120}
                       value={taskEditorForm.title}
+                      disabled={taskEditorForm.removalPlanned}
                       onChange={(event) =>
                         setTaskEditorForm((current) =>
                           current
@@ -3724,6 +4142,7 @@ function App() {
                         min={schoolYearRange?.startsOn}
                         max={schoolYearRange?.endsOn}
                         value={taskEditorForm.dueDate ?? ""}
+                        disabled={taskEditorForm.removalPlanned}
                         onChange={(event) =>
                           setTaskEditorForm((current) =>
                             current
@@ -3740,7 +4159,7 @@ function App() {
                         type="button"
                         aria-label="期限をクリア"
                         title="期限をクリア"
-                        disabled={!taskEditorForm.dueDate}
+                        disabled={!taskEditorForm.dueDate || taskEditorForm.removalPlanned}
                         onClick={() =>
                           setTaskEditorForm((current) =>
                             current ? { ...current, dueDate: null } : current,
@@ -3781,6 +4200,7 @@ function App() {
                           : undefined
                       }
                       value={taskEditorForm.relatedLessonInput}
+                      disabled={taskEditorForm.removalPlanned}
                       onFocus={() => setTaskLessonNameListOpen(true)}
                       onChange={(event) => {
                         setTaskLessonNameListOpen(true);
@@ -3826,6 +4246,7 @@ function App() {
                           taskLessonNameListOpen
                         ) {
                           event.preventDefault();
+                          event.stopPropagation();
                           setTaskLessonNameListOpen(false);
                           setActiveTaskLessonNameOption(-1);
                         }
@@ -3873,6 +4294,51 @@ function App() {
                     <p className="field-warning" role="status">
                       候補にない授業名として保存されます。
                     </p>
+                  ) : null}
+                  {taskEditorForm.editingTask ? (
+                    taskNoteList(
+                      taskEditorForm.editingTask,
+                      taskEditorForm.editingTask.notes ?? [],
+                      taskEditorForm.removalPlanned,
+                      undefined,
+                      "parent",
+                    )
+                  ) : null}
+                  <TaskNoteFields
+                    noteBodies={taskEditorForm.noteBodies}
+                    disabled={taskEditorForm.removalPlanned}
+                    onBodyChange={(index, body) =>
+                      setTaskEditorForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              noteBodies: current.noteBodies.map(
+                                (value, noteIndex) =>
+                                  noteIndex === index ? body : value,
+                              ),
+                            }
+                          : current,
+                      )}
+                    onAddNote={() =>
+                      setTaskEditorForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              noteBodies: [...current.noteBodies, ""],
+                            }
+                          : current,
+                      )}
+                  />
+                  {taskEditorForm.editingTask ? (
+                    <label className="task-removal-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={taskEditorForm.removalPlanned}
+                        onChange={(event) =>
+                          setTaskRemovalPlanned(event.target.checked)}
+                      />
+                      <span>削除予定にする</span>
+                    </label>
                   ) : null}
                   {taskEditorForm.editingTask ? (
                     <ImmutableFieldNotice
@@ -3926,25 +4392,32 @@ function App() {
                       </select>
                     </label>
                   )}
-                  <div className="editor-dialog-actions">
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={requestTaskEditorClose}
-                    >
-                      キャンセル
-                    </button>
-                    <button className="button-primary" type="submit">
-                      {editorActionLabel(
-                        taskEditorForm.editingTask || taskEditorForm.editingDraft
-                          ? "update"
-                          : "add",
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </section>
-            </div>
+                </div>
+              </form>
+            </DialogSurface>
+          ) : null}
+
+          {noteDetail ? (
+            <NoteDetailDialog
+              mode="view"
+              body={noteDetail.note.body}
+              targetScopeLabel={scopeLabel(
+                noteDetail.note.targetScopeType,
+                targetScopeContext,
+              )}
+              relatedContextLabel={noteRelatedContextLabel(
+                noteDetail.note,
+                noteDetail.parent,
+              )}
+              backLabel={noteDetail.parent.type === "task"
+                ? "タスクの詳細に戻る"
+                : noteDetail.parent.type === "timetable"
+                  ? "時間割の変更状況に戻る"
+                  : "戻る"}
+              onBack={closeNoteDetailFlow}
+              onOpenHistory={() =>
+                openNoteHistoryFrom(noteDetail.note, true)}
+            />
           ) : null}
 
           {taskDetail ? (
@@ -3955,6 +4428,8 @@ function App() {
                 targetScopeContext,
               )}
               referenceSchoolDate={selectedSchoolDate}
+              dueDateMin={schoolYearRange?.startsOn}
+              dueDateMax={schoolYearRange?.endsOn}
               draftLifecycle={taskDetail.type === "draft"
                 ? {
                     kind: taskDetail.draft.changeKind,
@@ -3964,24 +4439,53 @@ function App() {
               notes={taskNoteList(
                 taskDetail.task,
                 taskDetail.task.notes,
-                taskDetail.type === "draft" &&
-                  taskDetail.draft.changeKind === "remove",
+                (taskEditorForm?.removalPlanned ?? false) ||
+                  (taskDetail.type === "draft" &&
+                    taskDetail.draft.changeKind === "remove"),
+                { type: "task", task: taskDetail },
               )}
+              mode={taskEditorForm ? "edit" : "view"}
+              editForm={taskEditorForm ?? undefined}
               addNoteDisabled={
                 timetableEditor.atLimit || timetableEditor.submitting
               }
-              onClose={() => setTaskDetail(null)}
+              onClose={taskEditorForm
+                ? requestTaskEditorClose
+                : () => setTaskDetail(null)}
+              onSave={taskEditorForm ? saveTaskDraft : undefined}
+              onTitleChange={(title) =>
+                setTaskEditorForm((current) =>
+                  current ? { ...current, title } : current,
+                )}
+              onDueDateChange={(dueDate) =>
+                setTaskEditorForm((current) =>
+                  current ? { ...current, dueDate } : current,
+                )}
+              onRelatedLessonNameChange={(relatedLessonInput) =>
+                setTaskEditorForm((current) =>
+                  current ? { ...current, relatedLessonInput } : current,
+                )}
+              onNoteBodyChange={(index, body) =>
+                setTaskEditorForm((current) =>
+                  current
+                    ? {
+                        ...current,
+                        noteBodies: current.noteBodies.map(
+                          (value, noteIndex) =>
+                            noteIndex === index ? body : value,
+                        ),
+                      }
+                    : current,
+                )}
+              onRemovalChange={taskEditorForm?.editingTask
+                ? setTaskRemovalPlanned
+                : undefined}
               onOpenHistory={taskDetail.type === "active"
                 ? () => openTaskHistory(taskDetail.task)
                 : taskDetail.activeTask
                   ? () => openTaskHistory(taskDetail.activeTask!)
                   : undefined}
-              onAddNote={timetableEditor.editing &&
-                (taskDetail.type === "active" ||
-                  taskDetail.draft.changeKind === "add")
-                ? () => openTaskNoteEditor(taskDetail.task)
-                : undefined}
-              onEdit={timetableEditor.editing
+              onEdit={taskEditorForm ? undefined : timetableEditor.editing
                 ? taskDetail.type === "active"
                   ? () => openTaskUpdateEditor(editableTask(taskDetail.task))
                   : taskDetail.draft.changeKind === "add"
@@ -3994,6 +4498,21 @@ function App() {
                       )
                       : undefined
                 : undefined}
+              onAddNote={taskEditorForm
+                ? () =>
+                    setTaskEditorForm((current) =>
+                      current
+                        ? {
+                            ...current,
+                            noteBodies: [...current.noteBodies, ""],
+                          }
+                        : current,
+                    )
+                : timetableEditor.editing &&
+                    (taskDetail.type === "active" ||
+                      taskDetail.draft.changeKind === "add")
+                  ? () => openTaskNoteEditor(taskDetail.task)
+                  : undefined}
               onCancelDraft={timetableEditor.editing &&
                 taskDetail.type === "draft"
                 ? () => {
@@ -4001,16 +4520,13 @@ function App() {
                   setTaskDetail(null);
                 }
                 : undefined}
-              onRemove={timetableEditor.editing && taskDetail.type === "active"
-                ? () => planTaskRemoval(taskDetail.task)
-                : undefined}
             />
           ) : null}
 
           {taskRemovalConfirmation ? (
             <TaskRemovalConfirmationDialog
               taskTitle={taskRemovalConfirmation.title}
-              notes={taskRemovalConfirmation.notes}
+              notes={taskRemovalConfirmation.notes ?? []}
               onCancel={cancelTaskRemovalConfirmation}
               onConfirm={confirmTaskRemoval}
             />
@@ -4023,6 +4539,10 @@ function App() {
               referenceSchoolDate={selectedSchoolDate}
               state={taskHistoryDialog.state}
               onBack={() => {
+                if (restoreTaskHistoryEdit()) {
+                  setTaskHistoryDialog(null);
+                  return;
+                }
                 setTaskDetail(
                   visibleTasks.find(
                     (item) => item.task.taskId === taskHistoryDialog.task.taskId,
@@ -4030,7 +4550,10 @@ function App() {
                 );
                 setTaskHistoryDialog(null);
               }}
-              onClose={() => setTaskHistoryDialog(null)}
+              onClose={() => {
+                restoreTaskHistoryEdit();
+                setTaskHistoryDialog(null);
+              }}
               onRetry={() => setTaskHistoryDialog((current) =>
                 current ? {
                   ...current,
@@ -4044,6 +4567,9 @@ function App() {
             <NoteEditHistoryDialog
               targetScopeContext={targetScopeContext}
               state={noteHistoryDialog.state}
+              onBack={noteHistoryDialog.fromDetail
+                ? () => setNoteHistoryDialog(null)
+                : undefined}
               onClose={() => setNoteHistoryDialog(null)}
               onRetry={() => setNoteHistoryDialog((current) =>
                 current ? {
@@ -4103,8 +4629,8 @@ function App() {
                     ×
                   </button>
                 </header>
-
-                {timetableHistoryDialog.detail ? (
+                <DialogBody>
+                  {timetableHistoryDialog.detail ? (
                   timetableHistoryDialog.detail.status === "loading" ? (
                     <p className="layer-dialog-status" aria-live="polite">
                       変更内容を読み込んでいます…
@@ -4180,7 +4706,8 @@ function App() {
                       </button>
                     ))}
                   </div>
-                )}
+                  )}
+                </DialogBody>
               </section>
             </div>
           ) : null}
@@ -4210,8 +4737,8 @@ function App() {
                     ×
                   </button>
                 </header>
-
-                <div className="layer-dialog-navigation" aria-label="日付と時限">
+                <DialogBody>
+                  <div className="layer-dialog-navigation" aria-label="日付と時限">
                   <button
                     type="button"
                     className="icon-button"
@@ -4311,13 +4838,24 @@ function App() {
                   <div className="timetable-layer-stack">
                     <LayerRow
                       label="通常の時間割"
-                      value={`${
-                        buildDateHeader(
-                          timetableLayerDialog.schoolDate,
-                          currentSchoolDate,
-                        ).weekdayLabel
-                      }${timetableLayerDialog.periodNumber}`}
+                      value={timetableEditor.editing
+                        ? layerPreview.standardTimetable?.lessonName ?? "空欄"
+                        : `${
+                            buildDateHeader(
+                              timetableLayerDialog.schoolDate,
+                              currentSchoolDate,
+                            ).weekdayLabel
+                          }${timetableLayerDialog.periodNumber}`}
+                      source={timetableEditor.editing
+                        ? layerPreview.standardTimetable
+                          ? lessonSourceLabel({
+                              type: "period_reference",
+                              ...layerPreview.standardTimetable.periodReference,
+                            })
+                          : undefined
+                        : undefined}
                     />
+                    <LayerFlowArrow />
                     {layerPreview.layers.map((layer) => {
                       const existingDraft = timetableEditorClient.findDraft(
                         layer.targetScopeType,
@@ -4333,6 +4871,8 @@ function App() {
                         !timetableEditor.submitting &&
                         (!!existingDraft ||
                           (!!serverLayer && !timetableEditor.atLimit));
+                      const removalPlanned =
+                        "removalPlanned" in layer && layer.removalPlanned;
                       return (
                       <div
                         className="layer-with-notes"
@@ -4343,20 +4883,20 @@ function App() {
                           layer.targetScopeType,
                           targetScopeContext,
                         )}
-                        value={
-                          "removalPlanned" in layer && layer.removalPlanned
-                            ? "削除予定"
-                            : layer.state === "active"
+                        value={timetableEditor.editing
+                          ? layer.effectiveLessonName ?? ""
+                          : layer.state === "active"
                             ? replacementLabel(layer.replacement)
-                            : "変更無し"
-                        }
+                            : "変更無し"}
+                        source={timetableEditor.editing
+                          ? lessonSourceLabel(layer.effectiveLessonSource)
+                          : undefined}
+                        removalPlanned={removalPlanned}
                         detail={
                           layer.desired
                             ? layer.conflicted
                               ? "ほかの変更と重なっています"
-                              : "removalPlanned" in layer && layer.removalPlanned
-                                ? "削除予定"
-                                : "下書きの内容"
+                              : "下書きの内容"
                             : layer.state === "active" && "changedAt" in layer
                             ? `最終更新 ${formatRelativeTime(layer.changedAt)}`
                             : undefined
@@ -4403,58 +4943,70 @@ function App() {
                         targetScopeContext,
                         layer.targetScopeType,
                         "layer-note-list",
+                        { type: "timetable", dialog: timetableLayerDialog },
                       )}
+                      <LayerFlowArrow />
                       </div>
                       );
                     })}
                     <div className="layer-result-row">
                       <span>表示される授業名</span>
-                      <strong>
+                      <strong className="layer-result-lesson-name">
                         {layerPreview.finalDailyLesson.lessonName}
+                        {timetableEditor.editing &&
+                        lessonSourceLabel(
+                          layerPreview.layers.at(-1)?.effectiveLessonSource,
+                        ) ? (
+                          <small className="timetable-layer-source">
+                            （{lessonSourceLabel(
+                              layerPreview.layers.at(-1)?.effectiveLessonSource,
+                            )}）
+                          </small>
+                        ) : null}
                       </strong>
                     </div>
                   </div>
                 ) : null}
+                </DialogBody>
               </section>
             </div>
           ) : null}
 
           {timetableEditorForm && schoolYearRange ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className="timetable-editor-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="timetable-editor-title"
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  event.preventDefault();
-                  requestTimetableEditorClose("back");
-                }}
-              >
-                <form onSubmit={saveTimetableDraft}>
-                  <header className="editor-dialog-header">
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="時間割の変更状況に戻る"
-                      onClick={() => requestTimetableEditorClose("back")}
-                    >
-                      ‹
-                    </button>
-                    <div className="timetable-dialog-heading">
-                      <h2 id="timetable-editor-title">時間割変更</h2>
-                    </div>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="閉じる"
-                      autoFocus
-                      onClick={() => requestTimetableEditorClose("close")}
-                    >
-                      ×
-                    </button>
-                  </header>
+            <DialogSurface
+              className="editor-dialog-form-surface timetable-editor-form-dialog"
+              labelledBy="timetable-editor-title"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                requestTimetableEditorClose("back");
+              }}
+            >
+              <form className="editor-dialog-form" onSubmit={saveTimetableDraft}>
+                <DialogHeader
+                  title="時間割変更"
+                  titleId="timetable-editor-title"
+                  onBack={() => requestTimetableEditorClose("back")}
+                  actionLabel={editorActionLabel(
+                    timetableEditorForm.sourceId ||
+                      loadedLayerState?.layers.some(
+                        (layer) =>
+                          layer.targetScopeType ===
+                            timetableEditorForm.targetScopeType &&
+                          layer.state === "active",
+                      )
+                      ? "update"
+                      : "add",
+                  )}
+                  actionDisabled={
+                    timetableEditor.submitting ||
+                    (timetableEditorForm.includeTimetableChange &&
+                      timetableEditorForm.replacement.type === "lesson_name" &&
+                      !timetableEditorForm.replacement.registeredLessonNameId &&
+                      !timetableEditorOptions)
+                  }
+                />
+                <div className="editor-dialog-body">
                   <ImmutableFieldNotice
                     kind="timetable"
                     active={Boolean(
@@ -4510,15 +5062,38 @@ function App() {
                         setTimetableEditorForm({
                           ...timetableEditorForm,
                           includeTimetableChange: event.target.checked,
+                          removalPlanned: event.target.checked
+                            ? timetableEditorForm.removalPlanned
+                            : false,
                         })
                       }
                     />
                     時間割も変更する
                   </label>
 
+                  {timetableChangeCanBeRemoved ? (
+                    <label className="timetable-change-toggle timetable-removal-toggle">
+                      <input
+                        type="checkbox"
+                        checked={timetableEditorForm.removalPlanned}
+                        onChange={(event) =>
+                          setTimetableEditorForm({
+                            ...timetableEditorForm,
+                            includeTimetableChange: true,
+                            removalPlanned: event.target.checked,
+                          })
+                        }
+                      />
+                      時間割変更を削除予定にする
+                    </label>
+                  ) : null}
+
                   <fieldset
                     className="replacement-options"
-                    disabled={!timetableEditorForm.includeTimetableChange}
+                    disabled={
+                      !timetableEditorForm.includeTimetableChange ||
+                      timetableEditorForm.removalPlanned
+                    }
                   >
                     <legend className="replacement-section-label">
                       時間割変更
@@ -4742,24 +5317,74 @@ function App() {
                     </div>
                   </fieldset>
 
-                  <label className="daily-lesson-note-field">
-                    <span>ノートを書く</span>
-                    <textarea
-                      maxLength={1000}
-                      rows={5}
-                      placeholder="この日・時限・変更適用範囲に残す内容"
-                      value={timetableEditorForm.noteBody}
-                      onChange={(event) =>
-                        setTimetableEditorForm({
-                          ...timetableEditorForm,
-                          noteBody: event.target.value,
-                        })
+                  <fieldset className="daily-lesson-note-fields">
+                    <legend>ノートを書く</legend>
+                    <div className="daily-lesson-note-context" aria-label="ノートの適用先">
+                      <span>
+                        日付
+                        <strong>
+                          {formatUiSchoolDate(timetableEditorForm.changeDate, {
+                            referenceSchoolDate: selectedSchoolDate,
+                          })}
+                        </strong>
+                      </span>
+                      <span>
+                        時限
+                        <strong>{timetableEditorForm.periodNumber}限</strong>
+                      </span>
+                      <span>
+                        変更適用範囲
+                        <strong>
+                          {scopeLabel(
+                            timetableEditorForm.targetScopeType,
+                            targetScopeContext,
+                          )}
+                        </strong>
+                      </span>
+                    </div>
+                    {timetableEditorForm.noteBodies.map((noteBody, index) => (
+                      <label className="daily-lesson-note-field" key={index}>
+                        <span>ノート本文 {index + 1}</span>
+                        <textarea
+                          aria-label={`ノート本文 ${index + 1}`}
+                          maxLength={1000}
+                          rows={5}
+                          placeholder="この日・時限・変更適用範囲に残す内容"
+                          value={noteBody}
+                          onChange={(event) =>
+                            setTimetableEditorForm((current) => current ? {
+                              ...current,
+                              noteBodies: current.noteBodies.map(
+                                (value, noteIndex) =>
+                                  noteIndex === index
+                                    ? event.target.value
+                                    : value,
+                              ),
+                            } : current)
+                          }
+                        />
+                        <small className="note-character-count">
+                          {noteBody.length} / 1000
+                        </small>
+                      </label>
+                    ))}
+                    <button
+                      className="button-secondary note-add-button"
+                      type="button"
+                      disabled={
+                        timetableEditor.submitting ||
+                        timetableEditor.atLimit
                       }
-                    />
-                    <small className="note-character-count">
-                      {timetableEditorForm.noteBody.length} / 1000
-                    </small>
-                  </label>
+                      onClick={() =>
+                        setTimetableEditorForm((current) => current ? {
+                          ...current,
+                          noteBodies: [...current.noteBodies, ""],
+                        } : current)
+                      }
+                    >
+                      ノート欄を追加
+                    </button>
+                  </fieldset>
 
                   <footer className="editor-dialog-actions">
                     {timetableEditorClient.findDraft(
@@ -4784,51 +5409,10 @@ function App() {
                         下書きを取り消す
                       </button>
                     ) : null}
-                    {timetableEditorForm.includeTimetableChange &&
-                    timetableLayerDialog?.state.status === "ready" &&
-                    timetableLayerDialog.state.layers.some(
-                      (layer) =>
-                        layer.targetScopeType ===
-                          timetableEditorForm.targetScopeType &&
-                        layer.state === "active",
-                    ) ? (
-                      <button
-                        className="replacement-remove-button"
-                        type="button"
-                        disabled={timetableEditor.submitting}
-                        onClick={planTimetableRemoval}
-                      >
-                        {editorActionLabel("remove")}
-                      </button>
-                    ) : null}
-                    <button
-                      className="button-primary"
-                      type="submit"
-                      disabled={
-                        timetableEditor.submitting ||
-                        (timetableEditorForm.includeTimetableChange &&
-                          timetableEditorForm.replacement.type === "lesson_name" &&
-                          !timetableEditorForm.replacement
-                            .registeredLessonNameId &&
-                          !timetableEditorOptions)
-                      }
-                    >
-                      {editorActionLabel(
-                        timetableEditorForm.sourceId ||
-                        loadedLayerState?.layers.some(
-                          (layer) =>
-                            layer.targetScopeType ===
-                              timetableEditorForm.targetScopeType &&
-                            layer.state === "active",
-                        )
-                          ? "update"
-                          : "add",
-                      )}
-                    </button>
                   </footer>
-                </form>
-              </section>
-            </div>
+                  </div>
+              </form>
+            </DialogSurface>
           ) : null}
 
           {pendingEditorDismissal ? (
@@ -5072,6 +5656,8 @@ function App() {
 function LayerRow({
   label,
   value,
+  source,
+  removalPlanned = false,
   detail,
   desired = false,
   conflicted = false,
@@ -5081,6 +5667,8 @@ function LayerRow({
 }: {
   label: string;
   value: string;
+  source?: string;
+  removalPlanned?: boolean;
   detail?: string;
   desired?: boolean;
   conflicted?: boolean;
@@ -5096,12 +5684,28 @@ function LayerRow({
   const content = (
     <>
       <span className="timetable-layer-label">{label}</span>
-      <strong>{value}</strong>
+      <span
+        className={`timetable-layer-lesson-name${removalPlanned ? " removal" : ""}`}
+        aria-label={removalPlanned ? "削除対象の時間割変更" : undefined}
+      >
+        {removalPlanned ? (
+          <RemovalGlyph label="削除対象の時間割変更" />
+        ) : (
+          <>
+            <strong>{value}</strong>
+            {source && source !== value ? (
+              <small className="timetable-layer-source">（{source}）</small>
+            ) : null}
+          </>
+        )}
+      </span>
       <small>{detail}</small>
       {desired && lifecycleKind ? (
         <span className="layer-lifecycle-state">
           <LifecycleIcon kind={lifecycleKind} conflicted={conflicted} />
-          <small>{lifecycleLabel(lifecycleKind, conflicted)}</small>
+          <small className="sr-only">
+            {lifecycleLabel(lifecycleKind, conflicted)}
+          </small>
         </span>
       ) : null}
     </>
@@ -5109,11 +5713,11 @@ function LayerRow({
   return (
     <>
       <div
-        className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
+        className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${conflicted ? " conflict" : ""}${removalPlanned ? " removal" : ""}`}
       >
         {onClick ? (
           <button
-            className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
+            className={`timetable-layer-row editable${desired ? " desired" : ""}${conflicted ? " conflict" : ""}${removalPlanned ? " removal" : ""}`}
             type="button"
             onClick={onClick}
             aria-label={`${label}の時間割を編集${
@@ -5125,7 +5729,7 @@ function LayerRow({
             {content}
           </button>
         ) : (
-          <div className={`timetable-layer-row${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}>
+          <div className={`timetable-layer-row${desired ? " desired" : ""}${conflicted ? " conflict" : ""}${removalPlanned ? " removal" : ""}`}>
             {content}
           </div>
         )}
@@ -5161,11 +5765,12 @@ function LayerRow({
           </div>
         ) : null}
       </div>
-      <div className="layer-flow-arrow" aria-hidden="true">
-        ↓
-      </div>
     </>
   );
+}
+
+function LayerFlowArrow() {
+  return <div className="layer-flow-arrow" aria-hidden="true" />;
 }
 
 function PeriodWheelPicker({
@@ -5737,6 +6342,14 @@ function replacementLabel(replacement: TimetableReplacement) {
     return replacement.referenceLabel;
   }
   return "休講";
+}
+
+function lessonSourceLabel(source?: TimetableLessonSource | null) {
+  if (!source) return undefined;
+  if (source.type === "period_reference") {
+    return `${"月火水木金土"[source.weekday - 1]}${source.periodNumber}`;
+  }
+  return source.referenceLabel ?? undefined;
 }
 
 function resolveReplacementLessonName(

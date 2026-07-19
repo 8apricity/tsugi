@@ -1,4 +1,5 @@
 import type { DirectChangeReviewSummary } from './directChangeReview'
+import { DialogBody } from './dialogFoundation'
 
 export function DirectChangeReviewDialog({
   summary,
@@ -28,29 +29,31 @@ export function DirectChangeReviewDialog({
           </p>
         </div>
       </header>
-      <dl className="direct-change-review-counts">
-        <div><dt>時間割</dt><dd>{summary.timetable}件</dd></div>
-        <div><dt>タスク</dt><dd>{summary.task}件</dd></div>
-        <div><dt>ノート</dt><dd>{summary.note}件</dd></div>
-      </dl>
-      {conflictCount > 0 ? (
-        <p className="direct-change-review-warning" role="alert">
-          ほかの変更と重なっている下書きがあります。変更内容に戻って確認してください。
-        </p>
-      ) : null}
-      <footer className="editor-dialog-actions direct-change-review-actions">
-        <button className="button-secondary" type="button" disabled={submitting} onClick={onBack}>
-          戻る
-        </button>
-        <button
-          className="button-primary"
-          type="button"
-          disabled={submitting || summary.total === 0 || conflictCount > 0}
-          onClick={onApply}
-        >
-          {submitting ? "変更を反映しています…" : "変更を反映"}
-        </button>
-      </footer>
+      <DialogBody>
+        <dl className="direct-change-review-counts">
+          <div><dt>時間割</dt><dd>{summary.timetable}件</dd></div>
+          <div><dt>タスク</dt><dd>{summary.task}件</dd></div>
+          <div><dt>ノート</dt><dd>{summary.note}件</dd></div>
+        </dl>
+        {conflictCount > 0 ? (
+          <p className="direct-change-review-warning" role="alert">
+            ほかの変更と重なっている下書きがあります。変更内容に戻って確認してください。
+          </p>
+        ) : null}
+        <footer className="editor-dialog-actions direct-change-review-actions">
+          <button className="button-secondary" type="button" disabled={submitting} onClick={onBack}>
+            戻る
+          </button>
+          <button
+            className="button-primary"
+            type="button"
+            disabled={submitting || summary.total === 0 || conflictCount > 0}
+            onClick={onApply}
+          >
+            {submitting ? "変更を反映しています…" : "変更を反映"}
+          </button>
+        </footer>
+      </DialogBody>
     </section>
   )
 }
@@ -75,17 +78,19 @@ export function DraftLogoutConfirmationDialog({
       <header className="editor-dialog-header">
         <h2 id="draft-logout-title">下書きを削除してログアウトしますか？</h2>
       </header>
-      <p id="draft-logout-description">
-        保存中の下書き{draftCount}件はこの端末から削除され、復元できません。
-      </p>
-      <footer className="editor-dialog-actions">
-        <button className="button-secondary" type="button" onClick={onBack}>
-          戻る
-        </button>
-        <button className="button-danger" type="button" onClick={onLogout}>
-          ログアウト
-        </button>
-      </footer>
+      <DialogBody>
+        <p id="draft-logout-description">
+          保存中の下書き{draftCount}件はこの端末から削除され、復元できません。
+        </p>
+        <footer className="editor-dialog-actions">
+          <button className="button-secondary" type="button" onClick={onBack}>
+            戻る
+          </button>
+          <button className="button-danger" type="button" onClick={onLogout}>
+            ログアウト
+          </button>
+        </footer>
+      </DialogBody>
     </section>
   )
 }

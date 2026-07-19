@@ -230,6 +230,10 @@
 }
 
 .period-row {
+  --period-column-width: 56px;
+  display: grid;
+  grid-template-columns: var(--period-column-width) minmax(0, 1fr);
+  min-width: 0;
   min-height: 48px;
   border-bottom: 1px solid var(--color-border);
 }
@@ -244,8 +248,10 @@
 
 .period-inspect-button {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: var(--period-column-width) minmax(0, 1fr);
   width: 100%;
+  min-width: 0;
   min-height: 48px;
   padding: 0;
   border: 0;
@@ -394,13 +400,20 @@ button.period-inspect-button:active {
 }
 
 .daily-lesson-note-list {
-  padding: 0 12px 12px 68px;
+  min-width: 0;
+  padding: 0;
 }
 
 .daily-lesson-note-list .note-item,
 .layer-note-list .note-item {
   border-left: 3px solid #c8d9dc;
   background: #fff;
+}
+
+.period-row > .daily-lesson-note-list {
+  grid-column: 2;
+  min-width: 0;
+  padding: 0 12px 12px 0;
 }
 
 .daily-section {
@@ -505,6 +518,48 @@ button.period-inspect-button:active {
   gap: 8px;
 }
 
+.task-removal-cascade-surface {
+  position: relative;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid #e2abab;
+  border-radius: var(--radius-sm);
+  background: #fff1f1;
+}
+
+.task-removal-cascade-surface > .note-removal-glyph {
+  top: 50%;
+  left: 50%;
+  width: 110px;
+  height: 110px;
+  color: rgba(143, 29, 20, 0.16);
+}
+
+.task-removal-cascade-surface .task-item,
+.task-removal-cascade-surface .task-note-list .note-item {
+  position: relative;
+  z-index: 1;
+  border-color: transparent;
+  background: transparent;
+}
+
+.task-removal-cascade-surface > .task-note-list {
+  position: relative;
+  z-index: 1;
+}
+
+.task-removal-cascade-surface .task-item {
+  padding: 4px;
+}
+
+.task-removal-cascade-surface .task-note-list {
+  margin-left: 12px;
+}
+
+.task-removal-cascade-surface .task-note-list .note-item {
+  border-left-color: transparent;
+}
+
 .task-draft {
   padding: 8px;
   border-color: var(--color-accent);
@@ -520,6 +575,11 @@ button.period-inspect-button:active {
   border: 0;
   background: transparent;
   cursor: pointer;
+}
+
+.task-entry.task-removal-cascade-surface {
+  border-color: #e2abab;
+  background: #fff1f1;
 }
 
 .task-draft-actions {
@@ -538,6 +598,56 @@ button.period-inspect-button:active {
 .task-note-list .note-item {
   border-left: 3px solid #c8d9dc;
   background: #fff;
+}
+
+.task-note-list .note-item-related,
+.daily-lesson-note-list .note-item-related {
+  min-width: 0;
+  gap: 4px;
+  padding: 4px 0 4px 10px;
+  border: 0;
+  border-left: 2px solid #c8d9dc;
+  border-radius: 0;
+  background: transparent;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.task-note-list .note-item-related.note-draft,
+.daily-lesson-note-list .note-item-related.note-draft {
+  border-left-color: #c8d9dc;
+  background: transparent;
+}
+
+.note-item-related .note-related-scope {
+  color: inherit;
+  font-size: inherit;
+}
+
+.note-item-related .note-meta {
+  color: inherit;
+  font-size: 12px;
+}
+
+.note-item-related .note-expand-button {
+  color: inherit;
+  font-size: 12px;
+}
+
+.task-detail-dialog .task-note-list .note-detail-card-whole {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d6dadd;
+  border-radius: var(--radius-sm);
+  background: #f1f3f4;
+  box-sizing: border-box;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.task-detail-dialog .task-note-list .note-detail-card-whole:hover {
+  background: #eceff1;
 }
 
 .task-item span {
@@ -564,6 +674,7 @@ button.period-inspect-button:active {
 }
 
 .note-item {
+  position: relative;
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -583,11 +694,138 @@ button.period-inspect-button:active {
   background: var(--color-accent-soft);
 }
 
+.note-detail-card {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-detail-card-body {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-detail-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.note-removal-draft {
+  border-color: #e2abab;
+  background: #fff1f1;
+  overflow: hidden;
+}
+
+.note-removal-glyph {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  left: 50%;
+  width: 76px;
+  height: 76px;
+  color: rgba(143, 29, 20, 0.22);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.note-removal-glyph svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+
+.note-detail-dialog .editor-dialog-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.note-detail-dialog .editor-dialog-form {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.note-detail-body-field {
+  display: grid;
+  gap: 7px;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.note-detail-body-field textarea {
+  width: 100%;
+  min-height: 150px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+  box-sizing: border-box;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.note-removal-checkbox {
+  margin-top: 18px;
+}
+
+.task-removal-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.task-removal-checkbox input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #b42318;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.note-detail-context {
+  margin-top: 22px;
+}
+
+.note-detail-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .note-body-clamped {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
+  -webkit-line-clamp: 3;
 }
 
 .note-body-expanded {
@@ -753,10 +991,13 @@ button.period-inspect-button:active {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: max(24px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
   background: rgba(31, 41, 51, 0.42);
-  /* Keep dialog scrolling available while blocking pinch zoom in the dialog. */
-  touch-action: pan-y;
+  overflow: hidden;
+  touch-action: none;
 }
 
 html.page-scroll-locked,
@@ -766,19 +1007,46 @@ body.page-scroll-locked {
 }
 
 .timetable-editor-dialog {
+  display: grid;
   width: min(920px, 100%);
-  max-height: calc(100svh - 48px);
-  overflow: auto;
+  height: min(720px, calc(100dvh - 48px));
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100dvh - 48px);
+  overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-panel);
   box-shadow: 0 12px 36px rgba(31, 41, 51, 0.18);
+  touch-action: pan-y;
 }
 
 .timetable-editor-dialog form {
   display: grid;
   gap: 18px;
   padding: 22px;
+}
+
+.timetable-editor-dialog .editor-dialog-form {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+}
+
+.editor-dialog-scroll-body,
+.editor-dialog-form > .editor-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 22px;
+  touch-action: pan-y;
+}
+
+.editor-dialog-form-surface .editor-dialog-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .editor-dialog-header,
@@ -790,9 +1058,22 @@ body.page-scroll-locked {
 }
 
 .editor-dialog-header h2 {
+  min-width: 0;
+  flex: 1;
   margin: 0;
   color: var(--color-primary);
   font-size: 18px;
+  text-align: center;
+}
+
+.dialog-save-button {
+  min-width: 116px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.dialog-back-button {
+  flex: 0 0 44px;
 }
 
 .editor-fields {
@@ -1045,6 +1326,33 @@ body.page-scroll-locked {
   color: var(--color-primary);
   font-size: 13px;
   font-weight: 700;
+}
+
+.task-note-draft-fields {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.task-note-draft-fields textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+  box-sizing: border-box;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.task-note-add-button {
+  justify-self: start;
+}
+
+.task-edit-context {
+  margin-top: 18px;
 }
 
 .task-editor-dialog form input,
@@ -1499,6 +1807,23 @@ body.page-scroll-locked {
   padding: 0 48px 0 12px;
 }
 
+.layer-note-list .note-detail-card-whole {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d9dee3;
+  border-radius: var(--radius-sm);
+  background: #f5f6f7;
+  box-sizing: border-box;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.layer-note-list .note-detail-card-whole:hover {
+  border-color: #b7c1ca;
+  background: #eef1f3;
+}
+
 .layer-row-shell.has-menu {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
@@ -1657,6 +1982,41 @@ button.timetable-layer-row {
   text-align: right;
 }
 
+.timetable-layer-lesson-name {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.timetable-layer-source {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.timetable-layer-lesson-name.removal {
+  position: relative;
+  min-height: 42px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #e2abab;
+  border-radius: var(--radius-sm);
+  background: #fff1f1;
+}
+
+.timetable-layer-lesson-name.removal > .note-removal-glyph {
+  width: 52px;
+  height: 52px;
+  color: rgba(143, 29, 20, 0.22);
+}
+
+.layer-row-shell.removal,
+.timetable-layer-row.removal {
+  background: #fff;
+}
+
 .layer-lifecycle-state {
   grid-column: 1;
   justify-self: start;
@@ -1716,11 +2076,18 @@ button.timetable-layer-row {
 }
 
 .layer-flow-arrow {
-  height: 22px;
-  color: var(--color-accent);
-  font-weight: 800;
-  line-height: 22px;
-  text-align: center;
+  display: grid;
+  height: 18px;
+  place-items: center;
+}
+
+.layer-flow-arrow::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 10px solid #111827;
+  border-right: 7px solid transparent;
+  border-left: 7px solid transparent;
 }
 
 .layer-result-row {
@@ -1730,6 +2097,12 @@ button.timetable-layer-row {
 
 .layer-result-row strong {
   grid-column: 2 / -1;
+}
+
+.layer-result-lesson-name {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
 }
 
 .layer-dialog-actions {
@@ -2165,6 +2538,10 @@ button.timetable-layer-row {
   height: 18px;
 }
 
+.timetable-removal-toggle {
+  color: #8b3a3a;
+}
+
 .daily-lesson-note-field {
   display: grid;
   gap: 7px;
@@ -2183,6 +2560,44 @@ button.timetable-layer-row {
   font: inherit;
   resize: vertical;
   box-sizing: border-box;
+}
+
+.daily-lesson-note-fields {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.daily-lesson-note-fields legend {
+  padding: 0;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.daily-lesson-note-context {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.daily-lesson-note-context span {
+  display: grid;
+  gap: 2px;
+}
+
+.daily-lesson-note-context strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.note-add-button {
+  justify-self: start;
 }
 
 .editor-fields input,
@@ -2369,9 +2784,24 @@ button.timetable-layer-row {
   .timetable-editor-dialog {
     width: 100%;
     height: 100svh;
+    height: 100dvh;
     max-height: none;
     border: 0;
     border-radius: 0;
+  }
+
+  .editor-dialog-form > .editor-dialog-body {
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .editor-dialog-form-surface .editor-dialog-header {
+    padding: max(12px, env(safe-area-inset-top)) 12px 10px;
+  }
+
+  .dialog-save-button {
+    min-width: 104px;
+    padding: 0 8px;
+    font-size: 13px;
   }
 
   .change-content-dialog {
@@ -2549,7 +2979,7 @@ button.timetable-layer-row {
   }
 
   .period-row {
-    grid-template-columns: 48px minmax(0, 1fr);
+    --period-column-width: 48px;
   }
 
   .daily-section {

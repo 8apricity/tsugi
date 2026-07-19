@@ -54,7 +54,7 @@ describe('School Date Note body', () => {
       .toBe(false)
   })
 
-  it('shows textual lifecycle states and keeps history outside editing mode', () => {
+  it('shows the removal surface without repeating a visible lifecycle label', () => {
     const removed = renderToStaticMarkup(
       <NoteCard
         noteId="note-remove"
@@ -66,8 +66,9 @@ describe('School Date Note body', () => {
         onCancelDraft={() => undefined}
       />,
     )
-    expect(removed).toContain('削除予定')
-    expect(removed).toContain('要確認')
+    expect(removed).toContain('note-removal-draft')
+    expect(removed).toContain('note-removal-glyph')
+    expect(removed).not.toContain('削除予定・要確認')
     expect(removed).toContain('削除を取り消す')
     expect(removed).toContain('削除前\n全文')
 
@@ -82,6 +83,38 @@ describe('School Date Note body', () => {
     expect(viewMode).toContain('編集履歴')
     expect(viewMode).not.toContain('>編集<')
     expect(viewMode).not.toContain('>削除<')
+  })
+
+  it('renders a full-card detail target when supplied', () => {
+    const html = renderToStaticMarkup(
+      <NoteCard
+        noteId="note-detail"
+        body="詳細を開くノート"
+        onOpenDetail={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('ノートの詳細を開く')
+    expect(html).toContain('note-detail-card')
+    expect(html).not.toContain('ノートの続きを読む')
+  })
+
+  it('renders related Notes without a card treatment or visible lifecycle words', () => {
+    const html = renderToStaticMarkup(
+      <NoteCard
+        noteId="related-note"
+        body="親情報に添えるノート"
+        targetScopeLabel="文科"
+        draft
+        changeKind="update"
+        related
+      />,
+    )
+
+    expect(html).toContain('note-item-related')
+    expect(html).toContain('note-related-scope')
+    expect(html).toContain('lifecycle-summary sr-only')
+    expect(html).toContain('aria-label="更新予定"')
   })
 
   it('measures NoteCard overflow and expands through its native button', async () => {

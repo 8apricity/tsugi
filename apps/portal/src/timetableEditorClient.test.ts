@@ -86,11 +86,12 @@ describe('Shared Information editor client', () => {
     expect(restored.getSnapshot().draftCount).toBe(1)
   })
 
-  it('saves zero or one Timetable Change and zero or one Daily Lesson Note from one dialog', () => {
+  it('saves multiple Daily Lesson Notes, ignores blank fields, and preserves context', () => {
     const ids = [
       '33000000-0000-4000-8000-000000000001',
       '33000000-0000-4000-8000-000000000002',
       '33000000-0000-4000-8000-000000000003',
+      '33000000-0000-4000-8000-000000000004',
     ]
     const storage = memoryStorage()
     const editor = createTimetableEditorClient({
@@ -103,7 +104,7 @@ describe('Shared Information editor client', () => {
       schoolDate: '2026-07-10',
       periodNumber: 2,
       replacement: null,
-      noteBody: '   ',
+      noteBodies: ['   '],
     })).toEqual({ status: 'empty' })
     expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
 
@@ -112,7 +113,7 @@ describe('Shared Information editor client', () => {
       schoolDate: '2026-07-10',
       periodNumber: 2,
       replacement: null,
-      noteBody: '  空欄でも残るノート  ',
+      noteBodies: ['  空欄でも残るノート  '],
     })).toMatchObject({ status: 'saved', savedNote: true, savedTimetable: false })
     expect(editor.getSnapshot()).toMatchObject({
       draftCount: 1,
@@ -132,10 +133,15 @@ describe('Shared Information editor client', () => {
       schoolDate: '2026-07-10',
       periodNumber: 2,
       replacement: { type: 'cancelled' },
-      noteBody: '休講の案内',
-    })).toMatchObject({ status: 'saved', savedNote: true, savedTimetable: true })
+      noteBodies: ['休講の案内', '  ', '持ち物の案内'],
+    })).toMatchObject({
+      status: 'saved',
+      savedNote: true,
+      savedNotes: 2,
+      savedTimetable: true,
+    })
     expect(editor.getSnapshot()).toMatchObject({
-      draftCount: 3,
+      draftCount: 4,
       drafts: [{
         sourceId: '33000000-0000-4000-8000-000000000002',
         targetScopeType: 'class',
@@ -150,7 +156,57 @@ describe('Shared Information editor client', () => {
           periodNumber: 2,
           targetScopeType: 'class',
         }),
+        expect.objectContaining({
+          sourceId: '33000000-0000-4000-8000-000000000004',
+          body: '持ち物の案内',
+          schoolDate: '2026-07-10',
+          periodNumber: 2,
+          targetScopeType: 'class',
+        }),
       ],
+    })
+  })
+
+  it('saves Daily Lesson Notes with a Timetable Change removal without disabling the note flow', () => {
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: (() => {
+        let count = 0
+        return () => `34000000-0000-4000-8000-${String(++count).padStart(12, '0')}`
+      })(),
+    })
+    editor.reconcileLayerState(layerState([{
+      targetScopeType: 'track',
+      state: 'active',
+      sharedInformationItemId: 'timetable-item',
+      latestChangeId: 'timetable-change',
+      replacement: { type: 'cancelled' },
+      changedAt: 1,
+    }]))
+
+    expect(editor.saveDailyLessonDialogDraft({
+      targetScopeType: 'track',
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: null,
+      removeTimetableChange: true,
+      noteBodies: ['時間割変更は取り消します', '  '],
+    })).toMatchObject({
+      status: 'saved',
+      savedTimetable: true,
+      savedNotes: 1,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      drafts: [{
+        changeKind: 'remove',
+        sharedInformationItemId: 'timetable-item',
+      }],
+      noteDrafts: [{
+        body: '時間割変更は取り消します',
+        schoolDate: '2026-07-10',
+        periodNumber: 2,
+        targetScopeType: 'track',
+      }],
     })
   })
 
@@ -602,6 +658,44 @@ describe('Shared Information editor client', () => {
     })
   })
 
+  it('supports Note detail Body edits and removal-checkbox transitions', () => {
+    const activeNote = {
+      noteId: 'note-detail-1',
+      latestChangeId: 'note-detail-change-1',
+      body: '元の本文',
+      schoolDate: '2026-07-10',
+      periodNumber: null,
+      targetScopeType: 'track' as const,
+    }
+    const editor = createTimetableEditorClient({ storage: memoryStorage() })
+
+    expect(editor.saveNoteUpdateDraft(activeNote, '詳細で編集した本文'))
+      .toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot()).toMatchObject({
+      noteDrafts: [{
+        changeKind: 'update',
+        sharedInformationItemId: activeNote.noteId,
+        body: '詳細で編集した本文',
+      }],
+    })
+
+    expect(editor.saveNoteRemoveDraft(activeNote)).toMatchObject({
+      status: 'saved',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      noteDrafts: [{
+        changeKind: 'remove',
+        sharedInformationItemId: activeNote.noteId,
+        body: activeNote.body,
+      }],
+    })
+
+    expect(editor.saveNoteUpdateDraft(activeNote, activeNote.body)).toEqual({
+      status: 'removed-noop',
+    })
+    expect(editor.getSnapshot().noteDrafts).toEqual([])
+  })
+
   it('retains and marks a Task draft after an idempotency conflict', async () => {
     const sourceId = '33000000-0000-4000-8000-000000000201'
     const storage = memoryStorage()
@@ -722,6 +816,59 @@ describe('Shared Information editor client', () => {
         },
       ],
     }])
+  })
+
+  it('stores a Task removal with its active Notes and restores dependent drafts on cancel', () => {
+    const taskId = '33000000-0000-4000-8000-000000000370'
+    const taskRemovalSourceId = '33000000-0000-4000-8000-000000000371'
+    const noteSourceId = '33000000-0000-4000-8000-000000000372'
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: (() => {
+        const ids = [noteSourceId, taskRemovalSourceId]
+        return () => ids.shift()!
+      })(),
+    })
+    const activeTask = {
+      taskId,
+      latestChangeId: `${taskId}:change`,
+      title: '数学ワーク',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+      notes: [{
+        noteId: '33000000-0000-4000-8000-000000000373',
+        latestChangeId: '33000000-0000-4000-8000-000000000373:change',
+        body: '持ち物のノート',
+        targetScopeType: 'track' as const,
+        relatedContext: { type: 'task' as const, taskId },
+      }],
+    }
+
+    expect(editor.saveTaskNoteDraft(activeTask, '編集中の補足')).toMatchObject({
+      status: 'saved',
+      sourceId: noteSourceId,
+    })
+    expect(editor.saveTaskRemoveDraft(activeTask)).toEqual({
+      status: 'saved',
+      sourceId: taskRemovalSourceId,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      taskDrafts: [{
+        sourceId: taskRemovalSourceId,
+        changeKind: 'remove',
+        baseTask: { notes: activeTask.notes },
+      }],
+      noteDrafts: [],
+    })
+
+    expect(editor.removeTaskDraft(taskRemovalSourceId)).toEqual({
+      status: 'removed',
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      taskDrafts: [],
+      noteDrafts: [{ sourceId: noteSourceId, body: '編集中の補足' }],
+    })
   })
 
   it('reuses Task draft identities and removes an update that returns to active values', () => {
@@ -1168,10 +1315,40 @@ describe('Shared Information editor client', () => {
       ),
     ).toMatchObject({
       layers: [
-        { targetScopeType: 'grade', desired: false, replacement: { lessonName: '体育' } },
-        { targetScopeType: 'class', desired: false },
-        { targetScopeType: 'track', desired: true, replacement: { weekday: 1 } },
-        { targetScopeType: 'student', desired: false },
+        {
+          targetScopeType: 'grade',
+          desired: false,
+          replacement: { lessonName: '体育' },
+          effectiveLessonName: '体育',
+          effectiveLessonSource: null,
+        },
+        {
+          targetScopeType: 'class',
+          desired: false,
+          effectiveLessonName: '体育',
+          effectiveLessonSource: null,
+        },
+        {
+          targetScopeType: 'track',
+          desired: true,
+          replacement: { weekday: 1 },
+          effectiveLessonName: '化学',
+          effectiveLessonSource: {
+            type: 'period_reference',
+            weekday: 1,
+            periodNumber: 3,
+          },
+        },
+        {
+          targetScopeType: 'student',
+          desired: false,
+          effectiveLessonName: '化学',
+          effectiveLessonSource: {
+            type: 'period_reference',
+            weekday: 1,
+            periodNumber: 3,
+          },
+        },
       ],
       finalDailyLesson: { lessonName: '化学', timetableChangeState: 'resolved' },
     })
@@ -1719,7 +1896,7 @@ describe('Shared Information editor client', () => {
       schoolDate: '2026-07-10',
       periodNumber: 2,
       replacement: { type: 'cancelled' },
-      noteBody: '時間割と同時に追加するノート',
+      noteBodies: ['時間割と同時に追加するノート'],
     })
     const options = {
       confirmSubmission: () => true,
@@ -1844,6 +2021,96 @@ describe('Shared Information editor client', () => {
       applyFreshness: async () => { throw new Error('refresh failed') },
     })).resolves.toEqual({ status: 'applied', freshness: 'stale' })
     expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
+  })
+
+  it('saves zero, one, and multiple Task Notes with one atomic Task draft mutation', () => {
+    const taskInput = {
+      title: 'ノート付きTask',
+      dueDate: '2026-07-10',
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+    }
+
+    const zeroNotes = createTimetableEditorClient({ storage: memoryStorage() })
+    expect(zeroNotes.saveTaskDraftWithNotes(taskInput, [])).toMatchObject({
+      status: 'saved',
+    })
+    expect(zeroNotes.getSnapshot()).toMatchObject({
+      taskDrafts: [{ title: 'ノート付きTask' }],
+      noteDrafts: [],
+      draftCount: 1,
+    })
+
+    const oneNote = createTimetableEditorClient({ storage: memoryStorage() })
+    const oneResult = oneNote.saveTaskDraftWithNotes(taskInput, ['  集合場所  '])
+    expect(oneResult).toMatchObject({ status: 'saved' })
+    expect(oneNote.getSnapshot()).toMatchObject({
+      draftCount: 2,
+      noteDrafts: [{ body: '集合場所', relatedTaskItemId: oneResult.sourceId }],
+    })
+
+    const multipleNotes = createTimetableEditorClient({ storage: memoryStorage() })
+    const multipleResult = multipleNotes.saveTaskDraftWithNotes(taskInput, [
+      '提出方法',
+      '持ち物',
+      '  ',
+    ])
+    expect(multipleResult).toMatchObject({ status: 'saved' })
+    expect(multipleNotes.getSnapshot()).toMatchObject({
+      draftCount: 3,
+      noteDrafts: [
+        { body: '提出方法', relatedTaskItemId: multipleResult.sourceId },
+        { body: '持ち物', relatedTaskItemId: multipleResult.sourceId },
+      ],
+    })
+  })
+
+  it('saves Task edits and new Task Notes together, while rejecting the whole form on validation or limit failure', () => {
+    const activeTask = {
+      taskId: 'active-task-60',
+      latestChangeId: 'active-task-change-60',
+      title: '元のTask',
+      dueDate: null,
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+      notes: [],
+    }
+    const editor = createTimetableEditorClient({ storage: memoryStorage() })
+    expect(editor.saveTaskUpdateDraftWithNotes(activeTask, {
+      title: '更新Task',
+      dueDate: '2026-07-11',
+      relatedLessonName: { lessonName: '数学' },
+    }, ['更新メモ', '補足'])).toMatchObject({ status: 'saved' })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 3,
+      taskDrafts: [{ title: '更新Task' }],
+      noteDrafts: [
+        { body: '更新メモ', relatedTaskItemId: activeTask.taskId },
+        { body: '補足', relatedTaskItemId: activeTask.taskId },
+      ],
+    })
+
+    const invalid = createTimetableEditorClient({ storage: memoryStorage() })
+    expect(invalid.saveTaskDraftWithNotes(activeTask, ['有効', 'x'.repeat(1001)])).toEqual({
+      status: 'invalid-note',
+    })
+    expect(invalid.getSnapshot()).toMatchObject({ draftCount: 0, taskDrafts: [], noteDrafts: [] })
+
+    const atLimit = createTimetableEditorClient({ storage: memoryStorage() })
+    for (let index = 0; index < 49; index += 1) {
+      expect(atLimit.saveNoteDraft({
+        body: `既存ノート${index}`,
+        schoolDate: null,
+        targetScopeType: 'track',
+      }).status).toBe('saved')
+    }
+    expect(atLimit.saveTaskDraftWithNotes(activeTask, ['追加ノート'])).toEqual({
+      status: 'limit-reached',
+    })
+    expect(atLimit.getSnapshot()).toMatchObject({ draftCount: 49, taskDrafts: [] })
+    expect(atLimit.getSnapshot().noteDrafts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ body: '既存ノート0' })]),
+    )
   })
 
   it('limits new draft keys to 50 while allowing replacement and cancellation', () => {

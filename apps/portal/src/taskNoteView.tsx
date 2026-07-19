@@ -1,5 +1,6 @@
 import { NoteCard } from './noteCard'
 import { taskRemovalCascadeDetails } from './taskNoteCopy'
+import { DialogBody } from './dialogFoundation'
 
 export type TaskNoteListItem = {
   noteId: string
@@ -12,6 +13,9 @@ export type TaskNoteListItem = {
   onEdit?: () => void
   onRemove?: () => void
   onOpenHistory?: () => void
+  onOpenDetail?: () => void
+  wholeCardDetailTarget?: boolean
+  related?: boolean
 }
 
 export function TaskNoteList({ notes }: { notes: TaskNoteListItem[] }) {
@@ -52,25 +56,27 @@ export function TaskRemovalConfirmationDialog({
         <header className="editor-dialog-header">
           <h2 id="task-removal-confirmation-title">タスクを削除予定にしますか？</h2>
         </header>
-        <div className="task-removal-confirmation-content">
-          <p className="task-removal-confirmation-title">{taskTitle}</p>
-          <p>{details.consequence}</p>
-          {details.previews.length > 0 ? (
-            <ul className="task-removal-confirmation-notes" aria-label="削除予定のノート">
-              {details.previews.map((preview, index) => (
-                <li key={`${index}:${preview}`}>{preview}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-        <div className="editor-dialog-actions task-removal-confirmation-actions">
-          <button className="button-secondary" type="button" onClick={onCancel}>
-            キャンセル
-          </button>
-          <button className="button-danger" type="button" onClick={onConfirm}>
-            削除予定にする
-          </button>
-        </div>
+        <DialogBody>
+          <div className="task-removal-confirmation-content">
+            <p className="task-removal-confirmation-title">{taskTitle}</p>
+            {details.consequence ? <p>{details.consequence}</p> : null}
+            {details.previews.length > 0 ? (
+              <ul className="task-removal-confirmation-notes" aria-label="削除予定のノート">
+                {details.previews.map((preview, index) => (
+                  <li key={`${index}:${preview}`}>{preview}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+          <div className="editor-dialog-actions task-removal-confirmation-actions">
+            <button className="button-secondary" type="button" onClick={onCancel}>
+              キャンセル
+            </button>
+            <button className="button-danger" type="button" onClick={onConfirm}>
+              削除予定にする
+            </button>
+          </div>
+        </DialogBody>
       </section>
     </div>
   )

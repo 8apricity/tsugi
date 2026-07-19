@@ -1452,7 +1452,7 @@ function App() {
   }
 
   function closeTaskEditorFlow() {
-    if (changeContentReturnRef.current) setTaskDetail(null);
+    setTaskDetail(null);
     setTaskEditorForm(null);
     editorInitialFormsRef.current.task = null;
     setTaskLessonNameListOpen(false);

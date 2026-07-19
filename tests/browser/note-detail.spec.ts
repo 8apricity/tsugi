@@ -225,8 +225,10 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await expect(editableTaskDetail).toBeVisible()
 
     await editableTaskDetail.getByRole('button', { name: '戻る' }).click()
-    await page.getByRole('dialog', { name: 'タスクの詳細' })
-      .getByRole('button', { name: '閉じる' }).click()
+    await expect(editableTaskDetail).toHaveCount(0)
+    await expect(page.getByRole('dialog', { name: 'タスクの詳細' }))
+      .toHaveCount(0)
+    await expect(page.locator('body')).not.toHaveClass(/page-scroll-locked/)
     await applyCurrentDrafts(page)
   })
 })

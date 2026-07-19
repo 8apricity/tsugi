@@ -544,6 +544,11 @@ button.period-inspect-button:active {
   margin-left: 0;
 }
 
+.task-detail-dialog > .editor-dialog-body > .task-note-detail-list {
+  margin-right: 22px;
+  margin-left: 22px;
+}
+
 .task-note-detail-list .note-item {
   border: 1px solid var(--color-border);
   background: #f8fafb;

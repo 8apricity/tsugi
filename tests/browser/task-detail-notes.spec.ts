@@ -42,6 +42,20 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
     'rgb(248, 250, 251)',
   )
   await expect(relatedNotes.first()).toHaveCSS('border-top-width', '1px')
+  const detailBodyBox = await detail.locator('.editor-dialog-body').boundingBox()
+  const firstNoteBox = await relatedNotes.first().boundingBox()
+  expect(detailBodyBox).not.toBeNull()
+  expect(firstNoteBox).not.toBeNull()
+  expect(firstNoteBox!.x - detailBodyBox!.x).toBeGreaterThanOrEqual(21)
+  expect(firstNoteBox!.x - detailBodyBox!.x).toBeLessThanOrEqual(23)
+  expect(
+    detailBodyBox!.x + detailBodyBox!.width -
+      (firstNoteBox!.x + firstNoteBox!.width),
+  ).toBeGreaterThanOrEqual(21)
+  expect(
+    detailBodyBox!.x + detailBodyBox!.width -
+      (firstNoteBox!.x + firstNoteBox!.width),
+  ).toBeLessThanOrEqual(23)
 
   await relatedNotes.first().click()
   const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
@@ -64,6 +78,14 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await expect(editor.getByRole('button').filter({
     hasText: /複数ノートの[12]件目/,
   })).toHaveCount(2)
+
+  await editor.getByRole('button', { name: '戻る' }).click()
+  await expect(editor).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: 'タスクの詳細' })).toHaveCount(0)
+  await expect(page.locator('body')).not.toHaveClass(/page-scroll-locked/)
+
+  await multipleTask.locator('.task-item').click()
+  await expect(editor).toBeVisible()
 
   const updatedTitle = `${multipleTitle}-更新`
   await editor.getByRole('textbox', { name: 'タイトル' }).fill(updatedTitle)

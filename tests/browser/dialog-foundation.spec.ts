@@ -199,13 +199,8 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
     await expect(page.locator('body')).toHaveClass(/page-scroll-locked/)
 
     await page.goBack()
-    const readOnlyDetail = page.getByRole('dialog', { name: 'タスクの詳細' })
     await expect(editorDetail).toHaveCount(0)
-    await expect(readOnlyDetail).toBeVisible()
-    await expect(page.locator('body')).toHaveClass(/page-scroll-locked/)
-
-    await page.goBack()
-    await expect(readOnlyDetail).toHaveCount(0)
+    await expect(page.getByRole('dialog', { name: 'タスクの詳細' })).toHaveCount(0)
     await expect(page.locator('body')).not.toHaveClass(/page-scroll-locked/)
     await expect.poll(() => readPageScrollY(page)).toBe(
       dailyPlanScrollY,

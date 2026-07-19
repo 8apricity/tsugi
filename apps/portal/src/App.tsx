@@ -2205,10 +2205,19 @@ function App() {
       targetScopeType: TargetScopeType;
     },
     activeNotes: DailyPlanNoteForCache[],
-    taskRemovalPlanned = false,
-    notesOpenDetail = false,
-    presentation: "daily-plan" | "detail" = "daily-plan",
-    hideAddedDrafts = false,
+    {
+      taskRemovalPlanned = false,
+      notesOpenDetail = false,
+      presentation = "daily-plan",
+      hideAddedDrafts = false,
+      onOpenRelatedNote,
+    }: {
+      taskRemovalPlanned?: boolean;
+      notesOpenDetail?: boolean;
+      presentation?: "daily-plan" | "detail";
+      hideAddedDrafts?: boolean;
+      onOpenRelatedNote?: () => void;
+    } = {},
   ) {
     const items = buildVisibleTaskNoteList(
       activeNotes,
@@ -2254,7 +2263,13 @@ function App() {
           : undefined,
       };
     });
-    return <TaskNoteList notes={items} presentation={presentation} />;
+    return (
+      <TaskNoteList
+        notes={items}
+        presentation={presentation}
+        onOpenRelatedNote={onOpenRelatedNote}
+      />
+    );
   }
 
   function updateTaskNoteBody(index: number, body: string) {
@@ -2322,9 +2337,17 @@ function App() {
     schoolDate: string,
     periodNumber: number,
     scopeContext: TargetScopeDisplayContext | undefined,
-    targetScopeType?: TargetScopeType,
-    className?: string,
-    notesOpenDetail = false,
+    {
+      targetScopeType,
+      className,
+      notesOpenDetail = false,
+      onOpenRelatedNote,
+    }: {
+      targetScopeType?: TargetScopeType;
+      className?: string;
+      notesOpenDetail?: boolean;
+      onOpenRelatedNote?: () => void;
+    } = {},
   ) {
     const items = buildVisibleDailyLessonNoteList(
       activeNotes,
@@ -2364,7 +2387,14 @@ function App() {
           : undefined,
       };
     });
-    return <DailyLessonNoteList notes={items} className={className} />;
+    return (
+      <DailyLessonNoteList
+        notes={items}
+        className={className}
+        presentation={notesOpenDetail ? "detail" : "related"}
+        onOpenRelatedNote={onOpenRelatedNote}
+      />
+    );
   }
 
   function planTaskRemoval(task: DailyPlanTaskForCache) {
@@ -3419,52 +3449,58 @@ function App() {
                         } ${timetableEditor.editing ? "editable" : ""}`}
                         key={period.periodNumber}
                       >
-                        <button
-                          className="period-inspect-button"
-                          type="button"
-                          aria-label={`${period.periodNumber}限 ${period.lessonName || "空欄"}${
-                            lifecycleDrafts.length > 0
-                              ? ` ${lifecycleDrafts.map((draft) =>
-                                  lifecycleLabel(
-                                    draft.changeKind,
-                                    Boolean(draft.conflicted),
-                                  )
-                                ).join("、")}`
-                              : ""
-                          }`}
-                          onClick={() => openTimetableEditor(period.periodNumber)}
-                        >
-                          <span className="period-number">
-                            {period.periodNumber}
-                          </span>
-                          <span className="period-main">
-                            <span className="lesson-line">
-                              <span className="lesson-name">
-                                {period.lessonName}
-                              </span>
-                              {period.hasTasks ? (
-                                <span className="task-pill">タスク</span>
-                              ) : null}
-                              {lifecycleDrafts.length > 0 ? (
-                                <span className="period-lifecycle-icons">
-                                  {lifecycleDrafts.map((draft) => (
-                                    <LifecycleIcon
-                                      key={draft.sourceId}
-                                      kind={draft.changeKind}
-                                      conflicted={draft.conflicted}
-                                    />
-                                  ))}
+                        <span className="period-number" aria-hidden="true">
+                          {period.periodNumber}
+                        </span>
+                        <div className="period-content">
+                          <button
+                            className="period-inspect-button"
+                            type="button"
+                            aria-label={`${period.periodNumber}限 ${period.lessonName || "空欄"}${
+                              lifecycleDrafts.length > 0
+                                ? ` ${lifecycleDrafts.map((draft) =>
+                                    lifecycleLabel(
+                                      draft.changeKind,
+                                      Boolean(draft.conflicted),
+                                    )
+                                  ).join("、")}`
+                                : ""
+                            }`}
+                            onClick={() => openTimetableEditor(period.periodNumber)}
+                          >
+                            <span className="period-main">
+                              <span className="lesson-line">
+                                <span className="lesson-name">
+                                  {period.lessonName}
                                 </span>
-                              ) : null}
+                                {period.hasTasks ? (
+                                  <span className="task-pill">タスク</span>
+                                ) : null}
+                                {lifecycleDrafts.length > 0 ? (
+                                  <span className="period-lifecycle-icons">
+                                    {lifecycleDrafts.map((draft) => (
+                                      <LifecycleIcon
+                                        key={draft.sourceId}
+                                        kind={draft.changeKind}
+                                        conflicted={draft.conflicted}
+                                      />
+                                    ))}
+                                  </span>
+                                ) : null}
+                              </span>
                             </span>
-                          </span>
-                        </button>
-                        {dailyLessonNoteList(
-                          period.notes,
-                          selectedSchoolDate,
-                          period.periodNumber,
-                          targetScopeContext,
-                        )}
+                          </button>
+                          {dailyLessonNoteList(
+                            period.notes,
+                            selectedSchoolDate,
+                            period.periodNumber,
+                            targetScopeContext,
+                            {
+                              onOpenRelatedNote: () =>
+                                openTimetableEditor(period.periodNumber),
+                            },
+                          )}
+                        </div>
                       </article>
                       );
                     })}
@@ -3537,8 +3573,11 @@ function App() {
                         {taskNoteList(
                           task,
                           task.notes,
-                          item.type === "draft" &&
-                            item.draft.changeKind === "remove",
+                          {
+                            taskRemovalPlanned: item.type === "draft" &&
+                              item.draft.changeKind === "remove",
+                            onOpenRelatedNote: () => openTaskDetail(item),
+                          },
                         )}
                       </article>
                       );
@@ -4142,11 +4181,13 @@ function App() {
               notes={taskNoteList(
                 taskDetail.task,
                 taskDetail.task.notes,
-                taskDetail.type === "draft" &&
-                  taskDetail.draft.changeKind === "remove",
-                true,
-                "detail",
-                Boolean(taskEditorForm?.editingTask),
+                {
+                  taskRemovalPlanned: taskDetail.type === "draft" &&
+                    taskDetail.draft.changeKind === "remove",
+                  notesOpenDetail: true,
+                  presentation: "detail",
+                  hideAddedDrafts: Boolean(taskEditorForm?.editingTask),
+                },
               )}
               addNoteDisabled={
                 timetableEditor.atLimit || timetableEditor.submitting
@@ -4593,9 +4634,11 @@ function App() {
                         timetableLayerDialog.schoolDate,
                         timetableLayerDialog.periodNumber,
                         targetScopeContext,
-                        layer.targetScopeType,
-                        "layer-note-list",
-                        true,
+                        {
+                          targetScopeType: layer.targetScopeType,
+                          className: "layer-note-list",
+                          notesOpenDetail: true,
+                        },
                       )}
                       </div>
                       );

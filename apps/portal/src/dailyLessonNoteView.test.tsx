@@ -27,13 +27,32 @@ describe('Daily Lesson Note view', () => {
     )
     expect(html).toContain('2年')
     expect(html).toContain('文科')
+    expect(html).toContain('note-related')
+    expect(html.indexOf('2年')).toBeLessThan(html.indexOf('学年のノート'))
     expect(html).toContain('role="img"')
     expect(html).toContain('aria-label="削除予定のノート"')
     expect(html).toContain('<svg')
     expect(html).not.toContain('削除予定・要確認')
     expect(html).not.toContain('編集履歴')
     expect(html).toContain('role="button"')
+    expect(html).not.toContain('note-detail-chevron')
     expect(html).not.toContain('<time')
     expect(html).not.toContain('投稿者')
+  })
+
+  it('keeps layer-dialog Notes as independent detail targets', () => {
+    const html = renderToStaticMarkup(
+      <DailyLessonNoteList
+        presentation="detail"
+        notes={[{
+          noteId: 'layer-note',
+          body: 'レイヤー内ノート',
+          onOpen: () => undefined,
+        }]}
+      />,
+    )
+
+    expect(html).not.toContain('note-related')
+    expect(html).toContain('note-detail-chevron')
   })
 })

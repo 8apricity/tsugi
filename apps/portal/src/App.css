@@ -230,6 +230,8 @@
 }
 
 .period-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
   min-height: 48px;
   border-bottom: 1px solid var(--color-border);
 }
@@ -244,7 +246,6 @@
 
 .period-inspect-button {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
   width: 100%;
   min-height: 48px;
   padding: 0;
@@ -254,6 +255,10 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.period-content {
+  min-width: 0;
 }
 
 button.period-inspect-button:focus-visible {
@@ -394,12 +399,18 @@ button.period-inspect-button:active {
 }
 
 .daily-lesson-note-list {
-  padding: 0 12px 12px 68px;
+  padding: 0 12px 12px;
 }
 
-.daily-lesson-note-list .note-item {
+.daily-lesson-note-list .note-related:not(.note-removal-draft),
+.task-note-list .note-related:not(.note-removal-draft) {
+  padding: 4px 0 4px 10px;
+  border: 0;
   border-left: 3px solid #c8d9dc;
-  background: #fff;
+  border-radius: 0;
+  background: transparent;
+  color: #46545a;
+  font-size: 13px;
 }
 
 .layer-note-list .note-item {
@@ -495,9 +506,9 @@ button.period-inspect-button:active {
   gap: 10px;
   align-items: center;
   padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: #f8fafb;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--color-text);
   font: inherit;
   text-align: left;
@@ -506,7 +517,11 @@ button.period-inspect-button:active {
 
 .task-entry {
   display: grid;
-  gap: 8px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #f8fafb;
 }
 
 .task-draft {
@@ -536,15 +551,11 @@ button.period-inspect-button:active {
 .task-note-list {
   display: grid;
   gap: 8px;
-  margin-left: 12px;
-}
-
-.task-note-list .note-item {
-  border-left: 3px solid #c8d9dc;
-  background: #fff;
+  padding: 0 12px 12px;
 }
 
 .task-note-detail-list {
+  padding: 0;
   margin-left: 0;
 }
 
@@ -620,6 +631,10 @@ button.period-inspect-button:active {
   cursor: pointer;
 }
 
+.note-related.note-detail-target:focus-visible {
+  background: #f3f8f8;
+}
+
 .note-with-chevron {
   padding-right: 40px;
 }
@@ -677,6 +692,10 @@ button.period-inspect-button:active {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 5;
+}
+
+.note-related .note-body-clamped {
+  -webkit-line-clamp: 3;
 }
 
 .note-body-expanded {
@@ -2743,6 +2762,10 @@ button.timetable-layer-row {
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .note-related.note-detail-target:hover {
+    background: #f3f8f8;
+  }
+
   .change-content-item:hover {
     border-color: var(--color-accent);
     background: var(--color-accent-soft);

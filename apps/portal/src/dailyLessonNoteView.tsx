@@ -17,9 +17,13 @@ export type DailyLessonNoteListItem = {
 export function DailyLessonNoteList({
   notes,
   className = 'daily-lesson-note-list',
+  presentation = 'related',
+  onOpenRelatedNote,
 }: {
   notes: DailyLessonNoteListItem[]
   className?: string
+  presentation?: 'related' | 'detail'
+  onOpenRelatedNote?: () => void
 }) {
   if (notes.length === 0) return null
   return (
@@ -28,7 +32,9 @@ export function DailyLessonNoteList({
         <NoteCard
           key={note.noteId}
           {...note}
-          showChevron={Boolean(note.onOpen)}
+          presentation={presentation === 'related' ? 'related' : 'independent'}
+          onOpen={note.onOpen ?? onOpenRelatedNote}
+          showChevron={presentation === 'detail' && Boolean(note.onOpen)}
         />
       ))}
     </div>

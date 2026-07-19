@@ -66,6 +66,8 @@ describe('Reference Scope Daily Plan Note view', () => {
     expect(html).toContain('2限のノート')
     expect(html).toContain('class="panel timetable-panel"')
     expect(html).toContain('class="period-row"')
+    expect(html).toContain('class="period-content"')
+    expect(html).toContain('note-related')
     expect(html).toContain('class="panel daily-section"')
     expect(html).toContain('task-note-list')
     expect(html).toContain('タスク内のノート')

@@ -29,29 +29,31 @@ export function ReferenceDailyPlanNotes({
                 key={basePeriod.periodNumber}
                 aria-label={`${basePeriod.periodNumber}限 ${basePeriod.lessonName || '空欄'}`}
               >
-                <div className="period-inspect-button reference-period-heading">
-                  <span className="period-number">
-                    {basePeriod.periodNumber}
-                  </span>
-                  <span className="period-main">
-                    <span className="lesson-line">
-                      <span className="lesson-name">
-                        {basePeriod.lessonName}
+                <span className="period-number">
+                  {basePeriod.periodNumber}
+                </span>
+                <div className="period-content">
+                  <div className="period-inspect-button reference-period-heading">
+                    <span className="period-main">
+                      <span className="lesson-line">
+                        <span className="lesson-name">
+                          {basePeriod.lessonName}
+                        </span>
+                        {basePeriod.lessonName && tasks.some(
+                          (task) =>
+                            task.relatedLessonName === basePeriod.lessonName,
+                        ) ? <span className="task-pill">タスク</span> : null}
                       </span>
-                      {basePeriod.lessonName && tasks.some(
-                        (task) =>
-                          task.relatedLessonName === basePeriod.lessonName,
-                      ) ? <span className="task-pill">タスク</span> : null}
                     </span>
-                  </span>
+                  </div>
+                  <DailyLessonNoteList
+                    notes={(period?.notes ?? []).map((note) => ({
+                      noteId: note.noteId,
+                      body: note.body,
+                      targetScopeLabel,
+                    }))}
+                  />
                 </div>
-                <DailyLessonNoteList
-                  notes={(period?.notes ?? []).map((note) => ({
-                    noteId: note.noteId,
-                    body: note.body,
-                    targetScopeLabel,
-                  }))}
-                />
               </article>
             )
           })}

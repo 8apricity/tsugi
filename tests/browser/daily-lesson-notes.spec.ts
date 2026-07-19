@@ -11,10 +11,16 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
     `変更削除時ノート2-${suffix}`,
   ]
   const noteOnlyBodies = [
-    `Note-only 1-${suffix}`,
+    [
+      `Note-only 1-${suffix}`,
+      '2行目',
+      '3行目',
+      '4行目',
+      '5行目',
+    ].join('\n'),
     `Note-only 2-${suffix}`,
   ]
-  const updatedBody = `${noteOnlyBodies[0]}-更新`
+  const updatedBody = `更新-${noteOnlyBodies[0]}`
 
   await page.goto('/')
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
@@ -97,6 +103,47 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   await layerDialog.getByRole('button', { name: '閉じる' }).click()
   await applyCurrentDrafts(page, 5)
 
+  const dailyPlanPeriod = page.locator('.period-row').filter({
+    hasText: noteOnlyBodies[0],
+  })
+  const dailyPlanNote = dailyPlanPeriod
+    .locator('.daily-lesson-note-list .note-item')
+    .filter({ hasText: noteOnlyBodies[0] })
+  await expect(dailyPlanNote).toHaveClass(/note-related/)
+  await expect(dailyPlanNote).toHaveAttribute('role', 'button')
+  await page.mouse.move(0, 0)
+  await expect(dailyPlanNote).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(dailyPlanNote).toHaveCSS('border-top-width', '0px')
+  const scopeBadge = dailyPlanNote.getByText('3組', { exact: true })
+  const noteBody = dailyPlanNote.locator('p')
+  const scopeBox = await scopeBadge.boundingBox()
+  const noteBodyBox = await noteBody.boundingBox()
+  expect(scopeBox).not.toBeNull()
+  expect(noteBodyBox).not.toBeNull()
+  expect(scopeBox!.y).toBeLessThan(noteBodyBox!.y)
+
+  const periodBox = await dailyPlanPeriod.boundingBox()
+  const periodNumberBox = await dailyPlanPeriod.locator('.period-number')
+    .boundingBox()
+  expect(periodBox).not.toBeNull()
+  expect(periodNumberBox).not.toBeNull()
+  expect(Math.abs(periodBox!.height - periodNumberBox!.height))
+    .toBeLessThanOrEqual(1)
+
+  const expand = dailyPlanNote.getByRole('button', {
+    name: 'ノートの続きを読む',
+  })
+  await expect(expand).toBeVisible()
+  await expand.click()
+  await expect(page.getByRole('dialog', { name: '時間割の変更状況' }))
+    .toHaveCount(0)
+  await expect(dailyPlanNote.locator('.note-body-expanded'))
+    .toContainText(noteOnlyBodies[0])
+  await dailyPlanNote.click()
+  layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+  await expect(layerDialog).toBeVisible()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+
   await page.getByRole('button', { name: /^7限/ }).click()
   layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
   const noteCard = noteButton(layerDialog, noteOnlyBodies[0])
@@ -149,8 +196,8 @@ async function openLayerEditor(layerDialog: Locator, scopeLabel: string) {
 }
 
 function noteButton(dialog: Locator, body: string) {
-  return dialog.getByRole('button', {
-    name: new RegExp(escapeRegExp(body)),
+  return dialog.getByRole('button').filter({
+    hasText: body.split('\n')[0],
   })
 }
 

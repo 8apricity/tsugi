@@ -14,6 +14,7 @@ describe('Task Note view', () => {
 
     expect(html.indexOf('新しいノート')).toBeLessThan(html.indexOf('下書きノート'))
     expect(html).toContain('note-body-clamped')
+    expect(html).toContain('note-related')
     expect(html).toContain('追加予定・要確認')
     expect(html).not.toContain('task-scope-badge')
   })
@@ -33,10 +34,24 @@ describe('Task Note view', () => {
     expect(html).toContain('task-note-detail-list')
     expect(html).toContain('note-detail-target')
     expect(html).toContain('note-detail-chevron')
+    expect(html).not.toContain('note-related')
     expect(html).not.toContain('task-scope-badge')
     expect(html).not.toContain('>編集</button>')
     expect(html).not.toContain('削除予定にする</button>')
     expect(html).not.toContain('編集履歴</button>')
+  })
+
+  it('makes the whole related Note target open its parent Task', () => {
+    const html = renderToStaticMarkup(
+      <TaskNoteList
+        notes={[{ noteId: 'related-note', body: '親へ移動するノート' }]}
+        onOpenRelatedNote={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('note-related')
+    expect(html).toContain('role="button"')
+    expect(html).not.toContain('note-detail-chevron')
   })
 
   it('renders Task removal as an in-app cascade confirmation', () => {

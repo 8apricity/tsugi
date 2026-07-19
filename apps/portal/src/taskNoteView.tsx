@@ -18,9 +18,11 @@ export type TaskNoteListItem = {
 export function TaskNoteList({
   notes,
   presentation = 'daily-plan',
+  onOpenRelatedNote,
 }: {
   notes: TaskNoteListItem[]
   presentation?: 'daily-plan' | 'detail'
+  onOpenRelatedNote?: () => void
 }) {
   if (notes.length === 0) return null
   return (
@@ -31,6 +33,8 @@ export function TaskNoteList({
         <NoteCard
           key={note.noteId}
           {...note}
+          presentation={presentation === 'daily-plan' ? 'related' : 'independent'}
+          onOpen={note.onOpen ?? onOpenRelatedNote}
           showChevron={presentation === 'detail' && Boolean(note.onOpen)}
         />
       ))}

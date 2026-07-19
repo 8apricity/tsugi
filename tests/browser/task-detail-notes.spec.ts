@@ -7,6 +7,13 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   const zeroTitle = `NoteなしTask-${suffix}`
   const oneTitle = `Note1件Task-${suffix}`
   const multipleTitle = `Note複数Task-${suffix}`
+  const firstMultipleNote = [
+    `複数ノートの1件目-${suffix}`,
+    '2行目',
+    '3行目',
+    '4行目',
+    '5行目',
+  ].join('\n')
 
   await page.goto('/')
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
@@ -14,7 +21,7 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await addTask(page, zeroTitle, [])
   await addTask(page, oneTitle, ['1件目の関連ノート'])
   await addTask(page, multipleTitle, [
-    '複数ノートの1件目',
+    firstMultipleNote,
     '   ',
     '複数ノートの2件目',
   ])
@@ -27,7 +34,30 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   const multipleTask = page.locator('.task-entry').filter({
     hasText: multipleTitle,
   }).last()
-  await multipleTask.locator('.task-item').click()
+  const dailyPlanRelatedNote = multipleTask
+    .locator('.task-note-list .note-item')
+    .filter({ hasText: firstMultipleNote })
+  await expect(dailyPlanRelatedNote).toHaveClass(/note-related/)
+  await expect(dailyPlanRelatedNote).toHaveAttribute('role', 'button')
+  await page.mouse.move(0, 0)
+  await expect(dailyPlanRelatedNote).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(dailyPlanRelatedNote).toHaveCSS('border-top-width', '0px')
+  await expect(multipleTask).toHaveCSS('border-top-width', '1px')
+
+  const expand = dailyPlanRelatedNote.getByRole('button', {
+    name: 'ノートの続きを読む',
+  })
+  await expect(expand).toBeVisible()
+  await expand.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog', { name: 'タスクの詳細' }))
+    .toHaveCount(0)
+  await expect(dailyPlanRelatedNote.locator('.note-body-expanded'))
+    .toContainText(firstMultipleNote)
+  await expect(expand).toHaveCount(0)
+
+  await dailyPlanRelatedNote.click()
+  await expect(page.getByRole('dialog', { name: 'タスクの詳細' })).toBeVisible()
 
   const detail = page.getByRole('dialog', { name: 'タスクの詳細' })
   const relatedNotes = detail.getByRole('button').filter({

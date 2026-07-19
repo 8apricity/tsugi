@@ -100,6 +100,30 @@ describe('School Date Note body', () => {
     expect(relatedNote).not.toContain('note-detail-chevron')
   })
 
+  it('orders related Note scope, body, and lifecycle as one quiet block', () => {
+    const related = renderToStaticMarkup(
+      <NoteCard
+        noteId="related-draft"
+        body="関連ノート本文"
+        targetScopeLabel="3組"
+        draft
+        changeKind="add"
+        presentation="related"
+        onOpen={() => undefined}
+      />,
+    )
+
+    expect(related).toContain('note-related')
+    expect(related.indexOf('3組')).toBeLessThan(
+      related.indexOf('関連ノート本文'),
+    )
+    expect(related.indexOf('関連ノート本文')).toBeLessThan(
+      related.indexOf('追加予定'),
+    )
+    expect(related).toContain('role="button"')
+    expect(related).not.toContain('note-detail-chevron')
+  })
+
   it('measures NoteCard overflow and expands through its native button', async () => {
     const scrollHeight = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,
@@ -120,6 +144,7 @@ describe('School Date Note body', () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
+    let openCount = 0
 
     try {
       await act(async () => {
@@ -128,6 +153,8 @@ describe('School Date Note body', () => {
             noteId="note-1"
             body={'1行目\n2行目\n3行目\n4行目\n5行目\n6行目'}
             targetScopeLabel="3組"
+            presentation="related"
+            onOpen={() => { openCount += 1 }}
           />,
         )
       })
@@ -138,6 +165,15 @@ describe('School Date Note body', () => {
       expect(button?.tagName).toBe('BUTTON')
       expect(button?.tabIndex).toBe(0)
       expect(button?.getAttribute('aria-expanded')).toBe('false')
+
+      await act(async () => {
+        button?.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }))
+      })
+      expect(openCount).toBe(0)
 
       await act(async () => button?.click())
 

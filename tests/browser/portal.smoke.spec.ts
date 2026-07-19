@@ -175,6 +175,9 @@ test.describe('pointer state separation', () => {
     )
 
     await page.goto('/')
+    await expect(
+      page.getByRole('button', { name: 'この日の予定を編集' }),
+    ).toBeVisible()
 
     const menuButton = page.getByRole('button', { name: 'メニュー' })
     await menuButton.hover()
@@ -192,7 +195,9 @@ test.describe('pointer state separation', () => {
 
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
     const taskAddButton = page.getByRole('button', { name: 'タスクを追加' })
-    await taskAddButton.scrollIntoViewIfNeeded()
+    await taskAddButton.evaluate((element) => {
+      element.scrollIntoView({ block: 'center' })
+    })
     const taskAddBox = await taskAddButton.boundingBox()
     expect(taskAddBox).not.toBeNull()
     if (!taskAddBox) throw new Error('Task add button is not measurable')

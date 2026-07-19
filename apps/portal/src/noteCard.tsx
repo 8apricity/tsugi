@@ -55,6 +55,7 @@ export function NoteCard({
   changeKind = 'add',
   conflicted = false,
   removalReason,
+  presentation = 'independent',
   showChevron = false,
   onOpen,
   onCancelDraft,
@@ -69,6 +70,7 @@ export function NoteCard({
   changeKind?: 'add' | 'update' | 'remove'
   conflicted?: boolean
   removalReason?: 'task-cascade'
+  presentation?: 'independent' | 'related'
   showChevron?: boolean
   onOpen?: () => void
   onCancelDraft?: () => void
@@ -96,13 +98,18 @@ export function NoteCard({
 
   const individuallyRemoved = draft && changeKind === 'remove' &&
     removalReason !== 'task-cascade'
+  const related = presentation === 'related'
+  const hasMeta = (!related && Boolean(targetScopeLabel)) ||
+    (draft && changeKind !== 'remove') || Boolean(onEdit) ||
+    (!draft && Boolean(onRemove)) || Boolean(onOpenHistory)
 
   return (
     <article
       className={`note-item${draft ? ' note-draft' : ''}${
         individuallyRemoved ? ' note-removal-draft' : ''
       }${onOpen ? ' note-detail-target' : ''}${
-        showChevron ? ' note-with-chevron' : ''
+        showChevron && !related ? ' note-with-chevron' : ''
+      }${related ? ' note-related' : ''
       }`}
       data-note-id={noteId}
       role={onOpen ? 'button' : undefined}
@@ -110,12 +117,16 @@ export function NoteCard({
       onClick={onOpen}
       onKeyDown={onOpen
         ? (event) => {
+            if (event.target !== event.currentTarget) return
             if (event.key !== 'Enter' && event.key !== ' ') return
             event.preventDefault()
             onOpen()
           }
         : undefined}
     >
+      {related && targetScopeLabel ? (
+        <span className="task-scope-badge">{targetScopeLabel}</span>
+      ) : null}
       <NoteBodyView
         body={body}
         bodyId={bodyId}
@@ -124,8 +135,8 @@ export function NoteCard({
         onExpand={() => setExpanded(true)}
         bodyRef={bodyRef}
       />
-      <div className="note-meta">
-        {targetScopeLabel ? (
+      {hasMeta ? <div className="note-meta">
+        {!related && targetScopeLabel ? (
           <span className="task-scope-badge">{targetScopeLabel}</span>
         ) : null}
         {draft && changeKind !== 'remove' ? (
@@ -163,8 +174,8 @@ export function NoteCard({
             編集履歴
           </button>
         ) : null}
-      </div>
-      {showChevron ? (
+      </div> : null}
+      {showChevron && !related ? (
         <span className="note-detail-chevron" aria-hidden="true">›</span>
       ) : null}
       {individuallyRemoved ? (

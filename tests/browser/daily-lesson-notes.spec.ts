@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 test('Daily Lesson Notes support multiple and Note-only creation plus detail update/removal', async ({
   page,
@@ -21,7 +21,7 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   await page.getByRole('button', { name: /^7限/ }).click()
 
   let layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
-  await openLayerEditor(layerDialog, 2)
+  await openLayerEditor(layerDialog, '文科')
   let timetableEditor = page.getByRole('dialog', { name: '時間割変更' })
   const includeTimetableChange = timetableEditor.getByRole('checkbox', {
     name: '時間割も変更する',
@@ -41,17 +41,17 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
   await page.getByRole('button', { name: /^7限/ }).click()
   layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
-  await openLayerEditor(layerDialog, 2)
+  await openLayerEditor(layerDialog, '文科')
   timetableEditor = page.getByRole('dialog', { name: '時間割変更' })
 
   await expect(
-    timetableEditor.locator('dt').filter({ hasText: '変更対象日' }),
+    timetableEditor.getByText('変更対象日', { exact: true }),
   ).toBeVisible()
   await expect(
-    timetableEditor.locator('dt').filter({ hasText: '時限' }),
+    timetableEditor.getByText('時限', { exact: true }),
   ).toBeVisible()
   await expect(
-    timetableEditor.locator('dt').filter({ hasText: '変更適用範囲' }),
+    timetableEditor.getByText('変更適用範囲', { exact: true }),
   ).toBeVisible()
   await expect(
     timetableEditor.getByRole('textbox', { name: '変更対象日' }),
@@ -80,7 +80,7 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   ).toBeEnabled()
   await timetableEditor.getByRole('button', { name: '下書きを保存' }).click()
 
-  await openLayerEditor(layerDialog, 1)
+  await openLayerEditor(layerDialog, '3組')
   timetableEditor = page.getByRole('dialog', { name: '時間割変更' })
   await expect(
     timetableEditor.getByRole('checkbox', { name: '時間割も変更する' }),
@@ -96,14 +96,11 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
 
   await page.getByRole('button', { name: /^7限/ }).click()
   layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
-  const noteCard = layerDialog.locator('.layer-note-list .note-item').filter({
-    hasText: noteOnlyBodies[0],
-  })
+  const noteCard = noteButton(layerDialog, noteOnlyBodies[0])
   await expect(noteCard).toHaveCount(1)
-  await expect(noteCard).toHaveAttribute('role', 'button')
   await expect(noteCard).toHaveCSS('background-color', 'rgb(248, 250, 251)')
   await expect(noteCard).toHaveCSS('border-top-width', '1px')
-  await expect(noteCard.locator('.note-detail-chevron')).toHaveText('›')
+  await expect(noteCard).toContainText('›')
   await noteCard.click()
 
   let noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
@@ -117,9 +114,7 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
   await page.getByRole('button', { name: /^7限/ }).click()
   layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
-  await layerDialog.locator('.layer-note-list .note-item').filter({
-    hasText: noteOnlyBodies[0],
-  }).click()
+  await noteButton(layerDialog, noteOnlyBodies[0]).click()
   noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
   await noteDetail.getByRole('textbox', { name: '本文' }).fill(updatedBody)
   await noteDetail.getByRole('button', { name: '下書きを保存' }).click()
@@ -129,9 +124,7 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
   await page.getByRole('button', { name: /^7限/ }).click()
   layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
-  const updatedCard = layerDialog.locator('.layer-note-list .note-item').filter({
-    hasText: updatedBody,
-  })
+  const updatedCard = noteButton(layerDialog, updatedBody)
   await expect(updatedCard).toHaveCount(1)
   await updatedCard.click()
   noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
@@ -142,19 +135,23 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
 
   await page.getByRole('button', { name: /^7限/ }).click()
   layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
-  await expect(layerDialog.locator('.layer-note-list .note-item').filter({
-    hasText: updatedBody,
-  })).toHaveCount(0)
+  await expect(noteButton(layerDialog, updatedBody)).toHaveCount(0)
 })
 
-async function openLayerEditor(layerDialog: ReturnType<Page['getByRole']>, index: number) {
-  await layerDialog.getByRole('button', { name: /時間割を編集/ })
-    .nth(index)
-    .click()
+async function openLayerEditor(layerDialog: Locator, scopeLabel: string) {
+  await layerDialog.getByRole('button', {
+    name: new RegExp(`^${escapeRegExp(scopeLabel)}の時間割を編集`),
+  }).click()
+}
+
+function noteButton(dialog: Locator, body: string) {
+  return dialog.getByRole('button', {
+    name: new RegExp(escapeRegExp(body)),
+  })
 }
 
 async function fillNoteBodies(
-  dialog: ReturnType<Page['getByRole']>,
+  dialog: Locator,
   bodies: string[],
 ) {
   for (const [index, body] of bodies.entries()) {
@@ -164,6 +161,10 @@ async function fillNoteBodies(
     await dialog.getByRole('textbox', { name: `ノート本文 ${index + 1}` })
       .fill(body)
   }
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 async function applyCurrentDrafts(page: Page, count: number) {

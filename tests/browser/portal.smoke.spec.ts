@@ -265,8 +265,8 @@ test.describe('WebKit mobile editors', () => {
     await editableLayer.click()
 
     const timetableDialog = page.getByRole('dialog', { name: '時間割変更' })
-    const changeDateText = timetableDialog.locator('dt').filter({
-      hasText: '変更対象日',
+    const changeDateText = timetableDialog.getByText('変更対象日', {
+      exact: true,
     })
     await expect(timetableDialog).toBeVisible()
     await expect(changeDateText).toBeInViewport()

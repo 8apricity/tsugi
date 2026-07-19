@@ -1014,7 +1014,11 @@ export function createSharedInformationEditorClient({
 
       const noteBodies = normalizeNoteBodies(requestedNoteBodies)
       if (noteBodies === null) return { status: 'invalid-note' as const }
-      if (replacement === null && noteBodies.length === 0) {
+      if (
+        !removeTimetableChange &&
+        replacement === null &&
+        noteBodies.length === 0
+      ) {
         return { status: 'empty' as const }
       }
 

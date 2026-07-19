@@ -80,7 +80,7 @@ import {
   TaskEditHistoryDialog,
   type TaskEditHistoryState,
 } from "./taskEditHistoryView";
-import { TaskDetailDialog, TaskNoteFields } from "./taskDetailView";
+import { NoteBodyFields, TaskDetailDialog } from "./taskDetailView";
 import {
   NoteEditHistoryDialog,
   type NoteEditHistoryState,
@@ -293,6 +293,20 @@ function lessonNameOptionId(prefix: string, index: number) {
 
 function referenceScopeKey(scope: ReferenceScopeOption) {
   return `${scope.type}:${scope.value}`;
+}
+
+function replaceNoteBody(
+  noteBodies: readonly string[],
+  index: number,
+  body: string,
+) {
+  return noteBodies.map((value, noteIndex) =>
+    noteIndex === index ? body : value
+  );
+}
+
+function appendEmptyNoteBody(noteBodies: readonly string[]) {
+  return [...noteBodies, ""];
 }
 
 function shouldShowLessonNameOptions({
@@ -2248,9 +2262,7 @@ function App() {
       current
         ? {
             ...current,
-            noteBodies: current.noteBodies.map((value, noteIndex) =>
-              noteIndex === index ? body : value
-            ),
+            noteBodies: replaceNoteBody(current.noteBodies, index, body),
           }
         : current
     );
@@ -2259,7 +2271,7 @@ function App() {
   function addTaskNoteBody() {
     setTaskEditorForm((current) =>
       current
-        ? { ...current, noteBodies: [...current.noteBodies, ""] }
+        ? { ...current, noteBodies: appendEmptyNoteBody(current.noteBodies) }
         : current
     );
   }
@@ -2269,9 +2281,7 @@ function App() {
       current
         ? {
             ...current,
-            noteBodies: current.noteBodies.map((value, noteIndex) =>
-              noteIndex === index ? body : value
-            ),
+            noteBodies: replaceNoteBody(current.noteBodies, index, body),
           }
         : current
     );
@@ -2280,7 +2290,7 @@ function App() {
   function addTimetableNoteBody() {
     setTimetableEditorForm((current) =>
       current
-        ? { ...current, noteBodies: [...current.noteBodies, ""] }
+        ? { ...current, noteBodies: appendEmptyNoteBody(current.noteBodies) }
         : current
     );
   }
@@ -2603,6 +2613,7 @@ function App() {
     if (!timetableEditorForm || timetableEditor.submitting) return;
     let replacement = timetableEditorForm.replacement;
     if (timetableEditorForm.includeTimetableChange &&
+      !timetableEditorForm.removalPlanned &&
       replacement.type === "lesson_name") {
       const normalizedReplacement = normalizeDirectLessonReplacement(
         replacement.lessonName,
@@ -2635,6 +2646,7 @@ function App() {
     }
     if (
       timetableEditorForm.includeTimetableChange &&
+      !timetableEditorForm.removalPlanned &&
       replacement.type === "floating_lesson_reference" &&
       !replacement.floatingLessonReferenceLabelId
     ) {
@@ -4092,7 +4104,7 @@ function App() {
             >
                 <form id="task-editor-form" onSubmit={saveTaskDraft}>
                   {taskEditorFields}
-                  <TaskNoteFields
+                  <NoteBodyFields
                     noteBodies={taskEditorForm.noteBodies}
                     disabled={timetableEditor.submitting}
                     addDisabled={timetableEditor.atLimit}
@@ -4604,6 +4616,7 @@ function App() {
               saveDisabled={
                 timetableEditor.submitting ||
                 (timetableEditorForm.includeTimetableChange &&
+                  !timetableEditorForm.removalPlanned &&
                   timetableEditorForm.replacement.type === "lesson_name" &&
                   !timetableEditorForm.replacement.registeredLessonNameId &&
                   !timetableEditorOptions)
@@ -4614,7 +4627,11 @@ function App() {
                   <dl className="detail-list timetable-editor-context">
                     <div>
                       <dt>変更対象日</dt>
-                      <dd>{timetableEditorForm.changeDate}</dd>
+                      <dd>
+                        {formatUiSchoolDate(timetableEditorForm.changeDate, {
+                          referenceSchoolDate: selectedSchoolDate,
+                        })}
+                      </dd>
                     </div>
                     <div>
                       <dt>時限</dt>
@@ -4899,7 +4916,7 @@ function App() {
                     </label>
                   ) : null}
 
-                  <TaskNoteFields
+                  <NoteBodyFields
                     noteBodies={timetableEditorForm.noteBodies}
                     onBodyChange={updateTimetableNoteBody}
                     onAddNote={addTimetableNoteBody}

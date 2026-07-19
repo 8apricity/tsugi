@@ -212,6 +212,34 @@ describe('Shared Information editor client', () => {
     })
   })
 
+  it('saves Timetable Change removal without requiring a Daily Lesson Note', () => {
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => '33000000-0000-4000-8000-000000000021',
+    })
+    editor.reconcileLayerState(layerState([{
+      targetScopeType: 'class',
+      state: 'active',
+      sharedInformationItemId: '33000000-0000-4000-8000-000000000020',
+      latestChangeId: '33000000-0000-4000-8000-000000000020:change',
+      replacement: { type: 'cancelled' },
+      changedAt: 1,
+    }]))
+
+    expect(editor.saveDailyLessonDialogDraft({
+      targetScopeType: 'class',
+      schoolDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: null,
+      removeTimetableChange: true,
+      noteBodies: [' '],
+    })).toMatchObject({
+      status: 'saved',
+      savedTimetable: true,
+      savedNotes: 0,
+    })
+  })
+
   it('keeps persisted drafts inside one Student Account workspace and clears that workspace on logout', () => {
     const storage = memoryStorage()
     const editor = createTimetableEditorClient({

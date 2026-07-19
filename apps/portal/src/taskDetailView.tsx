@@ -59,7 +59,7 @@ export function TaskDetailDialog({
         <form id="task-detail-form" onSubmit={onSave}>
           {editorFields}
           {notes}
-          <TaskNoteFields
+          <NoteBodyFields
             noteBodies={editForm.noteBodies}
             onBodyChange={onNoteBodyChange}
             onAddNote={onAddNote}
@@ -173,7 +173,7 @@ export function TaskDetailDialog({
   )
 }
 
-export function TaskNoteFields({
+export function NoteBodyFields({
   noteBodies,
   onBodyChange,
   onAddNote,

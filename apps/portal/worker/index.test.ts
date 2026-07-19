@@ -755,6 +755,11 @@ describe('Timetable Direct Add API', () => {
     )).json()) as { finalDailyLesson: { lessonName: string; timetableChangeState: string } }
     expect(standardFallback.finalDailyLesson).toEqual({
       lessonName: '現代文',
+      lessonReference: {
+        type: 'period_reference',
+        weekday: 5,
+        periodNumber: 4,
+      },
       timetableChangeState: 'unchanged',
     })
     const fallbackPlan = (await (await readDailyPlan(
@@ -1890,6 +1895,11 @@ describe('Timetable Layer read API', () => {
       ],
       finalDailyLesson: {
         lessonName: '自走',
+        lessonReference: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: '2026:2:★',
+          referenceLabel: '★',
+        },
         timetableChangeState: 'resolved',
       },
     })
@@ -2009,10 +2019,20 @@ describe('Timetable Layer read API', () => {
     })
     expect(await finalDailyLesson(periodReference)).toEqual({
       lessonName: '古典',
+      lessonReference: {
+        type: 'period_reference',
+        weekday: 2,
+        periodNumber: 2,
+      },
       timetableChangeState: 'resolved',
     })
     expect(await finalDailyLesson(floatingReference)).toEqual({
       lessonName: '自走',
+      lessonReference: {
+        type: 'floating_lesson_reference',
+        floatingLessonReferenceLabelId: '2026:2:★',
+        referenceLabel: '★',
+      },
       timetableChangeState: 'resolved',
     })
   })
@@ -3289,12 +3309,22 @@ describe('Daily Plan read API', () => {
     expect(humanitiesBody.periods[1]).toEqual({
       periodNumber: 2,
       lessonName: '古典',
+      lessonReference: {
+        type: 'period_reference',
+        weekday: 2,
+        periodNumber: 2,
+      },
       hasTasks: false,
       notes: [],
     })
     expect(scienceBody.periods[1]).toEqual({
       periodNumber: 2,
       lessonName: '生物',
+      lessonReference: {
+        type: 'period_reference',
+        weekday: 2,
+        periodNumber: 2,
+      },
       hasTasks: false,
       notes: [],
     })

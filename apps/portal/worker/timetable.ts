@@ -7,6 +7,30 @@ import type {
   TimetableReplacement,
 } from '../shared/timetableProjection'
 
+export type DisplayTimetableReplacement =
+  | Exclude<TimetableReplacement, { type: 'floating_lesson_reference' }>
+  | (Extract<
+      TimetableReplacement,
+      { type: 'floating_lesson_reference' }
+    > & { referenceLabel: string })
+
+export async function withTimetableReferenceLabel(
+  replacement: TimetableReplacement,
+  affiliation: StudentAffiliation,
+  store: DailyPlanStore,
+): Promise<DisplayTimetableReplacement> {
+  if (replacement.type !== 'floating_lesson_reference') return replacement
+  const entry = await store.findStandardTimetableEntryForFloatingReferenceLabelId(
+    affiliation.classId,
+    affiliation.trackId,
+    replacement.floatingLessonReferenceLabelId,
+  )
+  return {
+    ...replacement,
+    referenceLabel: entry?.referenceLabel ?? '不明な参照',
+  }
+}
+
 export async function createTimetableReferenceResolver(
   replacements: readonly TimetableReplacement[],
   affiliation: StudentAffiliation,

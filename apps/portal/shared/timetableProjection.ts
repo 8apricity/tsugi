@@ -12,7 +12,11 @@ export type TimetableReplacement =
       registeredLessonNameId?: string
     }
   | { type: 'period_reference'; weekday: number; periodNumber: number }
-  | { type: 'floating_lesson_reference'; floatingLessonReferenceLabelId: string }
+  | {
+      type: 'floating_lesson_reference'
+      floatingLessonReferenceLabelId: string
+      referenceLabel?: string
+    }
   | { type: 'cancelled' }
 
 export type TimetableReference = Extract<
@@ -43,6 +47,7 @@ export function timetableReplacementsEqual(
 
 export type ProjectedDailyLesson = {
   lessonName: string
+  lessonReference?: TimetableReference
   timetableChangeState:
     | 'unchanged'
     | 'resolved'
@@ -80,12 +85,17 @@ export type StandardTimetableProjectionInput =
   | {
       type: 'candidates'
       selectedTrackId: string
+      periodReference?: { weekday: number; periodNumber: number }
       candidates: readonly {
         trackId: string | null
         lessonName: string
       }[]
     }
-  | { type: 'selected'; lessonName: string }
+  | {
+      type: 'selected'
+      lessonName: string
+      periodReference?: { weekday: number; periodNumber: number }
+    }
   | null
 
 export function projectTimetableSlot({
@@ -113,6 +123,14 @@ export function projectTimetableSlot({
   )
   let finalDailyLesson: ProjectedDailyLesson = {
     lessonName: standardTimetable?.lessonName ?? '',
+    ...(standardTimetable?.periodReference
+      ? {
+          lessonReference: {
+            type: 'period_reference' as const,
+            ...standardTimetable.periodReference,
+          },
+        }
+      : {}),
     timetableChangeState: 'unchanged',
   }
   const layers: ProjectedTimetableLayer[] = []
@@ -153,10 +171,20 @@ export function projectTimetableSlot({
 
 function selectStandardTimetable(
   input: StandardTimetableProjectionInput,
-): { lessonName: string } | null {
+): {
+  lessonName: string
+  periodReference?: { weekday: number; periodNumber: number }
+} | null {
   if (!input) return null
   if (input.type === 'selected') {
-    return input.lessonName === '' ? null : { lessonName: input.lessonName }
+    return input.lessonName === ''
+      ? null
+      : {
+          lessonName: input.lessonName,
+          ...(input.periodReference
+            ? { periodReference: input.periodReference }
+            : {}),
+        }
   }
   const candidates = input.candidates.filter(
     (candidate) => candidate.lessonName !== '',
@@ -164,7 +192,14 @@ function selectStandardTimetable(
   const selected = candidates.find(
     (candidate) => candidate.trackId === input.selectedTrackId,
   ) ?? candidates.find((candidate) => candidate.trackId === null)
-  return selected ? { lessonName: selected.lessonName } : null
+  return selected
+    ? {
+        lessonName: selected.lessonName,
+        ...(input.periodReference
+          ? { periodReference: input.periodReference }
+          : {}),
+      }
+    : null
 }
 
 function resolveReplacement(
@@ -179,9 +214,21 @@ function resolveReplacement(
   }
   const lessonName = resolveReference(replacement)
   if (lessonName !== null) {
-    return { lessonName, timetableChangeState: 'resolved' }
+    return {
+      lessonName,
+      lessonReference: replacement,
+      timetableChangeState: 'resolved',
+    }
   }
   return replacement.type === 'floating_lesson_reference'
-    ? { lessonName: 'エラー', timetableChangeState: 'unresolved-reference' }
-    : { lessonName: '', timetableChangeState: 'cancelled' }
+    ? {
+        lessonName: 'エラー',
+        lessonReference: replacement,
+        timetableChangeState: 'unresolved-reference',
+      }
+    : {
+        lessonName: '',
+        lessonReference: replacement,
+        timetableChangeState: 'cancelled',
+      }
 }

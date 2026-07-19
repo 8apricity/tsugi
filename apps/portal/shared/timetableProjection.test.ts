@@ -5,6 +5,84 @@ import {
 } from './timetableProjection'
 
 describe('Timetable Projection', () => {
+  it.each([
+    {
+      label: 'Standard Timetable',
+      standardTimetable: {
+        type: 'selected' as const,
+        lessonName: '数学',
+        periodReference: { weekday: 1, periodNumber: 1 },
+      },
+      activeLayers: [],
+      resolvedReference: null,
+      expected: {
+        lessonName: '数学',
+        lessonReference: { type: 'period_reference', weekday: 1, periodNumber: 1 },
+        timetableChangeState: 'unchanged',
+      },
+    },
+    {
+      label: 'Period Reference',
+      standardTimetable: null,
+      activeLayers: [{
+        targetScopeType: 'class' as const,
+        replacement: { type: 'period_reference' as const, weekday: 1, periodNumber: 3 },
+      }],
+      resolvedReference: '家庭科',
+      expected: {
+        lessonName: '家庭科',
+        lessonReference: { type: 'period_reference', weekday: 1, periodNumber: 3 },
+        timetableChangeState: 'resolved',
+      },
+    },
+    {
+      label: 'Floating Reference',
+      standardTimetable: null,
+      activeLayers: [{
+        targetScopeType: 'student' as const,
+        replacement: {
+          type: 'floating_lesson_reference' as const,
+          floatingLessonReferenceLabelId: 'star',
+          referenceLabel: '★',
+        },
+      }],
+      resolvedReference: '英語',
+      expected: {
+        lessonName: '英語',
+        lessonReference: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: 'star',
+          referenceLabel: '★',
+        },
+        timetableChangeState: 'resolved',
+      },
+    },
+    {
+      label: 'direct custom lesson name',
+      standardTimetable: null,
+      activeLayers: [{
+        targetScopeType: 'track' as const,
+        replacement: { type: 'lesson_name' as const, lessonName: '探究ゼミ' },
+      }],
+      resolvedReference: null,
+      expected: {
+        lessonName: '探究ゼミ',
+        timetableChangeState: 'resolved',
+      },
+    },
+  ])('projects the effective Lesson Name source for $label', ({
+    standardTimetable,
+    activeLayers,
+    resolvedReference,
+    expected,
+  }) => {
+    expect(projectTimetableSlot({
+      standardTimetable,
+      activeLayers,
+      resolveReference: () => resolvedReference,
+    }).finalDailyLesson).toEqual(expected)
+  })
+
   it('selects the track Standard Timetable value and applies narrower active layers', () => {
     expect(projectTimetableSlot({
       standardTimetable: {
@@ -150,7 +228,11 @@ describe('Timetable Projection', () => {
   it.each<{
     replacement: TimetableReplacement
     resolvedReference: string | null
-    expected: { lessonName: string; timetableChangeState: string }
+    expected: {
+      lessonName: string
+      lessonReference?: TimetableReplacement
+      timetableChangeState: string
+    }
   }>([
     {
       replacement: { type: 'lesson_name', lessonName: '学年行事' },
@@ -165,7 +247,11 @@ describe('Timetable Projection', () => {
     {
       replacement: { type: 'period_reference', weekday: 1, periodNumber: 2 },
       resolvedReference: '古典',
-      expected: { lessonName: '古典', timetableChangeState: 'resolved' },
+      expected: {
+        lessonName: '古典',
+        lessonReference: { type: 'period_reference', weekday: 1, periodNumber: 2 },
+        timetableChangeState: 'resolved',
+      },
     },
     {
       replacement: {
@@ -173,12 +259,23 @@ describe('Timetable Projection', () => {
         floatingLessonReferenceLabelId: 'star',
       },
       resolvedReference: '自走',
-      expected: { lessonName: '自走', timetableChangeState: 'resolved' },
+      expected: {
+        lessonName: '自走',
+        lessonReference: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: 'star',
+        },
+        timetableChangeState: 'resolved',
+      },
     },
     {
       replacement: { type: 'period_reference', weekday: 7, periodNumber: 7 },
       resolvedReference: null,
-      expected: { lessonName: '', timetableChangeState: 'cancelled' },
+      expected: {
+        lessonName: '',
+        lessonReference: { type: 'period_reference', weekday: 7, periodNumber: 7 },
+        timetableChangeState: 'cancelled',
+      },
     },
     {
       replacement: {
@@ -186,7 +283,14 @@ describe('Timetable Projection', () => {
         floatingLessonReferenceLabelId: 'unknown',
       },
       resolvedReference: null,
-      expected: { lessonName: 'エラー', timetableChangeState: 'unresolved-reference' },
+      expected: {
+        lessonName: 'エラー',
+        lessonReference: {
+          type: 'floating_lesson_reference',
+          floatingLessonReferenceLabelId: 'unknown',
+        },
+        timetableChangeState: 'unresolved-reference',
+      },
     },
   ])('resolves $replacement.type into the final Daily Lesson', ({
     replacement,

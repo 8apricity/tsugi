@@ -1,4 +1,5 @@
 import { shiftSchoolDate } from "./dailyPlanView";
+import type { TimetableReference } from "../shared/timetableProjection";
 
 export type SchoolYearRange = {
   startsOn: string;
@@ -21,6 +22,7 @@ export type DailyPlanForCache = {
   periods: Array<{
     periodNumber: number;
     lessonName: string;
+    lessonReference?: TimetableReference;
     hasTasks: boolean;
     notes: DailyPlanNoteForCache[];
   }>;

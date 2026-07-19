@@ -135,19 +135,30 @@ describe('Daily Plan module', () => {
     }
 
     expect(
-      result.periods.map(({ periodNumber, lessonName, hasTasks }) => ({
+      result.periods.map(({ periodNumber, lessonName, lessonReference, hasTasks }) => ({
         periodNumber,
         lessonName,
+        lessonReference,
         hasTasks,
       })),
     ).toEqual([
-      { periodNumber: 1, lessonName: '地理', hasTasks: false },
-      { periodNumber: 2, lessonName: '', hasTasks: false },
-      { periodNumber: 3, lessonName: '', hasTasks: false },
-      { periodNumber: 4, lessonName: '現代文', hasTasks: false },
-      { periodNumber: 5, lessonName: '', hasTasks: false },
-      { periodNumber: 6, lessonName: '', hasTasks: false },
-      { periodNumber: 7, lessonName: '', hasTasks: false },
+      {
+        periodNumber: 1,
+        lessonName: '地理',
+        lessonReference: { type: 'period_reference', weekday: 5, periodNumber: 1 },
+        hasTasks: false,
+      },
+      { periodNumber: 2, lessonName: '', lessonReference: undefined, hasTasks: false },
+      { periodNumber: 3, lessonName: '', lessonReference: undefined, hasTasks: false },
+      {
+        periodNumber: 4,
+        lessonName: '現代文',
+        lessonReference: { type: 'period_reference', weekday: 5, periodNumber: 4 },
+        hasTasks: false,
+      },
+      { periodNumber: 5, lessonName: '', lessonReference: undefined, hasTasks: false },
+      { periodNumber: 6, lessonName: '', lessonReference: undefined, hasTasks: false },
+      { periodNumber: 7, lessonName: '', lessonReference: undefined, hasTasks: false },
     ])
   })
 

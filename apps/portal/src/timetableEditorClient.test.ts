@@ -1366,6 +1366,11 @@ describe('Shared Information editor client', () => {
 
     expect(editor.previewLayerState(server, () => null).finalDailyLesson).toEqual({
       lessonName: 'エラー',
+      lessonReference: {
+        type: 'floating_lesson_reference',
+        floatingLessonReferenceLabelId: 'unknown',
+        referenceLabel: '★',
+      },
       timetableChangeState: 'unresolved-reference',
     })
   })

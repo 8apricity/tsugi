@@ -1,6 +1,7 @@
 import {
   projectTimetableSlot,
   type ProjectedDailyLesson,
+  type TimetableReference,
 } from '../shared/timetableProjection'
 import {
   type ActiveTimetableChange,
@@ -18,6 +19,7 @@ import {
 import {
   createTimetableReferenceResolver,
   isValidSchoolDate,
+  withTimetableReferenceLabel,
   weekdayForSchoolDate,
 } from './timetable'
 
@@ -75,6 +77,7 @@ export type DailyPlanResult =
       periods: Array<{
         periodNumber: number
         lessonName: string
+        lessonReference?: TimetableReference
         timetableChangeState?: 'resolved' | 'cancelled' | 'unresolved-reference'
         hasTasks: boolean
         notes: DailyPlanNote[]
@@ -243,6 +246,7 @@ export async function readDailyPlansRange({
       tasks,
       notes,
       projectedLessons: await projectDailyPlanLessons(
+        weekdayForSchoolDate(date),
         entriesByWeekday.get(weekdayForSchoolDate(date)) ?? [],
         activeTimetableChanges.filter((change) => change.changeDate === date),
         sharedContext.studentAffiliation,
@@ -307,6 +311,7 @@ async function readDailyPlanForAuthenticatedStudent({
     tasks,
     notes,
     projectedLessons: await projectDailyPlanLessons(
+      weekday,
       standardTimetableEntries,
       activeTimetableChanges,
       sharedContext.studentAffiliation,
@@ -401,6 +406,9 @@ function buildReadyDailyPlan({
       return {
         periodNumber,
         lessonName,
+        ...(projectedLesson?.lessonReference
+          ? { lessonReference: projectedLesson.lessonReference }
+          : {}),
         ...(projectedLesson && projectedLesson.timetableChangeState !== 'unchanged'
           ? { timetableChangeState: projectedLesson.timetableChangeState }
           : {}),
@@ -485,6 +493,7 @@ function compareDailyLessonNotes(
 }
 
 async function projectDailyPlanLessons(
+  weekday: number,
   standardTimetableEntries: PeriodStandardTimetableEntry[],
   changes: ActiveTimetableChange[],
   affiliation: StudentAffiliation,
@@ -492,12 +501,16 @@ async function projectDailyPlanLessons(
 ) {
   const result = new Map<number, ProjectedDailyLesson>()
   for (let periodNumber = 1; periodNumber <= 7; periodNumber += 1) {
-    const activeLayers = changes
+    const activeLayers = await Promise.all(changes
       .filter((change) => change.periodNumber === periodNumber)
-      .map((change) => ({
+      .map(async (change) => ({
         targetScopeType: change.targetScope.type,
-        replacement: change.replacement,
-      }))
+        replacement: await withTimetableReferenceLabel(
+          change.replacement,
+          affiliation,
+          store,
+        ),
+      })))
     const resolveReference = await createTimetableReferenceResolver(
       activeLayers.map((layer) => layer.replacement),
       affiliation,
@@ -507,6 +520,7 @@ async function projectDailyPlanLessons(
       standardTimetable: {
         type: 'candidates',
         selectedTrackId: affiliation.trackId,
+        periodReference: { weekday, periodNumber },
         candidates: standardTimetableEntries.filter(
           (entry) => entry.periodNumber === periodNumber,
         ),

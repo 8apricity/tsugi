@@ -204,6 +204,7 @@ export type TimetableLayerState = {
   >
   finalDailyLesson: {
     lessonName: string
+    lessonReference?: TimetableReference
     timetableChangeState:
       | 'unchanged'
       | 'resolved'
@@ -1571,7 +1572,11 @@ export function createSharedInformationEditorClient({
       )
       const projection = projectTimetableSlot({
         standardTimetable: state.standardTimetable
-          ? { type: 'selected', lessonName: state.standardTimetable.lessonName }
+          ? {
+              type: 'selected',
+              lessonName: state.standardTimetable.lessonName,
+              periodReference: state.standardTimetable.periodReference,
+            }
           : null,
         activeLayers: state.layers.flatMap((layer) =>
           layer.state === 'active'

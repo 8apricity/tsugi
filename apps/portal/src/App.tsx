@@ -807,7 +807,10 @@ function App() {
         return (await response.json()) as TimetableLayerState;
       }),
     )
-      .then((states) => timetableEditorClient.reconcileLayerStates(states))
+      .then((states) => {
+        timetableLayerCacheRef.current.store(states);
+        timetableEditorClient.reconcileLayerStates(states);
+      })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setTimetableEditorMessage(
@@ -3500,6 +3503,31 @@ function App() {
                           draft.changeDate === selectedSchoolDate &&
                           draft.periodNumber === period.periodNumber,
                       );
+                      const layerState = timetableLayerCacheRef.current.get(
+                        selectedSchoolDate,
+                        period.periodNumber,
+                      );
+                      const projectedLesson = lifecycleDrafts.length > 0 && layerState
+                        ? timetableEditorClient.previewLayerState(
+                            layerState,
+                            (reference) => resolveReplacementLessonName(
+                              reference,
+                              timetableEditorOptions,
+                            ),
+                          ).finalDailyLesson
+                        : period;
+                      const removalPlanned = lifecycleDrafts.some(
+                        (draft) => draft.changeKind === "remove",
+                      );
+                      const accessibleLessonLabel = timetableEditor.editing
+                        ? lifecycleDrafts.length > 0
+                          ? dailyLessonTransitionAccessibleLabel(
+                              period,
+                              projectedLesson,
+                              removalPlanned,
+                            )
+                          : effectiveDailyLessonAccessibleLabel(period)
+                        : period.lessonName || "空欄";
                       return (
                       <article
                         className={`period-row inspectable ${
@@ -3519,7 +3547,7 @@ function App() {
                           <button
                             className="period-inspect-button"
                             type="button"
-                            aria-label={`${period.periodNumber}限 ${period.lessonName || "空欄"}${
+                            aria-label={`${period.periodNumber}限 ${accessibleLessonLabel}${
                               lifecycleDrafts.length > 0
                                 ? ` ${lifecycleDrafts.map((draft) =>
                                     lifecycleLabel(
@@ -3533,8 +3561,40 @@ function App() {
                           >
                             <span className="period-main">
                               <span className="lesson-line">
-                                <span className="lesson-name">
-                                  {period.lessonName}
+                                <span
+                                  className={`lesson-name${
+                                    removalPlanned
+                                      ? " timetable-change-removal-draft"
+                                      : ""
+                                  }`}
+                                  {...(timetableEditor.editing
+                                    ? { "aria-label": accessibleLessonLabel }
+                                    : {})}
+                                >
+                                  <span aria-hidden={timetableEditor.editing || undefined}>
+                                    {timetableEditor.editing
+                                      ? lifecycleDrafts.length > 0
+                                        ? (
+                                          <span className="lesson-transition">
+                                            <EffectiveDailyLesson lesson={period} />
+                                            <span
+                                              className="lesson-transition-arrow"
+                                              aria-hidden="true"
+                                            >
+                                              ▶
+                                            </span>
+                                            <EffectiveDailyLesson lesson={projectedLesson} />
+                                          </span>
+                                        )
+                                        : <EffectiveDailyLesson lesson={period} />
+                                      : period.lessonName}
+                                  </span>
+                                  {removalPlanned ? (
+                                    <RemovalMark
+                                      className="timetable-change-removal-mark"
+                                      label="時間割変更の削除予定"
+                                    />
+                                  ) : null}
                                 </span>
                                 {period.hasTasks ? (
                                   <span className="task-pill">タスク</span>
@@ -4630,6 +4690,7 @@ function App() {
                         ).weekdayLabel
                       }${timetableLayerDialog.periodNumber}`}
                     />
+                    <LayerFlowArrow />
                     {layerPreview.layers.map((layer) => {
                       const existingDraft = timetableEditorClient.findDraft(
                         layer.targetScopeType,
@@ -4719,6 +4780,7 @@ function App() {
                           notesOpenDetail: true,
                         },
                       )}
+                      <LayerFlowArrow />
                       </div>
                       );
                     })}
@@ -5353,7 +5415,6 @@ function LayerRow({
     </>
   );
   return (
-    <>
       <div
         className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
       >
@@ -5407,11 +5468,11 @@ function LayerRow({
           </div>
         ) : null}
       </div>
-      <div className="layer-flow-arrow" aria-hidden="true">
-        ↓
-      </div>
-    </>
   );
+}
+
+function LayerFlowArrow() {
+  return <div className="layer-flow-arrow" aria-hidden="true" />;
 }
 
 function PeriodWheelPicker({
@@ -5983,6 +6044,50 @@ function replacementLabel(replacement: TimetableReplacement) {
     return replacement.referenceLabel;
   }
   return "休講";
+}
+
+type EffectiveDailyLesson = {
+  lessonName: string;
+  lessonReference?: TimetableReference;
+};
+
+function EffectiveDailyLesson({ lesson }: { lesson: EffectiveDailyLesson }) {
+  return (
+    <span className="effective-daily-lesson">
+      <span>{lesson.lessonName || "授業なし"}</span>
+      {lesson.lessonReference ? (
+        <span className="lesson-reference">
+          （{lessonReferenceLabel(lesson.lessonReference)}）
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function lessonReferenceLabel(reference: TimetableReference) {
+  if (reference.type === "period_reference") {
+    return `${"月火水木金土日"[reference.weekday - 1]}${reference.periodNumber}`;
+  }
+  return reference.referenceLabel ?? "不明な参照";
+}
+
+function effectiveDailyLessonAccessibleLabel(lesson: EffectiveDailyLesson) {
+  const lessonName = lesson.lessonName || "授業なし";
+  return lesson.lessonReference
+    ? `${lessonName}、参照元 ${lessonReferenceLabel(lesson.lessonReference)}`
+    : lessonName;
+}
+
+function dailyLessonTransitionAccessibleLabel(
+  before: EffectiveDailyLesson,
+  after: EffectiveDailyLesson,
+  removalPlanned: boolean,
+) {
+  return [
+    `現在 ${effectiveDailyLessonAccessibleLabel(before)}。`,
+    `変更後 ${effectiveDailyLessonAccessibleLabel(after)}。`,
+    ...(removalPlanned ? ["時間割変更の削除予定。"] : []),
+  ].join("");
 }
 
 function resolveReplacementLessonName(

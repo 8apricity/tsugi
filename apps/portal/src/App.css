@@ -307,9 +307,64 @@ button.period-inspect-button:active {
 }
 
 .lesson-name {
+  position: relative;
+  display: inline-block;
   min-height: 24px;
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.effective-daily-lesson {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lesson-reference {
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+.lesson-transition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.lesson-transition-arrow {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+}
+
+.timetable-change-removal-draft {
+  isolation: isolate;
+  margin: -4px -8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #fbe8e8;
+}
+
+.timetable-change-removal-draft > :not(.timetable-change-removal-mark) {
+  opacity: 0.54;
+}
+
+.timetable-change-removal-mark {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.timetable-change-removal-mark svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: #8b2f2f;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .task-pill {
@@ -1910,11 +1965,17 @@ button.timetable-layer-row {
 }
 
 .layer-flow-arrow {
+  display: grid;
   height: 22px;
-  color: var(--color-accent);
-  font-weight: 800;
-  line-height: 22px;
-  text-align: center;
+  place-items: center;
+}
+
+.layer-flow-arrow::before {
+  width: 14px;
+  height: 8px;
+  background: #1f2933;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  content: "";
 }
 
 .layer-result-row {

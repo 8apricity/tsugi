@@ -4,22 +4,21 @@ import type {
   StudentAccountAccessStore,
   StudentAffiliation,
   TargetScopeType,
-  TimetableChangeReplacement,
 } from './persistence'
-import { projectTimetableSlot } from '../shared/timetableProjection'
+import {
+  projectTimetableSlot,
+  type TimetableReference,
+} from '../shared/timetableProjection'
 import { resolveStudentOperationalContext } from './studentOperationalContext'
 import {
   createTimetableReferenceResolver,
   isValidSchoolDate,
+  type DisplayTimetableReplacement,
+  withTimetableReferenceLabel,
   weekdayForSchoolDate,
 } from './timetable'
 
-type TimetableLayerReplacement =
-  | Exclude<TimetableChangeReplacement, { type: 'floating_lesson_reference' }>
-  | (Extract<
-      TimetableChangeReplacement,
-      { type: 'floating_lesson_reference' }
-    > & { referenceLabel: string })
+type TimetableLayerReplacement = DisplayTimetableReplacement
 
 type TimetableLayerNote = {
   noteId: string
@@ -60,6 +59,7 @@ export type TimetableChangeLayerResult =
       >
       finalDailyLesson: {
         lessonName: string
+        lessonReference?: TimetableReference
         timetableChangeState:
           | 'unchanged'
           | 'resolved'
@@ -271,10 +271,19 @@ async function buildReadyLayerState({
       .filter((change) => change.periodNumber === selectedPeriod)
       .map((change) => [change.targetScope.type, change]),
   )
-  const activeLayers = [...changesByLayer.values()].map((change) => ({
-    targetScopeType: change.targetScope.type,
-    replacement: change.replacement,
-  }))
+  const activeLayers = await Promise.all(
+    [...changesByLayer.values()].map(async (change) => ({
+      targetScopeType: change.targetScope.type,
+      replacement: await withTimetableReferenceLabel(
+        change.replacement,
+        affiliation,
+        store,
+      ),
+    })),
+  )
+  const activeLayerByScope = new Map(
+    activeLayers.map((layer) => [layer.targetScopeType, layer]),
+  )
   const resolveReference = await createTimetableReferenceResolver(
     activeLayers.map((layer) => layer.replacement),
     affiliation,
@@ -284,6 +293,7 @@ async function buildReadyLayerState({
     standardTimetable: {
       type: 'candidates',
       selectedTrackId: affiliation.trackId,
+      periodReference: { weekday, periodNumber: selectedPeriod },
       candidates: standardEntries.filter(
         (entry) => entry.periodNumber === selectedPeriod,
       ),
@@ -317,7 +327,8 @@ async function buildReadyLayerState({
             state: 'active' as const,
             sharedInformationItemId: change.sharedInformationItemId,
             latestChangeId: change.latestChangeId,
-            replacement: await displayReplacement(change, affiliation, store),
+            replacement: activeLayerByScope.get(layer.targetScopeType)!
+              .replacement,
             changedAt: change.changedAt,
             ...(notes.length > 0 ? { notes } : {}),
           }
@@ -341,24 +352,5 @@ async function buildReadyLayerState({
       : null,
     layers,
     finalDailyLesson: projection.finalDailyLesson,
-  }
-}
-
-async function displayReplacement(
-  change: ActiveTimetableChange,
-  affiliation: StudentAffiliation,
-  store: DailyPlanStore,
-): Promise<TimetableLayerReplacement> {
-  if (change.replacement.type !== 'floating_lesson_reference') {
-    return change.replacement
-  }
-  const entry = await store.findStandardTimetableEntryForFloatingReferenceLabelId(
-    affiliation.classId,
-    affiliation.trackId,
-    change.replacement.floatingLessonReferenceLabelId,
-  )
-  return {
-    ...change.replacement,
-    referenceLabel: entry?.referenceLabel ?? '不明な参照',
   }
 }

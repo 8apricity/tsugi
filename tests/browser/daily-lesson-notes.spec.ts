@@ -148,6 +148,23 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
   const noteCard = noteButton(layerDialog, noteOnlyBodies[0])
   await expect(noteCard).toHaveCount(1)
+  const layerPresentation = await noteCard.evaluate((note) => {
+    const layer = note.closest('.layer-with-notes')
+    const arrow = layer?.querySelector('.layer-flow-arrow')
+    const style = arrow
+      ? arrow.ownerDocument.defaultView?.getComputedStyle(arrow, '::before')
+      : null
+    return {
+      notePrecedesArrow: !!arrow && !!(
+        note.compareDocumentPosition(arrow) & 4
+      ),
+      backgroundColor: style?.backgroundColor,
+      clipPath: style?.clipPath,
+    }
+  })
+  expect(layerPresentation.notePrecedesArrow).toBe(true)
+  expect(layerPresentation.backgroundColor).toBe('rgb(31, 41, 51)')
+  expect(layerPresentation.clipPath).toContain('polygon')
   await expect(noteCard.getByText('3組', { exact: true })).toHaveCount(0)
   await expect(noteCard).toHaveCSS('background-color', 'rgb(248, 250, 251)')
   await expect(noteCard).toHaveCSS('border-top-width', '1px')

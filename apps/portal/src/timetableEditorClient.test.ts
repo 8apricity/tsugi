@@ -484,19 +484,26 @@ describe('Shared Information editor client', () => {
 
   it('restores related Note drafts and conflicts when active Task removal is cancelled', async () => {
     const taskId = '33000000-0000-4000-8000-000000000141'
-    const noteSourceId = '33000000-0000-4000-8000-000000000142'
-    const taskRemovalSourceId = '33000000-0000-4000-8000-000000000143'
+    const addedNoteSourceId = '33000000-0000-4000-8000-000000000142'
+    const updatedNoteSourceId = '33000000-0000-4000-8000-000000000143'
+    const removedNoteSourceId = '33000000-0000-4000-8000-000000000146'
+    const taskRemovalSourceId = '33000000-0000-4000-8000-000000000147'
     const storage = memoryStorage()
     const editor = createTimetableEditorClient({
       storage,
       createId: (() => {
-        const ids = [noteSourceId, taskRemovalSourceId]
+        const ids = [
+          addedNoteSourceId,
+          updatedNoteSourceId,
+          removedNoteSourceId,
+          taskRemovalSourceId,
+        ]
         return () => ids.shift()!
       })(),
       submitDirectTimetableChanges: async () => ({
         status: 'remote-conflict',
         conflictingKeys: [],
-        conflictingSourceIds: [noteSourceId],
+        conflictingSourceIds: [updatedNoteSourceId],
       }),
     })
     const activeTask = {
@@ -515,16 +522,32 @@ describe('Shared Information editor client', () => {
       targetScopeType: 'track' as const,
       relatedTaskItemId: taskId,
     }
+    const removedActiveNote = {
+      ...activeNote,
+      noteId: '33000000-0000-4000-8000-000000000145',
+      latestChangeId: '33000000-0000-4000-8000-000000000145:change',
+      body: '削除する元のノート',
+    }
 
+    expect(editor.saveTaskNoteDraft(activeTask, '追加ノート')).toEqual({
+      status: 'saved', sourceId: addedNoteSourceId,
+    })
     expect(editor.saveNoteUpdateDraft(activeNote, '下書きの変更')).toEqual({
-      status: 'saved', sourceId: noteSourceId,
+      status: 'saved', sourceId: updatedNoteSourceId,
+    })
+    expect(editor.saveNoteRemoveDraft(removedActiveNote)).toEqual({
+      status: 'saved', sourceId: removedNoteSourceId,
     })
     await editor.submitCurrentBatch({
       confirmSubmission: () => true,
       applyFreshness: () => 'refreshed',
     })
     expect(editor.getSnapshot()).toMatchObject({
-      noteDrafts: [{ sourceId: noteSourceId, conflicted: true }],
+      noteDrafts: [
+        { sourceId: addedNoteSourceId, changeKind: 'add' },
+        { sourceId: updatedNoteSourceId, changeKind: 'update', conflicted: true },
+        { sourceId: removedNoteSourceId, changeKind: 'remove' },
+      ],
       conflictCount: 1,
     })
 
@@ -543,12 +566,24 @@ describe('Shared Information editor client', () => {
     })
     expect(restored.getSnapshot()).toMatchObject({
       taskDrafts: [],
-      noteDrafts: [{
-        sourceId: noteSourceId,
-        changeKind: 'update',
-        body: '下書きの変更',
-        conflicted: true,
-      }],
+      noteDrafts: [
+        {
+          sourceId: addedNoteSourceId,
+          changeKind: 'add',
+          body: '追加ノート',
+        },
+        {
+          sourceId: updatedNoteSourceId,
+          changeKind: 'update',
+          body: '下書きの変更',
+          conflicted: true,
+        },
+        {
+          sourceId: removedNoteSourceId,
+          changeKind: 'remove',
+          body: '削除する元のノート',
+        },
+      ],
       conflictCount: 1,
     })
   })

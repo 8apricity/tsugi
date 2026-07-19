@@ -541,6 +541,17 @@ button.period-inspect-button:active {
   cursor: pointer;
 }
 
+.task-removal-draft {
+  position: relative;
+  min-height: 74px;
+  border-color: #e3b4b4;
+  background: #fdecec;
+}
+
+.task-removal-draft > :not(.task-removal-mark) {
+  opacity: 0.48;
+}
+
 .task-draft-actions {
   display: flex;
   flex-wrap: wrap;
@@ -667,7 +678,8 @@ button.period-inspect-button:active {
   opacity: 0.48;
 }
 
-.note-removal-mark {
+.note-removal-mark,
+.task-removal-mark {
   position: absolute;
   z-index: 1;
   inset: 0;
@@ -677,7 +689,8 @@ button.period-inspect-button:active {
   pointer-events: none;
 }
 
-.note-removal-mark svg {
+.note-removal-mark svg,
+.task-removal-mark svg {
   width: 38px;
   height: 38px;
   fill: none;

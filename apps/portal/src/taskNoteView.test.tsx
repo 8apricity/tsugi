@@ -73,10 +73,25 @@ describe('Task Note view', () => {
     expect(html).toContain('あ'.repeat(80))
     expect(html).toContain('短いノート')
     expect(html).toContain('キャンセル')
+    expect(html).toContain('autofocus=""')
     expect(html).toContain('削除予定にする')
   })
 
-  it('keeps Task cascade Notes inside the parent removal unit', () => {
+  it('does not render a Task removal confirmation without active Notes', () => {
+    const html = renderToStaticMarkup(
+      <TaskRemovalConfirmationDialog
+        taskTitle="ノートなし"
+        notes={[]}
+        onCancel={() => undefined}
+        onConfirm={() => undefined}
+      />,
+    )
+
+    expect(html).toBe('')
+    expect(html).not.toContain('このタスクだけが削除予定になります。')
+  })
+
+  it('keeps Task cascade Notes non-interactive inside the parent removal unit', () => {
     const html = renderToStaticMarkup(<TaskNoteList notes={[
       {
         noteId: 'cascade-note',
@@ -85,13 +100,14 @@ describe('Task Note view', () => {
         changeKind: 'remove',
         removalReason: 'task-cascade',
       },
-    ]} />)
+    ]} onOpenRelatedNote={() => undefined} />)
 
     expect(html).not.toContain('note-removal-draft')
     expect(html).not.toContain('note-removal-mark')
     expect(html).not.toContain('タスクの削除に伴い削除予定')
     expect(html).not.toContain('ノートの削除を取り消す')
     expect(html).not.toContain('削除予定にする</button>')
+    expect(html).not.toContain('role="button"')
   })
 
   it('restores Task Note actions when the parent removal is cancelled', () => {

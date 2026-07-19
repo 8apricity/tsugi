@@ -15,10 +15,12 @@ export function TaskDetailDialog({
   draftLifecycle,
   notes,
   addNoteDisabled = false,
+  removalCheckboxAutoFocus = false,
   onClose,
   onSave,
   onNoteBodyChange,
   onRemovalPlannedChange,
+  onRemovalCheckboxFocus,
   onOpenHistory,
   onAddNote,
   onEdit,
@@ -37,10 +39,12 @@ export function TaskDetailDialog({
   draftLifecycle?: { kind: LifecycleKind; conflicted: boolean }
   notes: ReactNode
   addNoteDisabled?: boolean
+  removalCheckboxAutoFocus?: boolean
   onClose: () => void
   onSave?: (event: FormEvent<HTMLFormElement>) => void
   onNoteBodyChange?: (index: number, body: string) => void
   onRemovalPlannedChange?: (removalPlanned: boolean) => void
+  onRemovalCheckboxFocus?: () => void
   onOpenHistory?: () => void
   onAddNote?: () => void
   onEdit?: () => void
@@ -79,8 +83,10 @@ export function TaskDetailDialog({
           ) : null}
           <label className="task-removal-checkbox">
             <input
+              autoFocus={removalCheckboxAutoFocus}
               type="checkbox"
               checked={editForm.removalPlanned}
+              onFocus={onRemovalCheckboxFocus}
               onChange={(event) =>
                 onRemovalPlannedChange?.(event.target.checked)}
             />

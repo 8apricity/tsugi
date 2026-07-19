@@ -34,7 +34,9 @@ export function TaskNoteList({
           key={note.noteId}
           {...note}
           presentation={presentation === 'daily-plan' ? 'related' : 'independent'}
-          onOpen={note.onOpen ?? onOpenRelatedNote}
+          onOpen={note.removalReason === 'task-cascade'
+            ? undefined
+            : note.onOpen ?? onOpenRelatedNote}
           showChevron={presentation === 'detail' && Boolean(note.onOpen)}
         />
       ))}
@@ -53,6 +55,8 @@ export function TaskRemovalConfirmationDialog({
   onCancel: () => void
   onConfirm: () => void
 }) {
+  if (notes.length === 0) return null
+
   const details = taskRemovalCascadeDetails(notes)
 
   return (
@@ -62,6 +66,11 @@ export function TaskRemovalConfirmationDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-removal-confirmation-title"
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || event.defaultPrevented) return
+          event.preventDefault()
+          onCancel()
+        }}
       >
         <header className="editor-dialog-header">
           <h2 id="task-removal-confirmation-title">タスクを削除予定にしますか？</h2>
@@ -78,7 +87,12 @@ export function TaskRemovalConfirmationDialog({
           ) : null}
         </div>
         <div className="editor-dialog-actions task-removal-confirmation-actions">
-          <button className="button-secondary" type="button" onClick={onCancel}>
+          <button
+            autoFocus
+            className="button-secondary"
+            type="button"
+            onClick={onCancel}
+          >
             キャンセル
           </button>
           <button className="button-danger" type="button" onClick={onConfirm}>

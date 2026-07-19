@@ -4,6 +4,22 @@ import { isNoteBodyOverflowing } from './noteCardLayout'
 import { lifecycleLabel } from './editorLifecycle'
 import { LifecycleIcon } from './editorLifecycleView'
 
+export function RemovalMark({
+  className,
+  label,
+}: {
+  className: string
+  label: string
+}) {
+  return (
+    <span className={className} role="img" aria-label={label}>
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M5 7h14M9 7V4h6v3m2 0-1 13H8L7 7m4 4v5m2-5v5" />
+      </svg>
+    </span>
+  )
+}
+
 export function NoteBodyView({
   body,
   bodyId,
@@ -179,15 +195,10 @@ export function NoteCard({
         <span className="note-detail-chevron" aria-hidden="true">›</span>
       ) : null}
       {individuallyRemoved ? (
-        <span
+        <RemovalMark
           className="note-removal-mark"
-          role="img"
-          aria-label="削除予定のノート"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24">
-            <path d="M5 7h14M9 7V4h6v3m2 0-1 13H8L7 7m4 4v5m2-5v5" />
-          </svg>
-        </span>
+          label="削除予定のノート"
+        />
       ) : null}
     </article>
   )

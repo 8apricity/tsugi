@@ -869,7 +869,6 @@ export default {
     ) {
       const body = await request.json<{
         displayName?: unknown;
-        realName?: unknown;
         trackId?: unknown;
         confirmed?: unknown;
       }>();
@@ -878,7 +877,6 @@ export default {
       ).completeInitialSetup({
         setupSessionToken: readCookie(request, setupSessionCookieName),
         displayName: body.displayName,
-        realName: body.realName,
         trackId: body.trackId,
         confirmed: body.confirmed,
         now: Date.now(),

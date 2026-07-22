@@ -190,7 +190,7 @@ describe('initial Student Affiliation setup', () => {
     })
   })
 
-  it('validates trimmed names and selected Track before saving initial setup draft', async () => {
+  it('validates the trimmed Display Name and selected Track before saving initial setup draft', async () => {
     const store = new InMemoryPersistenceAdapters()
     await createSetupSession(store)
     await store.saveSchoolYear({
@@ -215,7 +215,6 @@ describe('initial Student Affiliation setup', () => {
       submitInitialSetupDraft({
         setupSessionToken: 'setup-session-token',
         displayName: '  Sora  ',
-        realName: '  空  ',
         trackId: 'track-2-3-science',
         confirmed: true,
         now: 2_000,
@@ -226,7 +225,6 @@ describe('initial Student Affiliation setup', () => {
       status: 'saved',
       draft: {
         displayName: 'Sora',
-        realName: '空',
         schoolYear: 2026,
         grade: 2,
         classId: 'class-2-3',
@@ -258,7 +256,6 @@ describe('initial Student Affiliation setup', () => {
     const draftResult = await submitInitialSetupDraft({
       setupSessionToken: 'setup-session-token',
       displayName: 'Sora',
-      realName: '空',
       trackId: 'track-2-3-science',
       confirmed: true,
       now: 2_000,
@@ -322,7 +319,6 @@ describe('initial Student Affiliation setup', () => {
     await createSetupSession(store)
     const draft = {
       displayName: 'Sora',
-      realName: '空',
       schoolYear: 2026,
       grade: 2,
       classId: 'class-2-3',
@@ -368,7 +364,6 @@ describe('initial Student Affiliation setup', () => {
         setupSessionToken: 'setup-session-token',
         draft: {
           displayName: 'Sora',
-          realName: '空',
           schoolYear: 2026,
           grade: 2,
           classId: 'class-2-3',
@@ -419,7 +414,6 @@ describe('initial Student Affiliation setup', () => {
       submitInitialSetupDraft({
         setupSessionToken: 'setup-session-token',
         displayName: '   ',
-        realName: 'Name',
         trackId: 'track-missing',
         confirmed: true,
         now: 2_000,
@@ -432,7 +426,6 @@ describe('initial Student Affiliation setup', () => {
       submitInitialSetupDraft({
         setupSessionToken: 'setup-session-token',
         displayName: 'Sora',
-        realName: 'Name',
         trackId: null,
         confirmed: true,
         now: 2_000,
@@ -445,7 +438,6 @@ describe('initial Student Affiliation setup', () => {
       submitInitialSetupDraft({
         setupSessionToken: 'setup-session-token',
         displayName: 'Sora',
-        realName: 'Name',
         trackId: 'track-missing',
         confirmed: false,
         now: 2_000,

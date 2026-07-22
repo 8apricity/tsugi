@@ -240,14 +240,12 @@ export function createStudentAccountAccess({
     async completeInitialSetup({
       setupSessionToken,
       displayName,
-      realName,
       trackId,
       confirmed,
       now,
     }: {
       setupSessionToken: string | null
       displayName: unknown
-      realName: unknown
       trackId: unknown
       confirmed: unknown
       now: number
@@ -255,7 +253,6 @@ export function createStudentAccountAccess({
       const draftResult = await submitInitialSetupDraft({
         setupSessionToken,
         displayName,
-        realName,
         trackId,
         confirmed,
         now,
@@ -611,7 +608,6 @@ export async function getInitialSetupOptions({
 export async function submitInitialSetupDraft({
   setupSessionToken,
   displayName,
-  realName,
   trackId,
   confirmed,
   now,
@@ -620,7 +616,6 @@ export async function submitInitialSetupDraft({
 }: {
   setupSessionToken: string | null
   displayName: unknown
-  realName: unknown
   trackId: unknown
   confirmed: unknown
   now: number
@@ -632,14 +627,8 @@ export async function submitInitialSetupDraft({
   }
 
   const trimmedDisplayName = trimName(displayName)
-  const trimmedRealName = trimName(realName)
 
-  if (
-    !trimmedDisplayName ||
-    trimmedDisplayName.length > 24 ||
-    !trimmedRealName ||
-    trimmedRealName.length > 40
-  ) {
+  if (!trimmedDisplayName || trimmedDisplayName.length > 24) {
     return { status: 'invalid-name' }
   }
 
@@ -674,7 +663,6 @@ export async function submitInitialSetupDraft({
 
   const draft = {
     displayName: trimmedDisplayName,
-    realName: trimmedRealName,
     schoolYear: currentSchoolYear.schoolYear,
     grade: resolvedTrack.schoolClass.grade,
     classId: resolvedTrack.schoolClass.classId,
@@ -725,7 +713,6 @@ export async function completeInitialSetup({
       studentAccountId: crypto.randomUUID(),
       studentAffiliationId: crypto.randomUUID(),
       displayName: draft.displayName,
-      realName: draft.realName,
       schoolYear: draft.schoolYear,
       grade: draft.grade,
       classId: draft.classId,

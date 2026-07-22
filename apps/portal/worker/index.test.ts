@@ -4563,7 +4563,7 @@ describe('initial Student Affiliation setup API', () => {
     vi.useRealTimers()
   })
 
-  it('returns setup choices and completes confirmed initial setup', async () => {
+  it('completes confirmed initial setup without a Real Name', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
 
@@ -4623,7 +4623,6 @@ describe('initial Student Affiliation setup API', () => {
         headers: { 'content-type': 'application/json', cookie },
         body: JSON.stringify({
           displayName: '  Sora  ',
-          realName: '  空  ',
           trackId: 'track-1-1-a',
           confirmed: true,
         }),
@@ -4658,7 +4657,7 @@ describe('initial Student Affiliation setup API', () => {
     })
   })
 
-  it('does not create duplicate Student Accounts when setup completion is retried', async () => {
+  it('ignores legacy Real Name input and does not create duplicate Student Accounts when retried', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-04T00:00:00.000Z'))
 
@@ -4688,6 +4687,12 @@ describe('initial Student Affiliation setup API', () => {
     const secondResponse = await setupRequest()
 
     expect(firstResponse.status).toBe(200)
+    const firstBody = await firstResponse.json()
+    expect(firstBody).toMatchObject({
+      status: 'authenticated',
+      studentAccount: { displayName: 'Sora' },
+    })
+    expect(JSON.stringify(firstBody)).not.toContain('realName')
     expect(secondResponse.status).toBe(400)
     await expect(secondResponse.json()).resolves.toEqual({
       status: 'invalid-setup-session',

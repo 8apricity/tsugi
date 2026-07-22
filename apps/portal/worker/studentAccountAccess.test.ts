@@ -67,7 +67,6 @@ describe('Student Account access module', () => {
           ? verification.setupSessionToken
           : null,
       displayName: ' Sora ',
-      realName: ' Student One ',
       trackId: 'track-1-1-a',
       confirmed: true,
       now: 3_000,
@@ -78,7 +77,6 @@ describe('Student Account access module', () => {
       studentAccount: {
         schoolEmail: '110-12345678mkn@e.osakamanabi.jp',
         displayName: 'Sora',
-        realName: 'Student One',
       },
       sessionToken: 'student-session-token',
     })

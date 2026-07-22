@@ -18,7 +18,7 @@ A person who attends the high school and can participate in the school community
 _Avoid_: User, member, teacher, administrator
 
 **Student Account**:
-The account a student uses to participate in Tsugi. A student account is created only after the student proves access to an eligible school email and completes required profile details such as display name and student affiliation.
+The account a student uses to participate in Tsugi. A student account is created only after the student proves access to an eligible school email and completes required profile details such as display name and student affiliation. The initial release does not require or collect a real name.
 _Avoid_: User account, anonymous account, shared account, domain-only account, Google account, verified email alone
 
 **School Email**:
@@ -38,7 +38,7 @@ The name shown for a student in ordinary Tsugi activity, usually a nickname rath
 _Avoid_: Real name, legal name, account name
 
 **Real Name**:
-The student's actual name, used only where a named response needs to identify who answered.
+The student's self-declared actual name. The initial release does not collect or store a real name. A future decision may attach it to a student account and require it during account creation when a concrete named use needs it; proving access to a school email does not verify the name.
 _Avoid_: Display name, nickname
 
 **Named Attribution**:
@@ -264,6 +264,9 @@ Domain expert: The student selects their own affiliation when creating their stu
 
 Developer: Does entering a school email number create a student account?
 Domain expert: No. It only requests a verification code. The student account is created after the student proves access to the school email and completes the required account details.
+
+Developer: Does the initial release require a student's real name when creating a student account?
+Domain expert: No. It requires a display name and student affiliation but does not collect or store a real name. Requiring a real name for a future named use is a separate decision.
 
 Developer: Is Tsugi using magic links for authentication?
 Domain expert: No. Tsugi uses verification codes sent to school email.

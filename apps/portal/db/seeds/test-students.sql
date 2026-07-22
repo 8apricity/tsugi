@@ -37,15 +37,15 @@ insert into student_accounts (
   disabled_at
 )
 values
-  ('test-student-2026-2-3-humanities-1', 'test-student-2026-2-3-humanities-1@example.invalid', '文科1', '検証 文科1', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
-  ('test-student-2026-2-3-humanities-2', 'test-student-2026-2-3-humanities-2@example.invalid', '文科2', '検証 文科2', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
-  ('test-student-2026-2-3-humanities-3', 'test-student-2026-2-3-humanities-3@example.invalid', '文科3', '検証 文科3', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
-  ('test-student-2026-2-3-science-1', 'test-student-2026-2-3-science-1@example.invalid', '理科1', '検証 理科1', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
-  ('test-student-2026-2-3-science-2', 'test-student-2026-2-3-science-2@example.invalid', '理科2', '検証 理科2', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
-  ('test-student-2026-2-3-science-3', 'test-student-2026-2-3-science-3@example.invalid', '理科3', '検証 理科3', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
-  ('test-student-2026-2-4-humanities-1', 'test-student-2026-2-4-humanities-1@example.invalid', '4組文科1', '検証 4組文科1', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
-  ('test-student-2026-2-4-humanities-2', 'test-student-2026-2-4-humanities-2@example.invalid', '4組文科2', '検証 4組文科2', '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
-  ('test-student-2025-2-3-humanities-1', 'test-student-2025-2-3-humanities-1@example.invalid', '25年度文科1', '検証 25年度文科1', '2025-04-01T00:00:00.000Z', '2025-04-01T00:00:00.000Z', null)
+  ('test-student-2026-2-3-humanities-1', 'test-student-2026-2-3-humanities-1@example.invalid', '文科1', null, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
+  ('test-student-2026-2-3-humanities-2', 'test-student-2026-2-3-humanities-2@example.invalid', '文科2', null, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
+  ('test-student-2026-2-3-humanities-3', 'test-student-2026-2-3-humanities-3@example.invalid', '文科3', null, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
+  ('test-student-2026-2-3-science-1', 'test-student-2026-2-3-science-1@example.invalid', '理科1', null, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
+  ('test-student-2026-2-3-science-2', 'test-student-2026-2-3-science-2@example.invalid', '理科2', null, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
+  ('test-student-2026-2-3-science-3', 'test-student-2026-2-3-science-3@example.invalid', '理科3', null, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
+  ('test-student-2026-2-4-humanities-1', 'test-student-2026-2-4-humanities-1@example.invalid', '4組文科1', null, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
+  ('test-student-2026-2-4-humanities-2', 'test-student-2026-2-4-humanities-2@example.invalid', '4組文科2', null, '2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', null),
+  ('test-student-2025-2-3-humanities-1', 'test-student-2025-2-3-humanities-1@example.invalid', '25年度文科1', null, '2025-04-01T00:00:00.000Z', '2025-04-01T00:00:00.000Z', null)
 on conflict (student_account_id) do update set
   school_email = excluded.school_email,
   display_name = excluded.display_name,

@@ -452,7 +452,6 @@ function App() {
     null,
   );
   const [displayName, setDisplayName] = useState("");
-  const [realName, setRealName] = useState("");
   const [selectedGrade, setSelectedGrade] = useState("");
   const [selectedClassId, setSelectedClassId] = useState("");
   const [selectedTrackId, setSelectedTrackId] = useState("");
@@ -2929,7 +2928,6 @@ function App() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         displayName,
-        realName,
         trackId: selectedTrackId,
         confirmed: confirmedSetup,
       }),
@@ -5194,7 +5192,7 @@ function App() {
             <p className="eyebrow">初回設定</p>
             <h1 id="setup-title">プロフィールを設定</h1>
             <p className="lead">
-              認証できました。次に名前・所属情報を入力してください。
+              認証できました。次に表示名・所属情報を入力してください。
             </p>
           </div>
           <form className="form-grid" onSubmit={submitInitialSetup}>
@@ -5207,17 +5205,6 @@ function App() {
               maxLength={24}
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
-            />
-
-            <label className="field-label" htmlFor="real-name">
-              本名
-            </label>
-            <input
-              id="real-name"
-              className="text-input"
-              maxLength={40}
-              value={realName}
-              onChange={(event) => setRealName(event.target.value)}
             />
 
             <label className="field-label" htmlFor="grade">

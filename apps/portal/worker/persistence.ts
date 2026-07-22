@@ -30,7 +30,6 @@ export type StudentAccount = {
   studentAccountId: string
   schoolEmail: string
   displayName: string
-  realName?: string
 }
 
 export type StudentSession = {
@@ -90,7 +89,6 @@ export type TrackRecord = {
 
 export type InitialSetupDraft = {
   displayName: string
-  realName: string
   schoolYear: number
   grade: number
   classId: string
@@ -349,7 +347,6 @@ export type CompleteInitialSetupTransactionInput = {
   studentAccountId: string
   studentAffiliationId: string
   displayName: string
-  realName: string
   schoolYear: number
   grade: number
   classId: string
@@ -1492,7 +1489,6 @@ export class InMemoryPersistenceAdapters
         studentAccountId: input.studentAccountId,
         schoolEmail: input.schoolEmail,
         displayName: input.displayName,
-        realName: input.realName,
       }
 
     const previousStudentAccounts = [...this.studentAccounts]
@@ -1558,7 +1554,6 @@ type StudentAccountRow = {
   student_account_id: string
   school_email: string
   display_name: string
-  real_name: string | null
 }
 
 type StudentSessionRow = {
@@ -1909,7 +1904,7 @@ export class D1PersistenceAdapters
   async findStudentAccountBySchoolEmail(schoolEmail: string) {
     const row = await this.db
       .prepare(
-        `select student_account_id, school_email, display_name, real_name
+        `select student_account_id, school_email, display_name
          from student_accounts
          where school_email = ?`,
       )
@@ -1922,7 +1917,7 @@ export class D1PersistenceAdapters
   async findStudentAccountById(studentAccountId: string) {
     const row = await this.db
       .prepare(
-        `select student_account_id, school_email, display_name, real_name
+        `select student_account_id, school_email, display_name
          from student_accounts
          where student_account_id = ?`,
       )
@@ -1941,16 +1936,14 @@ export class D1PersistenceAdapters
           student_account_id,
           school_email,
           display_name,
-          real_name,
           created_at,
           updated_at
-        ) values (?, ?, ?, ?, ?, ?)`,
+        ) values (?, ?, ?, ?, ?)`,
       )
       .bind(
         record.studentAccountId,
         record.schoolEmail,
         record.displayName,
-        record.realName ?? null,
         now,
         now,
       )
@@ -4047,7 +4040,6 @@ export class D1PersistenceAdapters
       .prepare(
         `update student_account_setup_sessions
          set display_name = ?,
-             real_name = ?,
              school_year = ?,
              grade = ?,
              class_id = ?,
@@ -4056,7 +4048,6 @@ export class D1PersistenceAdapters
       )
       .bind(
         draft.displayName,
-        draft.realName,
         draft.schoolYear,
         draft.grade,
         draft.classId,
@@ -4111,7 +4102,6 @@ export class D1PersistenceAdapters
       studentAccountId: input.studentAccountId,
       schoolEmail: input.schoolEmail,
       displayName: input.displayName,
-      realName: input.realName,
     }
 
     try {
@@ -4122,16 +4112,14 @@ export class D1PersistenceAdapters
               student_account_id,
               school_email,
               display_name,
-              real_name,
               created_at,
               updated_at
-            ) values (?, ?, ?, ?, ?, ?)`,
+            ) values (?, ?, ?, ?, ?)`,
           )
           .bind(
             input.studentAccountId,
             input.schoolEmail,
             input.displayName,
-            input.realName,
             createdAt,
             createdAt,
           ),
@@ -4267,7 +4255,6 @@ function mapStudentAccountRow(row: StudentAccountRow): StudentAccount {
     studentAccountId: row.student_account_id,
     schoolEmail: row.school_email,
     displayName: row.display_name,
-    realName: row.real_name ?? undefined,
   }
 }
 

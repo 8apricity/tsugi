@@ -54,6 +54,13 @@ create index email_verification_codes_school_email_requested_at_idx
   on email_verification_codes(school_email, requested_at);
 ```
 
+The nullable `real_name` column is reserved for a possible future decision to
+attach a self-declared Real Name to a Student Account. The initial release has
+no input or persistence path for it: new Student Accounts leave it null, and
+migration `0020_clear_real_names.sql` clears values previously stored in both
+`student_accounts` and `student_account_setup_sessions`. The columns remain so
+any future requirement can be designed and migrated separately.
+
 Verification code values are never stored directly. `code_hash` stores only a hash of the code sent by email. `invalidated_at is null` means the code request may still be used if it is also within the application-enforced expiry window. When a new code is issued for the same school email, older unused codes are invalidated. Request history is retained so resend cooldowns and hourly send limits can be enforced.
 
 ## Student Sessions and Interactive QA Login Tickets

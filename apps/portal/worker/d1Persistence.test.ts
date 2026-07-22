@@ -110,6 +110,109 @@ function createTestDatabase(maximumMigration?: string) {
   return database
 }
 
+describe('Real Name purge migration', () => {
+  it('clears stored Real Names while retaining the nullable columns', () => {
+    const database = createTestDatabase('0019_interactive_test_login_tickets.sql')
+    database.prepare(`
+      insert into student_accounts (
+        student_account_id, school_email, display_name, real_name,
+        created_at, updated_at
+      ) values (?, ?, ?, ?, ?, ?)
+    `).run(
+      'student-account-1',
+      'student@example.invalid',
+      'Student',
+      'Student One',
+      '2026-07-22T00:00:00.000Z',
+      '2026-07-22T00:00:00.000Z',
+    )
+    database.prepare(`
+      insert into student_account_setup_sessions (
+        student_account_setup_session_id, setup_session_token_hash,
+        school_email, created_at, expires_at, invalidated_at,
+        display_name, real_name
+      ) values (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'setup-session-1',
+      'setup-token-hash',
+      'student@example.invalid',
+      1_000,
+      2_000,
+      null,
+      'Student',
+      'Student One',
+    )
+
+    database.exec(readFileSync(fileURLToPath(new URL(
+      '../db/migrations/0020_clear_real_names.sql',
+      import.meta.url,
+    )), 'utf8'))
+
+    expect(database.prepare(
+      'select real_name from student_accounts where student_account_id = ?',
+    ).get('student-account-1')).toEqual({ real_name: null })
+    expect(database.prepare(`
+      select real_name from student_account_setup_sessions
+      where student_account_setup_session_id = ?
+    `).get('setup-session-1')).toEqual({ real_name: null })
+    expect(database.prepare('pragma table_info(student_accounts)').all())
+      .toContainEqual(expect.objectContaining({ name: 'real_name' }))
+    expect(database.prepare('pragma table_info(student_account_setup_sessions)').all())
+      .toContainEqual(expect.objectContaining({ name: 'real_name' }))
+  })
+})
+
+describe('D1 initial Student Affiliation setup persistence', () => {
+  it('leaves Real Name null in the setup draft and created Student Account', async () => {
+    const database = createTestDatabase()
+    const adapters = createD1PersistenceAdapters(
+      new SqliteD1Database(database) as unknown as D1Database,
+    )
+    const setupSessionTokenHash = 'setup-token-hash'
+    await adapters.studentAccount.saveSetupSession({
+      setupSessionTokenHash,
+      schoolEmail: 'student@example.invalid',
+      createdAt: 1_000,
+      expiresAt: 10_000,
+      invalidatedAt: null,
+    })
+    await adapters.studentAffiliation.saveInitialSetupDraft(
+      setupSessionTokenHash,
+      {
+        displayName: 'Student',
+        schoolYear: 2026,
+        grade: 2,
+        classId: '2026-grade-2-class-3',
+        trackId: '2026-grade-2-class-3-humanities',
+      },
+    )
+
+    expect(database.prepare(`
+      select real_name from student_account_setup_sessions
+      where setup_session_token_hash = ?
+    `).get(setupSessionTokenHash)).toEqual({ real_name: null })
+
+    await adapters.studentAffiliation.completeInitialSetupTransaction({
+      setupSessionTokenHash,
+      schoolEmail: 'student@example.invalid',
+      studentAccountId: 'student-account-1',
+      studentAffiliationId: 'student-affiliation-1',
+      displayName: 'Student',
+      schoolYear: 2026,
+      grade: 2,
+      classId: '2026-grade-2-class-3',
+      trackId: '2026-grade-2-class-3-humanities',
+      sessionTokenHash: 'session-token-hash',
+      now: 2_000,
+      expiresAt: 20_000,
+    })
+
+    expect(database.prepare(`
+      select real_name from student_accounts where student_account_id = ?
+    `).get('student-account-1')).toEqual({ real_name: null })
+  })
+})
+
 describe('D1 interactive test login ticket persistence', () => {
   it('stores only the ticket hash and atomically creates one Student Session', async () => {
     const database = createTestDatabase()

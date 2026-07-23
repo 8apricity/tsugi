@@ -1202,7 +1202,7 @@ body.page-scroll-locked {
 }
 
 .change-content-removal-unit > :not(.change-content-removal-mark) {
-  opacity: 0.48;
+  opacity: 0.68;
 }
 
 .change-content-removal-unit > .change-content-item,

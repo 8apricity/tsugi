@@ -2913,7 +2913,7 @@ function App() {
     if (result.status === "already-submitting") return;
     if (result.status === "network-error") {
       setTimetableEditorMessage(
-        "ネットワークに接続できません。下書きはこの端末に保存されています。変更内容からもう一度お試しください。",
+        "ネットワークに接続できません。下書きはこの端末に保存されています。変更を反映からもう一度お試しください。",
       );
       return;
     }

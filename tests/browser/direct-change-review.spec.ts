@@ -97,6 +97,62 @@ test.describe('authenticated Direct Change review', () => {
       'ほかの変更と重なっている下書きがあります。',
     )
   })
+
+  test('submits one mixed batch and exposes a stale-refresh recovery', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000)
+    let submissionCount = 0
+    let submittedChanges: Array<Record<string, unknown>> = []
+    let failDailyPlanReload = false
+
+    await page.route('**/api/daily-plans?*', async (route) => {
+      if (!failDailyPlanReload) {
+        await route.continue()
+        return
+      }
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'error' }),
+      })
+    })
+    await page.route('**/api/shared-information/direct-changes', async (route) => {
+      submissionCount += 1
+      const payload = route.request().postDataJSON() as {
+        changes: Array<Record<string, unknown>>
+      }
+      submittedChanges = payload.changes
+      failDailyPlanReload = true
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'applied' }),
+      })
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+    await saveTimetableChange(page)
+    await saveTaskWithNotes(page, `review-mixed-${Date.now()}`, 1)
+
+    await page.getByRole('button', { name: '変更を反映（3）' }).click()
+    await page.getByRole('dialog', { name: '変更を反映' })
+      .getByRole('button', { name: '確定' })
+      .click()
+
+    await expect.poll(() => submissionCount).toBe(1)
+    expect(submittedChanges).toHaveLength(3)
+    expect(submittedChanges.map((change) => change.kind ?? 'timetable'))
+      .toEqual(['timetable', 'task', 'note'])
+    await expect(page.getByRole('status').filter({
+      hasText: '変更は反映されましたが、最新の表示を読み込めませんでした。',
+    })).toBeVisible()
+    await expect(page.locator('.timetable-editor-toast')
+      .getByRole('button', { name: '再読み込み' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /変更を反映/ }))
+      .toHaveCount(0)
+  })
 })
 
 async function saveTaskWithNotes(
@@ -115,4 +171,20 @@ async function saveTaskWithNotes(
       .fill(`review note ${index + 1}`)
   }
   await editor.getByRole('button', { name: '下書きを保存' }).click()
+}
+
+async function saveTimetableChange(page: Page) {
+  await page.getByRole('button', { name: /^1限/ }).click()
+  const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+  await layerDialog.getByRole('button', {
+    name: /^3組の時間割を編集/,
+  }).click()
+  const editor = page.getByRole('dialog', { name: '時間割変更' })
+  const includeChange = editor.getByRole('checkbox', {
+    name: '時間割も変更する',
+  })
+  if (!(await includeChange.isChecked())) await includeChange.check()
+  await editor.getByRole('button', { name: '月3', exact: true }).click()
+  await editor.getByRole('button', { name: '下書きを保存' }).click()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
 }

@@ -72,18 +72,32 @@ export type ChangeContentTimetableItem = {
   draft: TimetableChangeDraft & DraftConflict
 }
 
+export type ChangeContentDailyLessonItem = {
+  kind: 'daily-lesson'
+  id: string
+  schoolDate: string
+  periodNumber: number
+  resolvedLessonName: string
+  timetableChanges: ChangeContentTimetableItem[]
+  children: ChangeContentNoteItem[]
+}
+
 export type ChangeContentItem =
-  | ChangeContentTimetableItem
+  | ChangeContentDailyLessonItem
   | ChangeContentTaskItem
   | ChangeContentNoteItem
 
 export type ChangeContentListInput = {
-  selectedSchoolDate: string
   timetableDrafts: readonly (TimetableChangeDraft & DraftConflict)[]
   taskDrafts: readonly (TaskDraft & DraftConflict)[]
   noteDrafts: readonly (NoteDraft & DraftConflict)[]
   activeTasks?: readonly DailyPlanTaskForCache[]
   activeNotes?: readonly DailyPlanNoteForCache[]
+  dailyLessons?: readonly {
+    schoolDate: string
+    periodNumber: number
+    lessonName: string
+  }[]
 }
 
 export function countChangeContentDrafts({
@@ -114,14 +128,37 @@ export function changeContentControlState({
 }
 
 export function buildChangeContentList({
-  selectedSchoolDate,
   timetableDrafts,
   taskDrafts,
   noteDrafts,
   activeTasks = [],
   activeNotes = [],
+  dailyLessons = [],
 }: ChangeContentListInput): ChangeContentItem[] {
   const taskById = new Map<string, ChangeContentTaskItem>()
+  const resolvedLessonNameByKey = new Map(
+    dailyLessons.map((lesson) => [
+      dailyLessonKey(lesson.schoolDate, lesson.periodNumber),
+      lesson.lessonName,
+    ]),
+  )
+  const dailyLessonByKey = new Map<string, ChangeContentDailyLessonItem>()
+  const ensureDailyLesson = (schoolDate: string, periodNumber: number) => {
+    const key = dailyLessonKey(schoolDate, periodNumber)
+    const existing = dailyLessonByKey.get(key)
+    if (existing) return existing
+    const dailyLesson: ChangeContentDailyLessonItem = {
+      kind: 'daily-lesson',
+      id: `daily-lesson:${key}`,
+      schoolDate,
+      periodNumber,
+      resolvedLessonName: resolvedLessonNameByKey.get(key) ?? '',
+      timetableChanges: [],
+      children: [],
+    }
+    dailyLessonByKey.set(key, dailyLesson)
+    return dailyLesson
+  }
 
   for (const draft of taskDrafts) {
     const taskId = taskIdentity(draft)
@@ -140,6 +177,11 @@ export function buildChangeContentList({
       conflicted: draft.conflicted === true,
       children: [],
     })
+  }
+
+  for (const draft of timetableDrafts) {
+    ensureDailyLesson(draft.changeDate, draft.periodNumber)
+      .timetableChanges.push(timetableItemFromDraft(draft))
   }
 
   const activeTaskById = new Map<string, DailyPlanTaskForCache>()
@@ -187,13 +229,16 @@ export function buildChangeContentList({
         taskById.set(activeTask.taskId, parentItem)
         continue
       }
+      const contextTask = draft.contextSnapshot?.type === 'task'
+        ? draft.contextSnapshot.task
+        : null
       const fallbackParent: ChangeContentTaskItem = {
         kind: 'task',
         id: `task:${draft.relatedTaskItemId}`,
         sourceId: null,
         changeKind: null,
         draft: null,
-        task: {
+        task: contextTask ?? {
           taskId: draft.relatedTaskItemId,
           title: '関連するタスク',
           dueDate: null,
@@ -204,6 +249,21 @@ export function buildChangeContentList({
         children: [note],
       }
       taskById.set(draft.relatedTaskItemId, fallbackParent)
+      continue
+    }
+    if (draft.schoolDate && draft.periodNumber != null) {
+      const key = dailyLessonKey(draft.schoolDate, draft.periodNumber)
+      const dailyLesson = ensureDailyLesson(
+        draft.schoolDate,
+        draft.periodNumber,
+      )
+      if (
+        !resolvedLessonNameByKey.has(key) &&
+        draft.contextSnapshot?.type === 'daily-lesson'
+      ) {
+        dailyLesson.resolvedLessonName = draft.contextSnapshot.lessonName
+      }
+      dailyLesson.children.push(note)
       continue
     }
     topLevelNotes.push(note)
@@ -230,41 +290,54 @@ export function buildChangeContentList({
     }
   }
 
-  const timetableItems: ChangeContentTimetableItem[] = timetableDrafts.map(
-    (draft) => ({
-      kind: 'timetable',
-      id: `timetable:${draft.sourceId}`,
-      sourceId: draft.sourceId,
-      changeKind: draft.changeKind,
-      changeDate: draft.changeDate,
-      periodNumber: draft.periodNumber,
-      targetScopeType: draft.targetScopeType,
-      ...(draft.changeKind === 'remove'
-        ? { serverReplacement: draft.serverReplacement }
-        : { replacement: draft.replacement }),
-      ...(draft.changeKind === 'update'
-        ? { serverReplacement: draft.serverReplacement }
-        : {}),
-      beforeReplacement: draft.changeKind === 'add'
-        ? null
-        : draft.serverReplacement,
-      afterReplacement: draft.changeKind === 'remove'
-        ? null
-        : draft.replacement,
-      conflicted: draft.conflicted === true,
-      draft,
-    }),
-  )
+  for (const dailyLesson of dailyLessonByKey.values()) {
+    dailyLesson.timetableChanges.sort(
+      (left, right) =>
+        targetScopeOrder(left.targetScopeType) -
+        targetScopeOrder(right.targetScopeType),
+    )
+  }
 
   return [
-    ...timetableItems,
+    ...dailyLessonByKey.values(),
     ...[...taskById.values()],
     ...topLevelNotes,
   ].sort((left, right) => compareChangeContentItems(
     left,
     right,
-    selectedSchoolDate,
   ))
+}
+
+function timetableItemFromDraft(
+  draft: TimetableChangeDraft & DraftConflict,
+): ChangeContentTimetableItem {
+  return {
+    kind: 'timetable',
+    id: `timetable:${draft.sourceId}`,
+    sourceId: draft.sourceId,
+    changeKind: draft.changeKind,
+    changeDate: draft.changeDate,
+    periodNumber: draft.periodNumber,
+    targetScopeType: draft.targetScopeType,
+    ...(draft.changeKind === 'remove'
+      ? { serverReplacement: draft.serverReplacement }
+      : { replacement: draft.replacement }),
+    ...(draft.changeKind === 'update'
+      ? { serverReplacement: draft.serverReplacement }
+      : {}),
+    beforeReplacement: draft.changeKind === 'add'
+      ? null
+      : draft.serverReplacement,
+    afterReplacement: draft.changeKind === 'remove'
+      ? null
+      : draft.replacement,
+    conflicted: draft.conflicted === true,
+    draft,
+  }
+}
+
+function dailyLessonKey(schoolDate: string, periodNumber: number) {
+  return `${schoolDate}:${periodNumber}`
 }
 
 function taskIdentity(draft: TaskDraft) {
@@ -352,21 +425,19 @@ function noteValueFromDraft(
 function compareChangeContentItems(
   left: ChangeContentItem,
   right: ChangeContentItem,
-  selectedSchoolDate: string,
 ) {
   const dateComparison = compareItemDates(
     itemDate(left),
     itemDate(right),
-    selectedSchoolDate,
   )
   if (dateComparison !== 0) return dateComparison
 
   const kindComparison = itemKindOrder(left) - itemKindOrder(right)
   if (kindComparison !== 0) return kindComparison
 
-  if (left.kind === 'timetable' && right.kind === 'timetable') {
+  if (left.kind === 'daily-lesson' && right.kind === 'daily-lesson') {
     return left.periodNumber - right.periodNumber ||
-      left.targetScopeType.localeCompare(right.targetScopeType)
+      left.id.localeCompare(right.id)
   }
   if (left.kind === 'task' && right.kind === 'task') {
     return left.task.title.localeCompare(right.task.title) ||
@@ -376,7 +447,7 @@ function compareChangeContentItems(
 }
 
 function itemDate(item: ChangeContentItem) {
-  if (item.kind === 'timetable') return item.changeDate
+  if (item.kind === 'daily-lesson') return item.schoolDate
   if (item.kind === 'task') return item.task.dueDate
   return item.relatedTask?.dueDate ?? item.schoolDate
 }
@@ -384,16 +455,24 @@ function itemDate(item: ChangeContentItem) {
 function compareItemDates(
   left: string | null,
   right: string | null,
-  selectedSchoolDate: string,
 ) {
-  const leftRank = left === null ? 2 : left === selectedSchoolDate ? 0 : 1
-  const rightRank = right === null ? 2 : right === selectedSchoolDate ? 0 : 1
+  const leftRank = left === null ? 1 : 0
+  const rightRank = right === null ? 1 : 0
   return leftRank - rightRank ||
-    (leftRank === 1 && rightRank === 1
+    (leftRank === 0 && rightRank === 0
       ? (left ?? '').localeCompare(right ?? '')
       : 0)
 }
 
 function itemKindOrder(item: ChangeContentItem) {
-  return item.kind === 'timetable' ? 0 : item.kind === 'task' ? 1 : 2
+  return item.kind === 'daily-lesson' ? 0 : item.kind === 'task' ? 1 : 2
+}
+
+function targetScopeOrder(targetScopeType: TargetScopeType) {
+  return {
+    grade: 0,
+    class: 1,
+    track: 2,
+    student: 3,
+  }[targetScopeType]
 }

@@ -249,8 +249,9 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
 
   await page.getByRole('button', { name: '変更を反映（1）' }).click()
   const review = page.getByRole('dialog', { name: '変更を反映' })
-  const removalUnit = review.locator('.change-content-removal-unit')
-    .filter({ hasText: updatedTitle })
+  const removalUnit = review.getByRole('article', {
+    name: '削除予定のタスク。関連するノート3件も削除予定です',
+  })
   await expect(removalUnit).toHaveCSS(
     'background-color',
     'rgb(253, 236, 236)',
@@ -259,7 +260,7 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
     name: '削除予定のタスク。関連するノート3件も削除予定です',
   })).toBeVisible()
   await expect(removalUnit.getByRole('button', {
-    name: /削除予定のタスク/,
+    name: new RegExp(updatedTitle),
   })).toBeVisible()
   await expect(removalUnit.getByRole('img')).toHaveCount(1)
   await expect(removalUnit).not.toContainText('削除予定')

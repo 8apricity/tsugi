@@ -124,6 +124,49 @@ export type NewNoteDraftForm = {
   schoolDate: string | null
   periodNumber?: number | null
   targetScopeType: TargetScopeType | null
+  contextSnapshot?: NoteContextSnapshot
+}
+
+export type NoteContextSnapshot =
+  | {
+      type: 'daily-lesson'
+      lessonName: string
+    }
+  | {
+      type: 'task'
+      task: {
+        taskId: string
+        title: string
+        dueDate: string | null
+        relatedLessonName?: string
+        targetScopeType: TargetScopeType
+      }
+    }
+
+export function createTaskNoteContextSnapshot(task: {
+  taskId: string
+  title: string
+  dueDate: string | null
+  relatedLessonName?: string | TaskRelatedLessonName | null
+  targetScopeType: TargetScopeType
+}): NoteContextSnapshot {
+  return {
+    type: 'task',
+    task: {
+      taskId: task.taskId,
+      title: task.title,
+      dueDate: task.dueDate,
+      ...(task.relatedLessonName
+        ? {
+            relatedLessonName:
+              typeof task.relatedLessonName === 'string'
+                ? task.relatedLessonName
+                : task.relatedLessonName.lessonName,
+          }
+        : {}),
+      targetScopeType: task.targetScopeType,
+    },
+  }
 }
 
 export type ActiveNoteForEditing = {
@@ -134,6 +177,7 @@ export type ActiveNoteForEditing = {
   periodNumber?: number | null
   targetScopeType: TargetScopeType
   relatedTaskItemId?: string
+  contextSnapshot?: NoteContextSnapshot
 }
 
 type NoteDraftBase = {
@@ -144,6 +188,7 @@ type NoteDraftBase = {
   periodNumber?: number | null
   targetScopeType: TargetScopeType
   relatedTaskItemId?: string
+  contextSnapshot?: NoteContextSnapshot
 }
 
 export type NoteDraft = NoteDraftBase & (
@@ -614,6 +659,7 @@ export function createSharedInformationEditorClient({
     taskId: string,
     targetScopeType: TargetScopeType,
     noteBodies: readonly string[],
+    contextSnapshot?: NoteContextSnapshot,
   ) {
     const sourceIds: string[] = []
     for (const body of noteBodies) {
@@ -627,6 +673,7 @@ export function createSharedInformationEditorClient({
         schoolDate: null,
         targetScopeType,
         relatedTaskItemId: taskId,
+        ...(contextSnapshot ? { contextSnapshot } : {}),
       })
     }
     return sourceIds
@@ -759,6 +806,7 @@ export function createSharedInformationEditorClient({
           activeTask.taskId,
           activeTask.targetScopeType,
           noteBodies,
+          createTaskNoteContextSnapshot(activeTask),
         )
     editing = true
     lastCommitFailed = false
@@ -855,6 +903,9 @@ export function createSharedInformationEditorClient({
       ...(activeNote.relatedTaskItemId
         ? { relatedTaskItemId: activeNote.relatedTaskItemId }
         : {}),
+      ...(activeNote.contextSnapshot
+        ? { contextSnapshot: activeNote.contextSnapshot }
+        : {}),
     })
     noteConflictSourceIds.delete(sourceId)
     editing = true
@@ -887,6 +938,9 @@ export function createSharedInformationEditorClient({
       targetScopeType: activeNote.targetScopeType,
       ...(activeNote.relatedTaskItemId
         ? { relatedTaskItemId: activeNote.relatedTaskItemId }
+        : {}),
+      ...(activeNote.contextSnapshot
+        ? { contextSnapshot: activeNote.contextSnapshot }
         : {}),
     })
     noteConflictSourceIds.delete(sourceId)
@@ -1007,6 +1061,7 @@ export function createSharedInformationEditorClient({
       replacement,
       removeTimetableChange = false,
       noteBodies: requestedNoteBodies,
+      resolvedLessonName,
     }: {
       targetScopeType: TargetScopeType
       schoolDate: string
@@ -1014,6 +1069,7 @@ export function createSharedInformationEditorClient({
       replacement: TimetableReplacement | null
       removeTimetableChange?: boolean
       noteBodies: readonly string[]
+      resolvedLessonName?: string
     }) {
       if (submitting) return { status: 'submission-in-progress' as const }
       if (
@@ -1127,6 +1183,14 @@ export function createSharedInformationEditorClient({
           schoolDate,
           periodNumber,
           targetScopeType,
+          ...(resolvedLessonName === undefined
+            ? {}
+            : {
+                contextSnapshot: {
+                  type: 'daily-lesson' as const,
+                  lessonName: resolvedLessonName,
+                },
+              }),
         })
       }
       lastTargetScopeType = targetScopeType
@@ -1193,6 +1257,9 @@ export function createSharedInformationEditorClient({
           ? {}
           : { periodNumber: input.periodNumber }),
         targetScopeType: input.targetScopeType,
+        ...(input.contextSnapshot
+          ? { contextSnapshot: input.contextSnapshot }
+          : {}),
       })
       lastTargetScopeType = input.targetScopeType
       editing = true
@@ -1201,7 +1268,13 @@ export function createSharedInformationEditorClient({
       return { status: 'saved' as const, sourceId }
     },
     saveTaskNoteDraft(
-      task: { taskId: string; targetScopeType: TargetScopeType },
+      task: {
+        taskId: string
+        targetScopeType: TargetScopeType
+        title?: string
+        dueDate?: string | null
+        relatedLessonName?: string | TaskRelatedLessonName | null
+      },
       desiredBody: string,
     ) {
       if (submitting) return { status: 'submission-in-progress' as const }
@@ -1232,6 +1305,15 @@ export function createSharedInformationEditorClient({
         schoolDate: null,
         targetScopeType: task.targetScopeType,
         relatedTaskItemId: task.taskId,
+        ...(task.title === undefined
+          ? {}
+          : {
+              contextSnapshot: createTaskNoteContextSnapshot({
+                ...task,
+                title: task.title,
+                dueDate: task.dueDate ?? null,
+              }),
+            }),
       })
       editing = true
       lastCommitFailed = false
@@ -1313,7 +1395,11 @@ export function createSharedInformationEditorClient({
         const active = activeById.get(draft.sharedInformationItemId)
         if (!active || active.latestChangeId !== draft.expectedLatestChangeId) {
           noteConflictSourceIds.add(draft.sourceId)
-          nextDrafts.push(draft)
+          nextDrafts.push(
+            active?.contextSnapshot
+              ? { ...draft, contextSnapshot: active.contextSnapshot }
+              : draft,
+          )
           continue
         }
         if (draft.changeKind === 'update' && draft.body === active.body) {
@@ -1321,7 +1407,11 @@ export function createSharedInformationEditorClient({
           continue
         }
         noteConflictSourceIds.delete(draft.sourceId)
-        nextDrafts.push(draft)
+        nextDrafts.push(
+          active.contextSnapshot
+            ? { ...draft, contextSnapshot: active.contextSnapshot }
+            : draft,
+        )
       }
       noteDrafts = nextDrafts
       publish()
@@ -2304,6 +2394,8 @@ function restoreNoteDraft(value: unknown): NoteDraft | null {
         !/^\d{4}-\d{2}-\d{2}$/.test(draft.schoolDate))) ||
     !isTargetScopeType(draft.targetScopeType)
   ) return null
+  const contextSnapshot = restoreNoteContextSnapshot(draft.contextSnapshot)
+  if (draft.contextSnapshot !== undefined && contextSnapshot === null) return null
   const base = {
     kind: 'note' as const,
     sourceId: draft.sourceId as string,
@@ -2316,6 +2408,7 @@ function restoreNoteDraft(value: unknown): NoteDraft | null {
     ...(typeof draft.relatedTaskItemId === 'string'
       ? { relatedTaskItemId: draft.relatedTaskItemId }
       : {}),
+    ...(contextSnapshot ? { contextSnapshot } : {}),
   }
   if (draft.changeKind === 'update' || draft.changeKind === 'remove') {
     return typeof draft.sharedInformationItemId === 'string' &&
@@ -2332,4 +2425,39 @@ function restoreNoteDraft(value: unknown): NoteDraft | null {
       draft.expectedLatestChangeId === undefined
     ? { ...base, changeKind: 'add' }
     : null
+}
+
+function restoreNoteContextSnapshot(
+  value: unknown,
+): NoteContextSnapshot | null {
+  if (!value || typeof value !== 'object') return null
+  const snapshot = value as Record<string, unknown>
+  if (snapshot.type === 'daily-lesson') {
+    return typeof snapshot.lessonName === 'string'
+      ? { type: 'daily-lesson', lessonName: snapshot.lessonName }
+      : null
+  }
+  if (snapshot.type !== 'task' || !snapshot.task ||
+      typeof snapshot.task !== 'object') return null
+  const task = snapshot.task as Record<string, unknown>
+  if (
+    typeof task.taskId !== 'string' ||
+    typeof task.title !== 'string' ||
+    (task.dueDate !== null && typeof task.dueDate !== 'string') ||
+    (task.relatedLessonName !== undefined &&
+      typeof task.relatedLessonName !== 'string') ||
+    !isTargetScopeType(task.targetScopeType)
+  ) return null
+  return {
+    type: 'task',
+    task: {
+      taskId: task.taskId,
+      title: task.title,
+      dueDate: task.dueDate as string | null,
+      ...(typeof task.relatedLessonName === 'string'
+        ? { relatedLessonName: task.relatedLessonName }
+        : {}),
+      targetScopeType: task.targetScopeType,
+    },
+  }
 }

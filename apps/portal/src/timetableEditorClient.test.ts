@@ -157,6 +157,7 @@ describe('Shared Information editor client', () => {
       schoolDate: '2026-07-10',
       periodNumber: 2,
       replacement: null,
+      resolvedLessonName: '地理',
       noteBodies: [
         '  1件目のノート  ',
         '   ',
@@ -182,6 +183,10 @@ describe('Shared Information editor client', () => {
           schoolDate: '2026-07-10',
           periodNumber: 2,
           targetScopeType: 'track',
+          contextSnapshot: {
+            type: 'daily-lesson',
+            lessonName: '地理',
+          },
         },
         {
           sourceId: '33000000-0000-4000-8000-000000000002',
@@ -193,6 +198,13 @@ describe('Shared Information editor client', () => {
         },
       ],
     })
+    expect(createTimetableEditorClient({ storage }).getSnapshot())
+      .toMatchObject({
+        noteDrafts: [
+          { contextSnapshot: { type: 'daily-lesson', lessonName: '地理' } },
+          { contextSnapshot: { type: 'daily-lesson', lessonName: '地理' } },
+        ],
+      })
   })
 
   it('saves Timetable Change removal and Daily Lesson Notes from the same dialog', () => {
@@ -578,6 +590,17 @@ describe('Shared Information editor client', () => {
 
     expect(editor.saveTaskNoteDraft(activeTask, '追加ノート')).toEqual({
       status: 'saved', sourceId: addedNoteSourceId,
+    })
+    expect(editor.getSnapshot().noteDrafts[0]).toMatchObject({
+      contextSnapshot: {
+        type: 'task',
+        task: {
+          taskId,
+          title: '数学ワーク',
+          dueDate: '2026-07-10',
+          targetScopeType: 'track',
+        },
+      },
     })
     expect(editor.saveNoteUpdateDraft(activeNote, '下書きの変更')).toEqual({
       status: 'saved', sourceId: updatedNoteSourceId,

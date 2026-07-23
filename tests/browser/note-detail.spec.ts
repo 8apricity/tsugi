@@ -146,8 +146,9 @@ test.describe('authenticated Daily Plan Note detail', () => {
       .toHaveCount(0)
     await page.getByRole('button', { name: '変更を反映（1）' }).click()
     const review = page.getByRole('dialog', { name: '変更を反映' })
-    const removalUnit = review.locator('.change-content-removal-unit')
-      .filter({ hasText: originalBody })
+    const removalUnit = review.getByRole('button', {
+      name: new RegExp(originalBody),
+    })
     await expect(removalUnit).toHaveCSS(
       'background-color',
       'rgb(253, 236, 236)',
@@ -155,9 +156,7 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await expect(removalUnit.getByRole('img', {
       name: '削除予定のノート',
     })).toBeVisible()
-    await expect(removalUnit.getByRole('button', {
-      name: /削除予定のノート/,
-    })).toBeVisible()
+    await expect(removalUnit).toHaveAttribute('role', 'button')
     await expect(removalUnit).not.toContainText('削除予定')
     await review.getByRole('button', { name: '確定' }).click()
   })

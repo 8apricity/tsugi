@@ -111,8 +111,9 @@ test('edit mode shows projected transitions, including identical and removal dra
 
   await page.getByRole('button', { name: '変更を反映（2）' }).click()
   const review = page.getByRole('dialog', { name: '変更を反映' })
-  const removalUnit = review.locator('.change-content-removal-unit')
-    .filter({ hasText: '1限の時間割' })
+  const removalUnit = review.getByRole('article', {
+    name: '時間割変更の削除予定',
+  })
   await expect(removalUnit).toHaveCSS(
     'background-color',
     'rgb(253, 236, 236)',
@@ -121,7 +122,7 @@ test('edit mode shows projected transitions, including identical and removal dra
     name: '時間割変更の削除予定',
   })).toBeVisible()
   await expect(removalUnit.getByRole('button', {
-    name: /時間割変更の削除予定/,
+    name: /月3/,
   })).toBeVisible()
   await expect(removalUnit).not.toContainText('削除予定')
   await expect(removalUnit).not.toContainText(noteBody)

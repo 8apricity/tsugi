@@ -6,9 +6,35 @@ import {
 } from './changeContentList'
 
 describe('change-content list projection', () => {
-  it('orders mixed drafts by selected date, chronological date, and context', () => {
+  it('orders dated drafts chronologically instead of prioritising the selected date', () => {
     const items = buildChangeContentList({
-      selectedSchoolDate: '2026-07-10',
+      timetableDrafts: [{
+        sourceId: 'timetable-selected',
+        targetScopeType: 'track',
+        changeDate: '2026-07-12',
+        periodNumber: 1,
+        changeKind: 'add',
+        replacement: { type: 'lesson_name', lessonName: '英語' },
+      }, {
+        sourceId: 'timetable-earlier',
+        targetScopeType: 'track',
+        changeDate: '2026-07-10',
+        periodNumber: 1,
+        changeKind: 'add',
+        replacement: { type: 'lesson_name', lessonName: '数学' },
+      }],
+      taskDrafts: [],
+      noteDrafts: [],
+    })
+
+    expect(items.map((item) => item.id)).toEqual([
+      'daily-lesson:2026-07-10:1',
+      'daily-lesson:2026-07-12:1',
+    ])
+  })
+
+  it('orders mixed drafts chronologically and by context', () => {
+    const items = buildChangeContentList({
       timetableDrafts: [{
         sourceId: 'timetable-later',
         targetScopeType: 'track',
@@ -57,13 +83,189 @@ describe('change-content list projection', () => {
     })
 
     expect(items.map((item) => item.id)).toEqual([
-      'timetable:timetable-selected',
+      'daily-lesson:2026-07-10:2',
       'task:task-selected',
-      'timetable:timetable-later',
+      'daily-lesson:2026-07-11:1',
       'note:note-later',
       'task:task-no-date',
       'note:note-no-date',
     ])
+  })
+
+  it('groups daily-lesson Notes beneath range-ordered timetable previews', () => {
+    const items = buildChangeContentList({
+      timetableDrafts: [{
+        sourceId: 'timetable-track',
+        targetScopeType: 'track',
+        changeDate: '2026-07-12',
+        periodNumber: 3,
+        changeKind: 'add',
+        replacement: { type: 'lesson_name', lessonName: '英語' },
+      }, {
+        sourceId: 'timetable-grade',
+        targetScopeType: 'grade',
+        changeDate: '2026-07-12',
+        periodNumber: 3,
+        changeKind: 'add',
+        replacement: { type: 'lesson_name', lessonName: '数学' },
+      }, {
+        sourceId: 'timetable-class',
+        targetScopeType: 'class',
+        changeDate: '2026-07-12',
+        periodNumber: 3,
+        changeKind: 'add',
+        replacement: { type: 'cancelled' },
+      }],
+      taskDrafts: [],
+      noteDrafts: [{
+        kind: 'note',
+        sourceId: 'lesson-note',
+        targetScopeType: 'class',
+        changeKind: 'add',
+        body: '教室変更',
+        schoolDate: '2026-07-12',
+        periodNumber: 3,
+      }],
+      dailyLessons: [{
+        schoolDate: '2026-07-12',
+        periodNumber: 3,
+        lessonName: '現代文',
+      }],
+    })
+
+    expect(items).toMatchObject([{
+      kind: 'daily-lesson',
+      id: 'daily-lesson:2026-07-12:3',
+      schoolDate: '2026-07-12',
+      periodNumber: 3,
+      resolvedLessonName: '現代文',
+      timetableChanges: [
+        { sourceId: 'timetable-grade', targetScopeType: 'grade' },
+        { sourceId: 'timetable-class', targetScopeType: 'class' },
+        { sourceId: 'timetable-track', targetScopeType: 'track' },
+      ],
+      children: [{ sourceId: 'lesson-note' }],
+    }])
+  })
+
+  it('creates one grey-parent lesson context when only its Note changes', () => {
+    const items = buildChangeContentList({
+      timetableDrafts: [],
+      taskDrafts: [],
+      noteDrafts: [{
+        kind: 'note',
+        sourceId: 'lesson-note',
+        targetScopeType: 'track',
+        changeKind: 'add',
+        body: '持ち物を確認',
+        schoolDate: '2026-07-11',
+        periodNumber: 2,
+      }],
+      dailyLessons: [{
+        schoolDate: '2026-07-11',
+        periodNumber: 2,
+        lessonName: '地理',
+      }],
+    })
+
+    expect(items).toMatchObject([{
+      kind: 'daily-lesson',
+      resolvedLessonName: '地理',
+      timetableChanges: [],
+      children: [{ sourceId: 'lesson-note' }],
+    }])
+  })
+
+  it('restores a Daily Lesson parent from the persisted Note context', () => {
+    const items = buildChangeContentList({
+      timetableDrafts: [],
+      taskDrafts: [],
+      noteDrafts: [{
+        kind: 'note',
+        sourceId: 'restored-lesson-note',
+        targetScopeType: 'student',
+        changeKind: 'add',
+        body: '復元した連絡',
+        schoolDate: '2026-06-01',
+        periodNumber: 4,
+        contextSnapshot: {
+          type: 'daily-lesson',
+          lessonName: '物理',
+        },
+      }],
+    })
+
+    expect(items).toMatchObject([{
+      kind: 'daily-lesson',
+      resolvedLessonName: '物理',
+    }])
+  })
+
+  it('keeps a cached empty lesson over an older Note context', () => {
+    const items = buildChangeContentList({
+      timetableDrafts: [],
+      taskDrafts: [],
+      noteDrafts: [{
+        kind: 'note',
+        sourceId: 'cancelled-lesson-note',
+        targetScopeType: 'class',
+        changeKind: 'add',
+        body: '休講です',
+        schoolDate: '2026-06-02',
+        periodNumber: 5,
+        contextSnapshot: {
+          type: 'daily-lesson',
+          lessonName: '古い授業名',
+        },
+      }],
+      dailyLessons: [{
+        schoolDate: '2026-06-02',
+        periodNumber: 5,
+        lessonName: '',
+      }],
+    })
+
+    expect(items).toMatchObject([{
+      kind: 'daily-lesson',
+      resolvedLessonName: '',
+    }])
+  })
+
+  it('restores a Task parent from the persisted Note context', () => {
+    const items = buildChangeContentList({
+      timetableDrafts: [],
+      taskDrafts: [],
+      noteDrafts: [{
+        kind: 'note',
+        sourceId: 'restored-task-note',
+        targetScopeType: 'class',
+        changeKind: 'add',
+        body: '復元した補足',
+        schoolDate: null,
+        relatedTaskItemId: 'task-outside-cache',
+        contextSnapshot: {
+          type: 'task',
+          task: {
+            taskId: 'task-outside-cache',
+            title: '夏休みの課題',
+            dueDate: '2026-08-20',
+            relatedLessonName: '数学',
+            targetScopeType: 'class',
+          },
+        },
+      }],
+    })
+
+    expect(items).toMatchObject([{
+      kind: 'task',
+      task: {
+        taskId: 'task-outside-cache',
+        title: '夏休みの課題',
+        dueDate: '2026-08-20',
+        relatedLessonName: '数学',
+        targetScopeType: 'class',
+      },
+    }])
   })
 
   it('nests Task Notes under the related Task while counting each draft', () => {
@@ -85,7 +287,6 @@ describe('change-content list projection', () => {
       relatedTaskItemId: 'task-draft',
     }
     const items = buildChangeContentList({
-      selectedSchoolDate: '2026-07-10',
       timetableDrafts: [],
       taskDrafts: [taskDraft],
       noteDrafts: [noteDraft],
@@ -109,7 +310,6 @@ describe('change-content list projection', () => {
 
   it('creates a task group for a Task Note attached to a cached active Task', () => {
     const items = buildChangeContentList({
-      selectedSchoolDate: '2026-07-11',
       timetableDrafts: [],
       taskDrafts: [],
       noteDrafts: [{
@@ -144,7 +344,6 @@ describe('change-content list projection', () => {
 
   it('nests Task-cascade Note removal projections under their parent Task', () => {
     const items = buildChangeContentList({
-      selectedSchoolDate: '2026-07-10',
       timetableDrafts: [],
       noteDrafts: [],
       taskDrafts: [{
@@ -220,7 +419,6 @@ describe('change-content list projection', () => {
 
   it('projects update before/after values for Task, Note, and Timetable rows', () => {
     const items = buildChangeContentList({
-      selectedSchoolDate: '2026-07-10',
       timetableDrafts: [{
         sourceId: 'timetable-update',
         targetScopeType: 'track',
@@ -272,9 +470,11 @@ describe('change-content list projection', () => {
 
     expect(items).toMatchObject([
       {
-        kind: 'timetable',
-        beforeReplacement: { lessonName: '数学' },
-        afterReplacement: { lessonName: '英語' },
+        kind: 'daily-lesson',
+        timetableChanges: [{
+          beforeReplacement: { lessonName: '数学' },
+          afterReplacement: { lessonName: '英語' },
+        }],
       },
       {
         kind: 'note',

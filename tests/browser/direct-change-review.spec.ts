@@ -66,6 +66,32 @@ test.describe('authenticated Direct Change review', () => {
     )).toBeVisible()
   })
 
+  test('previews mixed drafts with Daily Plan card presentation', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+    await saveTimetableChange(page)
+    const title = `review-cards-${Date.now()}`
+    await saveTaskWithNotes(page, title, 1)
+
+    await page.getByRole('button', { name: '変更を反映（3）' }).click()
+    const review = page.getByRole('dialog', { name: '変更を反映' })
+    const timetablePreview = review.getByRole('button', { name: /月3/ })
+    await expect(timetablePreview).toContainText('月3')
+    await expect(timetablePreview).toContainText('3組')
+    await expect(timetablePreview).toContainText('追加予定')
+
+    const taskPreview = review.getByRole('button', {
+      name: new RegExp(title),
+    })
+    await expect(taskPreview).toContainText('追加予定')
+    await expect(review.getByRole('button', { name: /review note 1/ }))
+      .toBeVisible()
+    await expect(review.getByText('変更前', { exact: true })).toHaveCount(0)
+    await expect(review.getByText('変更後', { exact: true })).toHaveCount(0)
+  })
+
   test('disables confirmation after a remote conflict', async ({ page }) => {
     await page.route('**/api/shared-information/direct-changes', async (route) => {
       const payload = route.request().postDataJSON() as {

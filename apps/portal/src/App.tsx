@@ -26,6 +26,7 @@ import { TimetableLayerMemoryCache } from "./timetableLayerCache";
 import {
   createNewNoteDraftForm,
   createNewTaskDraftForm,
+  createTaskNoteContextSnapshot,
   createSharedInformationEditorClient,
   normalizeDirectLessonReplacement,
   type ActiveTaskForEditing,
@@ -42,6 +43,7 @@ import {
 import { createSharedInformationDirectChangeTransport } from "./sharedInformationSubmissionTransport";
 import type { RegisteredLessonNameOption } from "../shared/lessonNames";
 import type {
+  DailyPlanForCache,
   DailyPlanNoteForCache,
   DailyPlanTaskForCache,
 } from "./dailyPlanCache";
@@ -59,6 +61,7 @@ import {
 import {
   buildChangeContentList,
   changeContentControlState,
+  type ChangeContentDailyLessonItem,
   type ChangeContentItem,
   type ChangeContentNoteItem,
   type ChangeContentTaskItem,
@@ -248,6 +251,8 @@ type NoteEditorForm = NewNoteDraftForm & {
   relatedTask: {
     taskId: string;
     title: string;
+    dueDate: string | null;
+    relatedLessonName?: string;
     targetScopeType: TargetScopeType;
   } | null;
 };
@@ -1023,17 +1028,25 @@ function App() {
         ...dailyPlanState.dailyPlan.notes,
         ...dailyPlanState.dailyPlan.tasks.flatMap((task) => task.notes),
         ...dailyPlanState.dailyPlan.periods.flatMap((period) => period.notes),
-      ].map((note) => ({
-        noteId: note.noteId,
-        latestChangeId: note.latestChangeId,
-        body: note.body,
-        schoolDate: noteSchoolDate(note),
-        periodNumber: notePeriodNumber(note),
-        targetScopeType: note.targetScopeType,
-        ...(note.relatedContext?.type === "task"
-          ? { relatedTaskItemId: note.relatedContext.taskId }
-          : {}),
-      })),
+      ].map((note) => {
+        const relatedContext = note.relatedContext;
+        const contextSnapshot = noteContextSnapshotFromPlans(
+          note,
+          [dailyPlanState.dailyPlan],
+        );
+        return {
+          noteId: note.noteId,
+          latestChangeId: note.latestChangeId,
+          body: note.body,
+          schoolDate: noteSchoolDate(note),
+          periodNumber: notePeriodNumber(note),
+          targetScopeType: note.targetScopeType,
+          ...(relatedContext?.type === "task"
+            ? { relatedTaskItemId: relatedContext.taskId }
+            : {}),
+          ...(contextSnapshot ? { contextSnapshot } : {}),
+        };
+      }),
       dailyPlanState.dailyPlan.schoolDate,
     );
   }, [dailyPlanState, timetableEditorClient]);
@@ -1626,16 +1639,6 @@ function App() {
     openTimetableEditorAt(item.changeDate, item.periodNumber);
   }
 
-  function openChangeContentItem(item: ChangeContentItem) {
-    if (item.kind === "timetable") {
-      openChangeContentTimetable(item);
-    } else if (item.kind === "task") {
-      openChangeContentTask(item);
-    } else {
-      openChangeContentNote(item);
-    }
-  }
-
   function changeContentDateLabel(schoolDate: string | null) {
     return schoolDate
       ? formatUiSchoolDate(schoolDate, { referenceSchoolDate: selectedSchoolDate })
@@ -1647,258 +1650,245 @@ function App() {
     return state.status === "ready" ? state.dailyPlan.studentAffiliation : undefined;
   }
 
-  function changeContentItemView(item: ChangeContentItem) {
-    if (item.kind === "timetable") {
-      const replacement = item.replacement ?? item.serverReplacement;
-      const value = replacement
-        ? replacementLabel(replacement)
-        : "変更内容";
-      const removed = item.changeKind === "remove";
-      return (
-        <li
-          className={removed ? "change-content-removal-unit" : undefined}
-          key={item.id}
-        >
-          <button
-            className={`change-content-item change-content-${item.kind} change-content-${item.changeKind}${item.conflicted ? " conflicted" : ""}`}
-            type="button"
-            data-change-content-kind={item.kind}
-            data-change-kind={item.changeKind}
-            aria-label={
-              removed
-                ? `${item.periodNumber}限の時間割。時間割変更の削除予定`
-                : undefined
-            }
-            onClick={() => openChangeContentItem(item)}
-          >
-            {!removed ? (
-              <LifecycleIcon
-                className="change-content-icon"
-                kind={item.changeKind}
-                conflicted={item.conflicted}
-                showTitle={false}
-              />
-            ) : null}
-            <span className="change-content-main">
-              <strong>{item.periodNumber}限の時間割</strong>
-              <small>
-                {changeContentDateLabel(item.changeDate)}・
-                {scopeLabel(item.targetScopeType, changeContentScopeContext())}
-              </small>
-              {item.changeKind === "update" ? (
-                <span className="change-content-diff">
-                  <small>変更前: {item.beforeReplacement ? replacementLabel(item.beforeReplacement) : "なし"}</small>
-                  <small>変更後: {item.afterReplacement ? replacementLabel(item.afterReplacement) : "なし"}</small>
-                </span>
-              ) : (
-                <span>{value}</span>
-              )}
-            </span>
-            <span className="change-content-chevron" aria-hidden="true">›</span>
-          </button>
-          {removed ? (
-            <RemovalMark
-              className="change-content-removal-mark"
-              label="時間割変更の削除予定"
-            />
-          ) : null}
-        </li>
-      );
-    }
+  function cachedDailyLessonName(
+    schoolDate: string,
+    periodNumber: number,
+  ) {
+    return dailyPlanClient.getCachedDailyPlans()
+      .find((plan) => plan.schoolDate === schoolDate)
+      ?.periods.find((period) => period.periodNumber === periodNumber)
+      ?.lessonName;
+  }
 
-    if (item.kind === "task") {
-      const taskRemoved = item.draft?.changeKind === "remove";
-      const taskRemovalLabel = taskRemoved
-        ? item.children.length === 0
-          ? "削除予定のタスク"
-          : `削除予定のタスク。関連するノート${item.children.length}件も削除予定です`
-        : null;
-      const taskRow = item.draft ? (
-        <button
-          className={`change-content-item change-content-${item.kind} change-content-${item.changeKind}${item.conflicted ? " conflicted" : ""}`}
-          type="button"
-          data-change-content-kind={item.kind}
-          data-change-kind={item.draft.changeKind}
-          aria-label={
-            taskRemovalLabel
-              ? `${item.task.title}。${taskRemovalLabel}`
-              : undefined
-          }
-          onClick={() => openChangeContentItem(item)}
-        >
-          {!taskRemoved ? (
-            <LifecycleIcon
-              className="change-content-icon"
-              kind={item.draft.changeKind}
-              conflicted={item.conflicted}
-              showTitle={false}
-            />
-          ) : null}
-          <span className="change-content-main">
-            <strong>{item.task.title}</strong>
-            <small>
-              {changeContentDateLabel(item.task.dueDate)}・
-              {scopeLabel(item.task.targetScopeType, changeContentScopeContext())}
-              {item.task.relatedLessonName ? `・${item.task.relatedLessonName}` : ""}
-            </small>
-            {item.draft.changeKind === "update" ? (
-              <span className="change-content-diff">
-                <small>変更前: {item.beforeTask ? `${item.beforeTask.title}・${formatTaskDueLabel(item.beforeTask.dueDate, selectedSchoolDate)}` : "確認できません"}</small>
-                <small>変更後: {item.task.title}・{formatTaskDueLabel(item.task.dueDate, selectedSchoolDate)}</small>
-              </span>
-            ) : null}
-          </span>
-          <span className="change-content-chevron" aria-hidden="true">›</span>
-        </button>
-      ) : (
-        <div className="change-content-item change-content-task related-task-group">
-          <span className="related-task-icon" aria-hidden="true">↳</span>
-          <span className="change-content-main">
-            <strong>{item.task.title}</strong>
-            <small>{changeContentDateLabel(item.task.dueDate)}・関連するタスク</small>
-          </span>
-          <span className="change-content-status">ノートの変更</span>
-        </div>
-      );
-      return (
-        <li
-          className={taskRemoved ? "change-content-removal-unit" : undefined}
-          key={item.id}
-        >
-          {taskRow}
-          {item.children.length > 0 ? (
-            <ul className="change-content-children" aria-label={`${item.task.title}のノート`}>
-              {item.children.map((child) => (
-                <li
-                  className={
-                    child.source === "draft" && child.changeKind === "remove"
-                      ? "change-content-removal-unit"
-                      : undefined
-                  }
-                  key={child.id}
-                >
-                  {child.source === "task-cascade" ? (
-                    <div
-                      className="change-content-item change-content-note change-content-remove nested cascade-projection"
-                      data-change-content-kind="note"
-                      data-change-kind="remove"
-                      data-change-content-projection="task-cascade"
-                    >
-                      <span className="change-content-main">
-                        <strong>ノート</strong>
-                        <small>{child.beforeBody ?? child.body}</small>
-                      </span>
-                    </div>
-                  ) : (
-                  <button
-                    className={`change-content-item change-content-note change-content-${child.changeKind} nested${child.conflicted ? " conflicted" : ""}`}
-                    type="button"
-                    data-change-content-kind="note"
-                    data-change-kind={child.changeKind}
-                    aria-label={
-                      child.changeKind === "remove"
-                        ? `${child.body}。削除予定のノート`
-                        : undefined
-                    }
-                    onClick={() => openChangeContentItem(child)}
-                  >
-                    {child.changeKind !== "remove" ? (
-                      <LifecycleIcon
-                        className="change-content-icon"
-                        kind={child.changeKind}
-                        conflicted={child.conflicted}
-                        showTitle={false}
-                      />
-                    ) : null}
-                    <span className="change-content-main">
-                      <strong>ノート</strong>
-                      {child.changeKind === "update" ? (
-                        <span className="change-content-diff">
-                          <small>変更前: {child.beforeBody ?? "確認できません"}</small>
-                          <small>変更後: {child.afterBody ?? "なし"}</small>
-                        </span>
-                      ) : child.changeKind === "remove" ? (
-                        <small>{child.beforeBody ?? child.body}</small>
-                      ) : (
-                        <small>{child.body}</small>
-                      )}
-                    </span>
-                    <span className="change-content-chevron" aria-hidden="true">›</span>
-                  </button>
-                  )}
-                  {child.source === "draft" && child.changeKind === "remove" ? (
-                    <RemovalMark
-                      className="change-content-removal-mark"
-                      label="削除予定のノート"
-                    />
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {taskRemoved ? (
-            <RemovalMark
-              className="change-content-removal-mark"
-              label={taskRemovalLabel!}
-            />
-          ) : null}
-        </li>
-      );
-    }
+  function noteContextSnapshot(note: DailyPlanNoteForCache) {
+    return noteContextSnapshotFromPlans(
+      note,
+      dailyPlanClient.getCachedDailyPlans(),
+    );
+  }
 
-    const noteRemoved = item.changeKind === "remove";
+  function changeContentLifecycle(
+    changeKind: "add" | "update" | "remove",
+    conflicted: boolean,
+  ) {
+    if (changeKind === "remove") return null;
     return (
-      <li
-        className={noteRemoved ? "change-content-removal-unit" : undefined}
+      <span className="lifecycle-summary">
+        <LifecycleIcon kind={changeKind} conflicted={conflicted} />
+        <small>{lifecycleLabel(changeKind, conflicted)}</small>
+      </span>
+    );
+  }
+
+  function changeContentNoteCard(item: ChangeContentNoteItem) {
+    const draft = item.source === "draft";
+    return (
+      <div
+        className={item.conflicted ? "change-content-conflicted-note" : undefined}
+        data-change-content-kind="note"
+        data-change-kind={item.changeKind}
+        data-change-content-projection={
+          item.source === "task-cascade" ? "task-cascade" : undefined
+        }
+        key={item.id}
+      >
+        <NoteCard
+          noteId={item.sourceId}
+          body={
+            item.changeKind === "remove"
+              ? item.beforeBody ?? item.body
+              : item.afterBody ?? item.body
+          }
+          targetScopeLabel={scopeLabel(
+            item.targetScopeType,
+            changeContentScopeContext(),
+          )}
+          draft
+          changeKind={item.changeKind}
+          conflicted={item.conflicted}
+          removalReason={
+            item.source === "task-cascade" ? "task-cascade" : undefined
+          }
+          showChevron={draft}
+          onOpen={draft ? () => openChangeContentNote(item) : undefined}
+        />
+      </div>
+    );
+  }
+
+  function changeContentTimetableCard(item: ChangeContentTimetableItem) {
+    const replacement = item.replacement ?? item.serverReplacement;
+    const removed = item.changeKind === "remove";
+    return (
+      <article
+        aria-label={removed ? "時間割変更の削除予定" : undefined}
+        className={`task-entry task-draft change-content-preview-card${
+          removed ? " task-removal-draft" : ""
+        }${item.conflicted ? " change-content-conflicted" : ""}`}
         key={item.id}
       >
         <button
-          className={`change-content-item change-content-note change-content-${item.changeKind}${item.conflicted ? " conflicted" : ""}`}
+          className="task-item"
           type="button"
-          data-change-content-kind={item.kind}
+          data-change-content-kind="timetable"
           data-change-kind={item.changeKind}
-          aria-label={
-            noteRemoved
-              ? `${item.body}。削除予定のノート`
-              : undefined
-          }
-          onClick={() => openChangeContentItem(item)}
+          onClick={() => openChangeContentTimetable(item)}
         >
-          {!noteRemoved ? (
-            <LifecycleIcon
-              className="change-content-icon"
-              kind={item.changeKind}
-              conflicted={item.conflicted}
-              showTitle={false}
-            />
-          ) : null}
-          <span className="change-content-main">
-            <strong>ノート</strong>
+          <span>
+            <strong>
+              {replacement ? replacementLabel(replacement) : "変更内容"}
+            </strong>
             <small>
-              {changeContentDateLabel(item.schoolDate)}・
-              {scopeLabel(item.targetScopeType, changeContentScopeContext())}
+              {changeContentDateLabel(item.changeDate)}・
+              {item.periodNumber}限
             </small>
-            {item.changeKind === "update" ? (
-              <span className="change-content-diff">
-                <small>変更前: {item.beforeBody ?? "確認できません"}</small>
-                <small>変更後: {item.afterBody ?? "なし"}</small>
-              </span>
-            ) : item.changeKind === "remove" ? (
-              <span>{item.beforeBody ?? item.body}</span>
-            ) : (
-              <span>{item.body}</span>
-            )}
+            <span className="task-scope-badge">
+              {scopeLabel(
+                item.targetScopeType,
+                changeContentScopeContext(),
+              )}
+            </span>
+            {changeContentLifecycle(item.changeKind, item.conflicted)}
           </span>
-          <span className="change-content-chevron" aria-hidden="true">›</span>
+          <span aria-hidden="true">›</span>
         </button>
-        {noteRemoved ? (
+        {removed ? (
           <RemovalMark
-            className="change-content-removal-mark"
-            label="削除予定のノート"
+            className="task-removal-mark"
+            label="時間割変更の削除予定"
           />
+        ) : null}
+      </article>
+    );
+  }
+
+  function changeContentDailyLessonView(
+    item: ChangeContentDailyLessonItem,
+  ) {
+    const contextScopes = [...new Set(
+      item.children.map((child) => child.targetScopeType),
+    )];
+    return (
+      <li
+        className="change-content-group-stack"
+        data-change-content-kind="daily-lesson"
+        key={item.id}
+      >
+        {item.timetableChanges.length > 0 ? (
+          item.timetableChanges.map(changeContentTimetableCard)
+        ) : (
+          <article className="task-entry change-content-context-card">
+            <div className="task-item">
+              <span>
+                <strong>{item.resolvedLessonName || "授業なし"}</strong>
+                <small>
+                  {changeContentDateLabel(item.schoolDate)}・
+                  {item.periodNumber}限
+                </small>
+                <span className="change-content-scope-list">
+                  {contextScopes.map((scope) => (
+                    <span className="task-scope-badge" key={scope}>
+                      {scopeLabel(scope, changeContentScopeContext())}
+                    </span>
+                  ))}
+                </span>
+              </span>
+            </div>
+          </article>
+        )}
+        {item.children.length > 0 ? (
+          <div
+            className="change-content-related-notes"
+            aria-label={`${item.periodNumber}限のノート`}
+          >
+            {item.children.map(changeContentNoteCard)}
+          </div>
         ) : null}
       </li>
     );
+  }
+
+  function changeContentTaskView(item: ChangeContentTaskItem) {
+    const taskRemoved = item.draft?.changeKind === "remove";
+    const taskRemovalLabel = taskRemoved
+      ? item.children.length === 0
+        ? "削除予定のタスク"
+        : `削除予定のタスク。関連するノート${item.children.length}件も削除予定です`
+      : undefined;
+    const taskContent = (
+      <>
+        <span>
+          <strong>{item.task.title}</strong>
+          <small>
+            {formatTaskDueLabel(item.task.dueDate, selectedSchoolDate)}
+            {item.task.relatedLessonName
+              ? ` · ${item.task.relatedLessonName}`
+              : ""}
+          </small>
+          <span className="task-scope-badge">
+            {scopeLabel(
+              item.task.targetScopeType,
+              changeContentScopeContext(),
+            )}
+          </span>
+          {item.draft
+            ? changeContentLifecycle(
+                item.draft.changeKind,
+                item.conflicted,
+              )
+            : null}
+        </span>
+        {item.draft ? <span aria-hidden="true">›</span> : null}
+      </>
+    );
+    return (
+      <li key={item.id}>
+        <article
+          aria-label={taskRemovalLabel}
+          className={`task-entry${
+            item.draft ? " task-draft change-content-preview-card" : " change-content-context-card"
+          }${taskRemoved ? " task-removal-draft" : ""}${
+            item.conflicted ? " change-content-conflicted" : ""
+          }`}
+          data-change-content-kind="task"
+          data-change-kind={item.draft?.changeKind}
+        >
+          {item.draft ? (
+            <button
+              className="task-item"
+              type="button"
+              onClick={() => openChangeContentTask(item)}
+            >
+              {taskContent}
+            </button>
+          ) : (
+            <div className="task-item">{taskContent}</div>
+          )}
+          {item.children.length > 0 ? (
+            <div
+              className="task-note-list change-content-related-notes"
+              aria-label={`${item.task.title}のノート`}
+            >
+              {item.children.map(changeContentNoteCard)}
+            </div>
+          ) : null}
+          {taskRemoved ? (
+            <RemovalMark
+              className="task-removal-mark"
+              label={taskRemovalLabel!}
+            />
+          ) : null}
+        </article>
+      </li>
+    );
+  }
+
+  function changeContentItemView(item: ChangeContentItem) {
+    if (item.kind === "daily-lesson") {
+      return changeContentDailyLessonView(item);
+    }
+    if (item.kind === "task") return changeContentTaskView(item);
+    return <li key={item.id}>{changeContentNoteCard(item)}</li>;
   }
 
   function openTaskEditor() {
@@ -2028,7 +2018,13 @@ function App() {
   }
 
   function openTaskNoteEditor(
-    task: { taskId: string; title: string; targetScopeType: TargetScopeType },
+    task: {
+      taskId: string;
+      title: string;
+      dueDate: string | null;
+      relatedLessonName?: string;
+      targetScopeType: TargetScopeType;
+    },
     note?: DailyPlanNoteForCache,
     draft?: NoteDraft,
   ) {
@@ -2069,6 +2065,7 @@ function App() {
   }
 
   function activeNoteForEditing(note: DailyPlanNoteForCache) {
+    const contextSnapshot = noteContextSnapshot(note);
     return {
       noteId: note.noteId,
       latestChangeId: note.latestChangeId,
@@ -2079,6 +2076,7 @@ function App() {
       ...(note.relatedContext?.type === "task"
         ? { relatedTaskItemId: note.relatedContext.taskId }
         : {}),
+      ...(contextSnapshot ? { contextSnapshot } : {}),
     };
   }
 
@@ -2296,6 +2294,8 @@ function App() {
     task: {
       taskId: string;
       title: string;
+      dueDate: string | null;
+      relatedLessonName?: string;
       targetScopeType: TargetScopeType;
     },
     activeNotes: DailyPlanNoteForCache[],
@@ -2808,6 +2808,10 @@ function App() {
         : null,
       removeTimetableChange: timetableEditorForm.removalPlanned,
       noteBodies: timetableEditorForm.noteBodies,
+      resolvedLessonName: cachedDailyLessonName(
+        timetableEditorForm.changeDate,
+        timetableEditorForm.periodNumber,
+      ),
     });
     if (result.status === "empty") {
       setTimetableEditorMessage(
@@ -3005,7 +3009,6 @@ function App() {
         )
       : [];
     const changeContentItems = buildChangeContentList({
-      selectedSchoolDate,
       timetableDrafts: timetableEditor.drafts,
       taskDrafts: timetableEditor.taskDrafts,
       noteDrafts: timetableEditor.noteDrafts,
@@ -3017,6 +3020,12 @@ function App() {
         ...plan.periods.flatMap((period) => period.notes),
         ...plan.tasks.flatMap((task) => task.notes),
       ]),
+      dailyLessons: dailyPlanClient.getCachedDailyPlans().flatMap((plan) =>
+        plan.periods.map((period) => ({
+          schoolDate: plan.schoolDate,
+          periodNumber: period.periodNumber,
+          lessonName: period.lessonName,
+        }))),
     });
     const changeContentControls = changeContentControlState({
       editing: timetableEditor.editing,
@@ -6048,6 +6057,28 @@ function editableTask(task: DailyPlanTaskForCache) {
     targetScopeType: task.targetScopeType,
     notes: task.notes,
   };
+}
+
+function noteContextSnapshotFromPlans(
+  note: DailyPlanNoteForCache,
+  plans: readonly DailyPlanForCache[],
+) {
+  const relatedContext = note.relatedContext;
+  if (relatedContext?.type === "daily-lesson") {
+    const plan = plans.find(
+      (candidate) => candidate.schoolDate === relatedContext.schoolDate,
+    );
+    const lessonName = plan?.periods.find(
+      (period) => period.periodNumber === relatedContext.periodNumber,
+    )?.lessonName;
+    return lessonName === undefined
+      ? undefined
+      : { type: "daily-lesson" as const, lessonName };
+  }
+  if (relatedContext?.type !== "task") return undefined;
+  const task = plans.flatMap((plan) => plan.tasks)
+    .find((candidate) => candidate.taskId === relatedContext.taskId);
+  return task ? createTaskNoteContextSnapshot(task) : undefined;
 }
 
 function scopeLabel(

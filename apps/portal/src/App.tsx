@@ -1699,6 +1699,9 @@ function App() {
               ? item.beforeBody ?? item.body
               : item.afterBody ?? item.body
           }
+          schoolDateLabel={item.schoolDate && item.periodNumber == null
+            ? changeContentDateLabel(item.schoolDate)
+            : undefined}
           targetScopeLabel={scopeLabel(
             item.targetScopeType,
             changeContentScopeContext(),

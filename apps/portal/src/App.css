@@ -796,6 +796,11 @@ button.period-inspect-button:active {
   gap: 8px;
 }
 
+.note-school-date-label {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
 .note-meta .button-link {
   margin-left: auto;
 }

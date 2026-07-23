@@ -92,6 +92,27 @@ test.describe('authenticated Direct Change review', () => {
     await expect(review.getByText('変更後', { exact: true })).toHaveCount(0)
   })
 
+  test('shows the related school date on a school-date Note', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+    await page.getByRole('button', { name: 'ノートを追加' }).click()
+    const editor = page.getByRole('dialog', { name: 'ノートを追加' })
+    const body = `review-school-date-note-${Date.now()}`
+    await editor.getByRole('textbox', { name: '本文' }).fill(body)
+    await editor.getByRole('combobox', { name: '変更適用範囲' })
+      .selectOption('class')
+    const schoolDate = await editor.locator('input[type="date"]').inputValue()
+    const [, month, day] = schoolDate.split('-').map(Number)
+    await editor.getByRole('button', { name: '下書きを保存' }).click()
+
+    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+    const notePreview = page.getByRole('dialog', { name: '変更を反映' })
+      .getByRole('button', { name: new RegExp(body) })
+    await expect(notePreview).toContainText(`${month}月${day}日`)
+  })
+
   test('disables confirmation after a remote conflict', async ({ page }) => {
     await page.route('**/api/shared-information/direct-changes', async (route) => {
       const payload = route.request().postDataJSON() as {

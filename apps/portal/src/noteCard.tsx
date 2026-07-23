@@ -66,6 +66,7 @@ export function NoteBodyView({
 export function NoteCard({
   noteId,
   body,
+  schoolDateLabel,
   targetScopeLabel,
   draft = false,
   changeKind = 'add',
@@ -81,6 +82,7 @@ export function NoteCard({
 }: {
   noteId: string
   body: string
+  schoolDateLabel?: string
   targetScopeLabel?: string
   draft?: boolean
   changeKind?: 'add' | 'update' | 'remove'
@@ -115,7 +117,7 @@ export function NoteCard({
   const individuallyRemoved = draft && changeKind === 'remove' &&
     removalReason !== 'task-cascade'
   const related = presentation === 'related'
-  const hasMeta = (!related && Boolean(targetScopeLabel)) ||
+  const hasMeta = (!related && Boolean(schoolDateLabel || targetScopeLabel)) ||
     (draft && changeKind !== 'remove') || Boolean(onEdit) ||
     (!draft && Boolean(onRemove)) || Boolean(onOpenHistory)
 
@@ -152,6 +154,9 @@ export function NoteCard({
         bodyRef={bodyRef}
       />
       {hasMeta ? <div className="note-meta">
+        {!related && schoolDateLabel ? (
+          <small className="note-school-date-label">{schoolDateLabel}</small>
+        ) : null}
         {!related && targetScopeLabel ? (
           <span className="task-scope-badge">{targetScopeLabel}</span>
         ) : null}

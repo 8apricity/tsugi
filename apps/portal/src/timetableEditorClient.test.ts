@@ -2050,7 +2050,7 @@ describe('Shared Information editor client', () => {
     })
   })
 
-  it('keeps an applied result when freshness cannot be restored', async () => {
+  it('keeps an applied stale-refresh result and prevents resubmission', async () => {
     const editor = createTimetableEditorClient({
       storage: memoryStorage(),
       submitDirectTimetableChanges: async () => ({ status: 'applied' }),
@@ -2067,7 +2067,15 @@ describe('Shared Information editor client', () => {
       confirmSubmission: () => true,
       applyFreshness: async () => { throw new Error('refresh failed') },
     })).resolves.toEqual({ status: 'applied', freshness: 'stale' })
-    expect(editor.getSnapshot()).toMatchObject({ draftCount: 0 })
+    expect(editor.getSnapshot()).toMatchObject({
+      editing: false,
+      draftCount: 0,
+      submitting: false,
+    })
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: async () => 'refreshed' as const,
+    })).resolves.toEqual({ status: 'empty' })
   })
 
   it('saves zero, one, and multiple Task Notes with one atomic Task draft mutation', () => {

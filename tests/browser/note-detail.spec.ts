@@ -19,15 +19,10 @@ test.describe('authenticated Daily Plan Note detail', () => {
       .selectOption('class')
     await addition.getByRole('button', { name: '下書きを保存' }).click()
 
-    await page.getByRole('button', { name: /変更内容（1）/ }).click()
+    await page.getByRole('button', { name: /変更を反映（1）/ }).click()
     await page
-      .getByRole('dialog', { name: '変更内容' })
-      .getByRole('button', { name: '反映を確認' })
-      .click()
-    page.once('dialog', (dialog) => dialog.accept())
-    await page
-      .getByRole('dialog', { name: '最終確認' })
-      .getByRole('button', { name: '変更を反映' })
+      .getByRole('dialog', { name: '変更を反映' })
+      .getByRole('button', { name: '確定' })
       .click()
 
     const noteCard = page.locator('.note-item').filter({ hasText: originalBody })
@@ -149,7 +144,22 @@ test.describe('authenticated Daily Plan Note detail', () => {
     )
     await expect(removalCard.getByText('削除予定', { exact: true }))
       .toHaveCount(0)
-    await applyCurrentDrafts(page)
+    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+    const review = page.getByRole('dialog', { name: '変更を反映' })
+    const removalUnit = review.locator('.change-content-removal-unit')
+      .filter({ hasText: originalBody })
+    await expect(removalUnit).toHaveCSS(
+      'background-color',
+      'rgb(253, 236, 236)',
+    )
+    await expect(removalUnit.getByRole('img', {
+      name: '削除予定のノート',
+    })).toBeVisible()
+    await expect(removalUnit.getByRole('button', {
+      name: /削除予定のノート/,
+    })).toBeVisible()
+    await expect(removalUnit).not.toContainText('削除予定')
+    await review.getByRole('button', { name: '確定' }).click()
   })
 
   test('returns a related Note to its retained Task detail', async ({
@@ -234,15 +244,10 @@ test.describe('authenticated Daily Plan Note detail', () => {
 })
 
 async function applyCurrentDrafts(page: import('@playwright/test').Page) {
-  await page.getByRole('button', { name: /変更内容（1）/ }).click()
+  await page.getByRole('button', { name: /変更を反映（1）/ }).click()
   await page
-    .getByRole('dialog', { name: '変更内容' })
-    .getByRole('button', { name: '反映を確認' })
-    .click()
-  page.once('dialog', (dialog) => dialog.accept())
-  await page
-    .getByRole('dialog', { name: '最終確認' })
-    .getByRole('button', { name: '変更を反映' })
+    .getByRole('dialog', { name: '変更を反映' })
+    .getByRole('button', { name: '確定' })
     .click()
 }
 

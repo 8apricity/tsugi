@@ -108,15 +108,30 @@ test('edit mode shows projected transitions, including identical and removal dra
   await expect(note).toBeVisible()
   await expect(note).not.toHaveClass(/note-removal-draft/)
   await expect(note).not.toHaveCSS('background-color', 'rgb(251, 232, 232)')
+
+  await page.getByRole('button', { name: '変更を反映（2）' }).click()
+  const review = page.getByRole('dialog', { name: '変更を反映' })
+  const removalUnit = review.locator('.change-content-removal-unit')
+    .filter({ hasText: '1限の時間割' })
+  await expect(removalUnit).toHaveCSS(
+    'background-color',
+    'rgb(253, 236, 236)',
+  )
+  await expect(removalUnit.getByRole('img', {
+    name: '時間割変更の削除予定',
+  })).toBeVisible()
+  await expect(removalUnit.getByRole('button', {
+    name: /時間割変更の削除予定/,
+  })).toBeVisible()
+  await expect(removalUnit).not.toContainText('削除予定')
+  await expect(removalUnit).not.toContainText(noteBody)
+  await expect(review.getByText(noteBody, { exact: true })).toBeVisible()
 })
 
 async function applyCurrentDraft(page: import('@playwright/test').Page) {
-  await page.getByRole('button', { name: '変更内容（1）' }).click()
-  await page.getByRole('dialog', { name: '変更内容' })
-    .getByRole('button', { name: '反映を確認' }).click()
-  page.once('dialog', (dialog) => dialog.accept())
-  await page.getByRole('dialog', { name: '最終確認' })
-    .getByRole('button', { name: '変更を反映' }).click()
+  await page.getByRole('button', { name: '変更を反映（1）' }).click()
+  await page.getByRole('dialog', { name: '変更を反映' })
+    .getByRole('button', { name: '確定' }).click()
   await expect(page.getByRole('button', { name: 'この日の予定を編集' }))
     .toBeVisible()
 }

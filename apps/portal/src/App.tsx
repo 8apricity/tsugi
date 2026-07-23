@@ -104,12 +104,10 @@ import {
   LifecycleIcon,
 } from "./editorLifecycleView";
 import {
-  DirectChangeReviewDialog,
   DraftExitConfirmationDialog,
   DraftLogoutConfirmationDialog,
   StaleDirectChangeRefreshAction,
 } from "./directChangeReviewView";
-import { buildDirectChangeReviewSummary } from "./directChangeReview";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -540,7 +538,6 @@ function App() {
   const [pendingEditorDismissal, setPendingEditorDismissal] =
     useState<PendingEditorDismissal | null>(null);
   const [changeContentOpen, setChangeContentOpen] = useState(false);
-  const [directChangeReviewOpen, setDirectChangeReviewOpen] = useState(false);
   const [draftExitConfirmationOpen, setDraftExitConfirmationOpen] =
     useState(false);
   const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
@@ -591,8 +588,7 @@ function App() {
     timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
       taskEditorForm || noteEditorForm || taskRemovalConfirmation || taskDetail || taskHistoryDialog ||
       noteHistoryDialog || referencePickerOpen || changeContentOpen ||
-      directChangeReviewOpen || draftExitConfirmationOpen ||
-      logoutConfirmationOpen,
+      draftExitConfirmationOpen || logoutConfirmationOpen,
   );
 
   useEffect(() => {
@@ -634,8 +630,6 @@ function App() {
       goBackInTimetableHistoryDialog();
     } else if (referencePickerOpen) {
       setReferencePickerOpen(false);
-    } else if (directChangeReviewOpen) {
-      setDirectChangeReviewOpen(false);
     } else if (draftExitConfirmationOpen) {
       setDraftExitConfirmationOpen(false);
     } else if (logoutConfirmationOpen) {
@@ -1386,7 +1380,6 @@ function App() {
     setReferenceScope(null);
     setMenuOpen(false);
     setChangeContentOpen(false);
-    setDirectChangeReviewOpen(false);
     setDraftExitConfirmationOpen(false);
     setTimetableEditorRefreshNeeded(false);
     changeContentReturnRef.current = false;
@@ -1410,7 +1403,6 @@ function App() {
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
     setChangeContentOpen(false);
-    setDirectChangeReviewOpen(false);
     changeContentReturnRef.current = false;
     pendingChangeContentTimetableRef.current = null;
     setTimetableEditorMessage(null);
@@ -1650,14 +1642,6 @@ function App() {
       : "日付なし";
   }
 
-  function changeContentStatus(
-    changeKind: "add" | "update" | "remove" | null,
-    conflicted: boolean,
-  ) {
-    if (changeKind === null) return "関連タスク";
-    return lifecycleLabel(changeKind, conflicted);
-  }
-
   function changeContentScopeContext() {
     const state = dailyPlanClient.getSnapshot().dailyPlanState;
     return state.status === "ready" ? state.dailyPlan.studentAffiliation : undefined;
@@ -1666,25 +1650,35 @@ function App() {
   function changeContentItemView(item: ChangeContentItem) {
     if (item.kind === "timetable") {
       const replacement = item.replacement ?? item.serverReplacement;
-      const value = item.changeKind === "remove"
-        ? "削除予定"
-        : replacement
-          ? replacementLabel(replacement)
-          : "変更内容";
+      const value = replacement
+        ? replacementLabel(replacement)
+        : "変更内容";
+      const removed = item.changeKind === "remove";
       return (
-        <li key={item.id}>
+        <li
+          className={removed ? "change-content-removal-unit" : undefined}
+          key={item.id}
+        >
           <button
             className={`change-content-item change-content-${item.kind} change-content-${item.changeKind}${item.conflicted ? " conflicted" : ""}`}
             type="button"
             data-change-content-kind={item.kind}
             data-change-kind={item.changeKind}
+            aria-label={
+              removed
+                ? `${item.periodNumber}限の時間割。時間割変更の削除予定`
+                : undefined
+            }
             onClick={() => openChangeContentItem(item)}
           >
-            <LifecycleIcon
-              className="change-content-icon"
-              kind={item.changeKind}
-              conflicted={item.conflicted}
-            />
+            {!removed ? (
+              <LifecycleIcon
+                className="change-content-icon"
+                kind={item.changeKind}
+                conflicted={item.conflicted}
+                showTitle={false}
+              />
+            ) : null}
             <span className="change-content-main">
               <strong>{item.periodNumber}限の時間割</strong>
               <small>
@@ -1700,29 +1694,46 @@ function App() {
                 <span>{value}</span>
               )}
             </span>
-            <span className="change-content-status">
-              {changeContentStatus(item.changeKind, item.conflicted)}
-            </span>
-            <span aria-hidden="true">›</span>
+            <span className="change-content-chevron" aria-hidden="true">›</span>
           </button>
+          {removed ? (
+            <RemovalMark
+              className="change-content-removal-mark"
+              label="時間割変更の削除予定"
+            />
+          ) : null}
         </li>
       );
     }
 
     if (item.kind === "task") {
+      const taskRemoved = item.draft?.changeKind === "remove";
+      const taskRemovalLabel = taskRemoved
+        ? item.children.length === 0
+          ? "削除予定のタスク"
+          : `削除予定のタスク。関連するノート${item.children.length}件も削除予定です`
+        : null;
       const taskRow = item.draft ? (
         <button
           className={`change-content-item change-content-${item.kind} change-content-${item.changeKind}${item.conflicted ? " conflicted" : ""}`}
           type="button"
           data-change-content-kind={item.kind}
           data-change-kind={item.draft.changeKind}
+          aria-label={
+            taskRemovalLabel
+              ? `${item.task.title}。${taskRemovalLabel}`
+              : undefined
+          }
           onClick={() => openChangeContentItem(item)}
         >
-          <LifecycleIcon
-            className="change-content-icon"
-            kind={item.draft.changeKind}
-            conflicted={item.conflicted}
-          />
+          {!taskRemoved ? (
+            <LifecycleIcon
+              className="change-content-icon"
+              kind={item.draft.changeKind}
+              conflicted={item.conflicted}
+              showTitle={false}
+            />
+          ) : null}
           <span className="change-content-main">
             <strong>{item.task.title}</strong>
             <small>
@@ -1735,17 +1746,9 @@ function App() {
                 <small>変更前: {item.beforeTask ? `${item.beforeTask.title}・${formatTaskDueLabel(item.beforeTask.dueDate, selectedSchoolDate)}` : "確認できません"}</small>
                 <small>変更後: {item.task.title}・{formatTaskDueLabel(item.task.dueDate, selectedSchoolDate)}</small>
               </span>
-            ) : item.draft.changeKind === "remove" ? (
-              <span className="change-content-diff">
-                <small>変更前: {item.task.title}・{formatTaskDueLabel(item.task.dueDate, selectedSchoolDate)}</small>
-                <small>変更後: 削除予定</small>
-              </span>
             ) : null}
           </span>
-          <span className="change-content-status">
-            {changeContentStatus(item.changeKind, item.conflicted)}
-          </span>
-          <span aria-hidden="true">›</span>
+          <span className="change-content-chevron" aria-hidden="true">›</span>
         </button>
       ) : (
         <div className="change-content-item change-content-task related-task-group">
@@ -1758,12 +1761,22 @@ function App() {
         </div>
       );
       return (
-        <li key={item.id}>
+        <li
+          className={taskRemoved ? "change-content-removal-unit" : undefined}
+          key={item.id}
+        >
           {taskRow}
           {item.children.length > 0 ? (
             <ul className="change-content-children" aria-label={`${item.task.title}のノート`}>
               {item.children.map((child) => (
-                <li key={child.id}>
+                <li
+                  className={
+                    child.source === "draft" && child.changeKind === "remove"
+                      ? "change-content-removal-unit"
+                      : undefined
+                  }
+                  key={child.id}
+                >
                   {child.source === "task-cascade" ? (
                     <div
                       className="change-content-item change-content-note change-content-remove nested cascade-projection"
@@ -1771,17 +1784,9 @@ function App() {
                       data-change-kind="remove"
                       data-change-content-projection="task-cascade"
                     >
-                      <LifecycleIcon
-                        className="change-content-icon"
-                        kind="remove"
-                        conflicted={false}
-                      />
                       <span className="change-content-main">
                         <strong>ノート</strong>
-                        <span className="change-content-diff">
-                          <small>変更前: {child.beforeBody ?? child.body}</small>
-                          <small>変更後: 削除予定</small>
-                        </span>
+                        <small>{child.beforeBody ?? child.body}</small>
                       </span>
                     </div>
                   ) : (
@@ -1790,13 +1795,21 @@ function App() {
                     type="button"
                     data-change-content-kind="note"
                     data-change-kind={child.changeKind}
+                    aria-label={
+                      child.changeKind === "remove"
+                        ? `${child.body}。削除予定のノート`
+                        : undefined
+                    }
                     onClick={() => openChangeContentItem(child)}
                   >
-                    <LifecycleIcon
-                      className="change-content-icon"
-                      kind={child.changeKind}
-                      conflicted={child.conflicted}
-                    />
+                    {child.changeKind !== "remove" ? (
+                      <LifecycleIcon
+                        className="change-content-icon"
+                        kind={child.changeKind}
+                        conflicted={child.conflicted}
+                        showTitle={false}
+                      />
+                    ) : null}
                     <span className="change-content-main">
                       <strong>ノート</strong>
                       {child.changeKind === "update" ? (
@@ -1805,42 +1818,60 @@ function App() {
                           <small>変更後: {child.afterBody ?? "なし"}</small>
                         </span>
                       ) : child.changeKind === "remove" ? (
-                        <span className="change-content-diff">
-                          <small>変更前: {child.beforeBody ?? child.body}</small>
-                          <small>変更後: 削除予定</small>
-                        </span>
+                        <small>{child.beforeBody ?? child.body}</small>
                       ) : (
                         <small>{child.body}</small>
                       )}
                     </span>
-                    <span className="change-content-status">
-                      {changeContentStatus(child.changeKind, child.conflicted)}
-                    </span>
-                    <span aria-hidden="true">›</span>
+                    <span className="change-content-chevron" aria-hidden="true">›</span>
                   </button>
                   )}
+                  {child.source === "draft" && child.changeKind === "remove" ? (
+                    <RemovalMark
+                      className="change-content-removal-mark"
+                      label="削除予定のノート"
+                    />
+                  ) : null}
                 </li>
               ))}
             </ul>
+          ) : null}
+          {taskRemoved ? (
+            <RemovalMark
+              className="change-content-removal-mark"
+              label={taskRemovalLabel!}
+            />
           ) : null}
         </li>
       );
     }
 
+    const noteRemoved = item.changeKind === "remove";
     return (
-      <li key={item.id}>
+      <li
+        className={noteRemoved ? "change-content-removal-unit" : undefined}
+        key={item.id}
+      >
         <button
           className={`change-content-item change-content-note change-content-${item.changeKind}${item.conflicted ? " conflicted" : ""}`}
           type="button"
           data-change-content-kind={item.kind}
           data-change-kind={item.changeKind}
+          aria-label={
+            noteRemoved
+              ? `${item.body}。削除予定のノート`
+              : undefined
+          }
           onClick={() => openChangeContentItem(item)}
         >
-          <LifecycleIcon
-            className="change-content-icon"
-            kind={item.changeKind}
-            conflicted={item.conflicted}
-          />
+          {!noteRemoved ? (
+            <LifecycleIcon
+              className="change-content-icon"
+              kind={item.changeKind}
+              conflicted={item.conflicted}
+              showTitle={false}
+            />
+          ) : null}
           <span className="change-content-main">
             <strong>ノート</strong>
             <small>
@@ -1853,19 +1884,19 @@ function App() {
                 <small>変更後: {item.afterBody ?? "なし"}</small>
               </span>
             ) : item.changeKind === "remove" ? (
-              <span className="change-content-diff">
-                <small>変更前: {item.beforeBody ?? item.body}</small>
-                <small>変更後: 削除予定</small>
-              </span>
+              <span>{item.beforeBody ?? item.body}</span>
             ) : (
               <span>{item.body}</span>
             )}
           </span>
-          <span className="change-content-status">
-            {changeContentStatus(item.changeKind, item.conflicted)}
-          </span>
-          <span aria-hidden="true">›</span>
+          <span className="change-content-chevron" aria-hidden="true">›</span>
         </button>
+        {noteRemoved ? (
+          <RemovalMark
+            className="change-content-removal-mark"
+            label="削除予定のノート"
+          />
+        ) : null}
       </li>
     );
   }
@@ -2847,18 +2878,8 @@ function App() {
     });
   }
 
-  function openDirectChangeReview() {
-    if (
-      timetableEditor.submitting ||
-      timetableEditor.draftCount === 0 ||
-      timetableEditor.conflictCount > 0
-    ) return;
-    setChangeContentOpen(false);
-    setDirectChangeReviewOpen(true);
-  }
-
   async function commitTimetableDrafts() {
-    setDirectChangeReviewOpen(false);
+    setChangeContentOpen(false);
     setTimetableEditorRefreshNeeded(false);
     setTimetableEditorMessage("変更を反映しています…");
     const result = await timetableEditorClient.submitCurrentBatch({
@@ -3868,7 +3889,7 @@ function App() {
                       disabled={timetableEditor.submitting}
                       onClick={() => setChangeContentOpen(true)}
                     >
-                      変更内容（{timetableEditor.draftCount}）
+                      変更を反映（{timetableEditor.draftCount}）
                     </button>
                   </>
                 ) : null}
@@ -3909,74 +3930,61 @@ function App() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="change-content-title"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape" || event.defaultPrevented) return;
+                  event.preventDefault();
+                  setChangeContentOpen(false);
+                  changeContentReturnRef.current = false;
+                }}
               >
                 <header className="editor-dialog-header">
-                  <div>
-                    <h2 id="change-content-title">変更内容</h2>
-                    <p className="change-content-subtitle">
-                      下書き {timetableEditor.draftCount}件
-                    </p>
-                  </div>
                   <button
                     className="icon-button"
                     type="button"
-                    aria-label="変更内容を閉じる"
+                    aria-label="戻る"
                     onClick={() => {
                       setChangeContentOpen(false);
                       changeContentReturnRef.current = false;
                     }}
                   >
-                    ×
+                    ‹
                   </button>
-                </header>
-                {changeContentItems.length === 0 ? (
-                  <p className="change-content-empty">
-                    変更内容はありません。
-                  </p>
-                ) : (
-                  <ol className="change-content-list" aria-label="変更内容一覧">
-                    {changeContentItems.map(changeContentItemView)}
-                  </ol>
-                )}
-                {timetableEditor.conflictCount > 0 ? (
-                  <p className="change-content-conflict-notice" role="alert">
-                    ほかの変更と重なっている下書きがあります。確認してから編集し直してください。
-                  </p>
-                ) : null}
-                <footer className="editor-dialog-actions change-content-actions">
+                  <div className="change-content-heading">
+                    <h2 id="change-content-title">変更を反映</h2>
+                    <p className="change-content-subtitle">
+                      下書き {timetableEditor.draftCount}件
+                    </p>
+                  </div>
                   <button
-                    className="button-secondary"
+                    className="button-primary change-content-confirm"
                     type="button"
                     disabled={
                       timetableEditor.submitting ||
                       timetableEditor.draftCount === 0 ||
                       timetableEditor.conflictCount > 0
                     }
-                    onClick={openDirectChangeReview}
+                    onClick={() => void commitTimetableDrafts()}
                   >
-                    反映を確認
+                    確定
                   </button>
-                </footer>
+                </header>
+                <div className="change-content-body">
+                  {changeContentItems.length === 0 ? (
+                    <p className="change-content-empty">
+                      変更内容はありません。
+                    </p>
+                  ) : (
+                    <ol className="change-content-list" aria-label="変更内容一覧">
+                      {changeContentItems.map(changeContentItemView)}
+                    </ol>
+                  )}
+                  {timetableEditor.conflictCount > 0 ? (
+                    <p className="change-content-conflict-notice" role="alert">
+                      ほかの変更と重なっている下書きがあります。確認してから編集し直してください。
+                    </p>
+                  ) : null}
+                </div>
               </section>
-            </div>
-          ) : null}
-
-          {directChangeReviewOpen ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <DirectChangeReviewDialog
-                summary={buildDirectChangeReviewSummary({
-                  timetableDraftCount: timetableEditor.drafts.length,
-                  taskDraftCount: timetableEditor.taskDrafts.length,
-                  noteDraftCount: timetableEditor.noteDrafts.length,
-                })}
-                submitting={timetableEditor.submitting}
-                conflictCount={timetableEditor.conflictCount}
-                onBack={() => {
-                  setDirectChangeReviewOpen(false);
-                  setChangeContentOpen(true);
-                }}
-                onApply={() => void commitTimetableDrafts()}
-              />
             </div>
           ) : null}
 

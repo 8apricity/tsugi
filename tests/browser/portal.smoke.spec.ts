@@ -106,15 +106,10 @@ test('draft lifecycle protects Task input and renders immutable scope as text', 
   await expect(draftCard).toContainText(savedTitle)
   await expect(draftCard).not.toContainText('破棄される未保存入力')
 
-  await page.getByRole('button', { name: /変更内容（1）/ }).click()
+  await page.getByRole('button', { name: /変更を反映（1）/ }).click()
   await page
-    .getByRole('dialog', { name: '変更内容' })
-    .getByRole('button', { name: '反映を確認' })
-    .click()
-  page.once('dialog', (dialog) => dialog.accept())
-  await page
-    .getByRole('dialog', { name: '最終確認' })
-    .getByRole('button', { name: '変更を反映' })
+    .getByRole('dialog', { name: '変更を反映' })
+    .getByRole('button', { name: '確定' })
     .click()
   await expect(draftCard).toHaveCount(0)
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
@@ -136,9 +131,9 @@ test('draft lifecycle protects Task input and renders immutable scope as text', 
   const updatedTitle = `${savedTitle}（更新）`
   await updateDialog.getByRole('textbox', { name: 'タイトル' }).fill(updatedTitle)
   await updateDialog.getByRole('button', { name: '下書きを保存' }).click()
-  await page.getByRole('button', { name: /変更内容（1）/ }).click()
+  await page.getByRole('button', { name: /変更を反映（1）/ }).click()
   await page
-    .getByRole('dialog', { name: '変更内容' })
+    .getByRole('dialog', { name: '変更を反映' })
     .getByRole('button', { name: new RegExp(updatedTitle) })
     .click()
 
@@ -159,7 +154,7 @@ test('draft lifecycle protects Task input and renders immutable scope as text', 
     .getByRole('alertdialog', { name: '入力内容を破棄しますか？' })
     .getByRole('button', { name: '入力内容を破棄' })
     .click()
-  await expect(page.getByRole('dialog', { name: '変更内容' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '変更を反映' })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'タスクの詳細' })).toHaveCount(0)
 })
 

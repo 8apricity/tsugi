@@ -234,15 +234,10 @@ function escapeRegExp(value: string) {
 }
 
 async function applyCurrentDrafts(page: Page, count: number) {
-  await page.getByRole('button', { name: `変更内容（${count}）` }).click()
+  await page.getByRole('button', { name: `変更を反映（${count}）` }).click()
   await page
-    .getByRole('dialog', { name: '変更内容' })
-    .getByRole('button', { name: '反映を確認' })
-    .click()
-  page.once('dialog', (dialog) => dialog.accept())
-  await page
-    .getByRole('dialog', { name: '最終確認' })
-    .getByRole('button', { name: '変更を反映' })
+    .getByRole('dialog', { name: '変更を反映' })
+    .getByRole('button', { name: '確定' })
     .click()
   await expect(
     page.getByRole('button', { name: 'この日の予定を編集' }),

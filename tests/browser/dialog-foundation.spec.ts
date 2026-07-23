@@ -170,14 +170,13 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
       .selectOption('class')
     await editor.getByRole('button', { name: '下書きを保存' }).click()
 
-    await page.getByRole('button', { name: /変更内容（1）/ }).click()
-    await page
-      .getByRole('dialog', { name: '変更内容' })
-      .getByRole('button', { name: '反映を確認' })
-      .click()
-    const review = page.getByRole('dialog', { name: '最終確認' })
-    page.once('dialog', (dialog) => dialog.accept())
-    await review.getByRole('button', { name: '変更を反映' }).click()
+    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+    const review = page.getByRole('dialog', { name: '変更を反映' })
+    const reviewHeader = review.locator('.editor-dialog-header')
+    await expect(reviewHeader.getByRole('button', { name: '戻る' }))
+      .toHaveText('‹')
+    await reviewHeader.getByRole('button', { name: '確定' }).click()
+    await expect(page.getByRole('dialog', { name: '最終確認' })).toHaveCount(0)
     await expect(page.locator('.task-draft').filter({ hasText: title })).toHaveCount(0)
 
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()

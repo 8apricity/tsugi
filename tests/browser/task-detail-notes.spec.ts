@@ -247,10 +247,25 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await expect(removalDraftTask).not.toContainText('タスクに伴い削除予定')
   await expect(removalDraftTask).not.toContainText('削除予定')
 
-  await page.getByRole('button', { name: '変更内容（1）' }).click()
-  await page
-    .getByRole('dialog', { name: '変更内容' })
-    .getByRole('button', { name: new RegExp(updatedTitle) })
+  await page.getByRole('button', { name: '変更を反映（1）' }).click()
+  const review = page.getByRole('dialog', { name: '変更を反映' })
+  const removalUnit = review.locator('.change-content-removal-unit')
+    .filter({ hasText: updatedTitle })
+  await expect(removalUnit).toHaveCSS(
+    'background-color',
+    'rgb(253, 236, 236)',
+  )
+  await expect(removalUnit.getByRole('img', {
+    name: '削除予定のタスク。関連するノート3件も削除予定です',
+  })).toBeVisible()
+  await expect(removalUnit.getByRole('button', {
+    name: /削除予定のタスク/,
+  })).toBeVisible()
+  await expect(removalUnit.getByRole('img')).toHaveCount(1)
+  await expect(removalUnit).not.toContainText('削除予定')
+  await expect(removalUnit).toContainText('複数ノートの1件目')
+  await expect(removalUnit).toContainText('複数ノートの2件目')
+  await removalUnit.getByRole('button', { name: new RegExp(updatedTitle) })
     .click()
   const reflectedRemovalEditor = page.getByRole('dialog', {
     name: 'タスクを編集',
@@ -267,12 +282,12 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await reflectedRemovalEditor
     .getByRole('button', { name: '下書きを保存' })
     .click()
-  const emptyChangeContent = page.getByRole('dialog', { name: '変更内容' })
+  const emptyChangeContent = page.getByRole('dialog', { name: '変更を反映' })
   await expect(emptyChangeContent).toContainText('変更内容はありません。')
   await emptyChangeContent
-    .getByRole('button', { name: '変更内容を閉じる' })
+    .getByRole('button', { name: '戻る' })
     .click()
-  await expect(page.getByRole('button', { name: '変更内容（0）' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '変更を反映（0）' })).toBeVisible()
 
   await updatedTask.locator('.task-item').click()
   const updateBeforeRemoval = page.getByRole('dialog', { name: 'タスクを編集' })
@@ -281,8 +296,8 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
     .fill(updateDraftTitle)
   await updateBeforeRemoval.getByRole('button', { name: '下書きを保存' })
     .click()
-  await page.getByRole('button', { name: '変更内容（1）' }).click()
-  await page.getByRole('dialog', { name: '変更内容' })
+  await page.getByRole('button', { name: '変更を反映（1）' }).click()
+  await page.getByRole('dialog', { name: '変更を反映' })
     .getByRole('button', { name: new RegExp(updateDraftTitle) })
     .click()
   const changeContentTaskEditor = page.getByRole('dialog', {
@@ -302,7 +317,7 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await changeContentRemovalConfirmation
     .getByRole('button', { name: '削除予定にする' })
     .click()
-  await expect(page.getByRole('dialog', { name: '変更内容' })).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: '変更を反映' })).toHaveCount(0)
 
   const finalRemovalDraftTask = page.getByRole('article', {
     name: '削除予定のタスク。関連するノート3件も削除予定です',
@@ -358,15 +373,10 @@ async function expectTaskNotes(
 }
 
 async function applyCurrentDrafts(page: Page, count: number) {
-  await page.getByRole('button', { name: `変更内容（${count}）` }).click()
+  await page.getByRole('button', { name: `変更を反映（${count}）` }).click()
   await page
-    .getByRole('dialog', { name: '変更内容' })
-    .getByRole('button', { name: '反映を確認' })
-    .click()
-  page.once('dialog', (dialog) => dialog.accept())
-  await page
-    .getByRole('dialog', { name: '最終確認' })
-    .getByRole('button', { name: '変更を反映' })
+    .getByRole('dialog', { name: '変更を反映' })
+    .getByRole('button', { name: '確定' })
     .click()
   await expect(
     page.getByRole('button', { name: 'この日の予定を編集' }),

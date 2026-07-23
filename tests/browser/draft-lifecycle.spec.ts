@@ -48,7 +48,7 @@ test.describe('draft lifecycle', () => {
     await expect(page.getByRole('status').filter({ hasText: '編集中' }))
       .toBeVisible()
     await expect(page.getByText(title, { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: /変更内容（1）/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /変更を反映（1）/ })).toBeVisible()
 
     await page.getByRole('button', { name: '編集を終了' }).click()
     const exitDialog = page.getByRole('alertdialog', {
@@ -143,7 +143,7 @@ test.describe('draft lifecycle', () => {
     await expect(
       page.getByRole('button', { name: 'この日の予定を編集' }),
     ).toHaveCount(0)
-    await expect(page.getByRole('button', { name: /変更内容（1）/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /変更を反映（1）/ })).toHaveCount(0)
     await expect(page.getByLabel('下書き1件')).toHaveCount(0)
     await expect(page.getByLabel('変更下書きあり')).toHaveCount(0)
     await expect(page.getByText(title, { exact: true })).toHaveCount(0)

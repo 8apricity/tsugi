@@ -48,10 +48,12 @@ export function LifecycleIcon({
   kind,
   conflicted = false,
   className = '',
+  showTitle = true,
 }: {
   kind: LifecycleKind
   conflicted?: boolean
   className?: string
+  showTitle?: boolean
 }) {
   const label = lifecycleLabel(kind, conflicted)
   return (
@@ -59,7 +61,7 @@ export function LifecycleIcon({
       className={`lifecycle-icon lifecycle-${conflicted ? 'conflict' : kind}${className ? ` ${className}` : ''}`}
       role="img"
       aria-label={label}
-      title={lifecycleTitle(kind, conflicted)}
+      {...(showTitle ? { title: lifecycleTitle(kind, conflicted) } : {})}
     >
       <LifecycleGlyph kind={kind} conflicted={conflicted} />
     </span>

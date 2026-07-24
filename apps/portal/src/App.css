@@ -1107,6 +1107,86 @@ body.page-scroll-locked {
   min-width: 0;
 }
 
+.draft-cancellation-row {
+  --draft-cancellation-offset: 0px;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: inherit;
+  touch-action: pan-y;
+}
+
+.draft-cancellation-content {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  background: inherit;
+  transform: translateX(var(--draft-cancellation-offset));
+  transition: transform 160ms ease-out;
+}
+
+.draft-cancellation-dragging > .draft-cancellation-content {
+  transition: none;
+}
+
+.draft-cancellation-action {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  width: 72px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: #b42318;
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease-out;
+}
+
+.draft-cancellation-action svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.draft-cancellation-open > .draft-cancellation-action,
+.draft-cancellation-action:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.task-draft .draft-cancellation-content > .task-item {
+  padding: 4px;
+  border: 0;
+  background: inherit;
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .draft-cancellation-row:hover > .draft-cancellation-action,
+  .draft-cancellation-row:focus-within > .draft-cancellation-action {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .draft-cancellation-content,
+  .draft-cancellation-action {
+    transition: none;
+  }
+}
+
 .change-content-context-card {
   border-color: #cbd2d8;
   background: #e4e8eb;

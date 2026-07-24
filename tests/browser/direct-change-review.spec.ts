@@ -130,19 +130,139 @@ test.describe('authenticated Direct Change review', () => {
     })
     await page.goto('/')
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
-    await saveTaskWithNotes(page, `review-conflict-${Date.now()}`, 0)
+    await saveTaskWithNotes(page, `review-a-conflict-${Date.now()}`, 0)
+    await saveTaskWithNotes(page, `review-z-valid-${Date.now()}`, 0)
 
-    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+    await page.getByRole('button', { name: '変更を反映（2）' }).click()
     await page.getByRole('dialog', { name: '変更を反映' })
       .getByRole('button', { name: '確定' })
       .click()
 
-    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+    await page.getByRole('button', { name: '変更を反映（2）' }).click()
     const review = page.getByRole('dialog', { name: '変更を反映' })
     await expect(review.getByRole('button', { name: '確定' })).toBeDisabled()
     await expect(review.getByRole('alert')).toContainText(
       'ほかの変更と重なっている下書きがあります。',
     )
+
+    const conflictCancel = review.locator('.change-content-conflicted')
+      .locator(':scope > .draft-cancellation-row')
+      .getByRole('button', { name: '下書きを取り消す' })
+    await conflictCancel.focus()
+    await page.keyboard.press('Enter')
+
+    await expect(review.getByRole('alert')).toHaveCount(0)
+    await expect(review.getByText('下書き 1件', { exact: true })).toBeVisible()
+    await expect(review.getByRole('button', { name: '確定' })).toBeEnabled()
+  })
+
+  test('cancels Task groups by pointer and restores keyboard focus after Note cancellation', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'chromium')
+    await page.goto('/')
+    await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+    const groupedTitle = `review-a-group-cancel-${Date.now()}`
+    const remainingTitle = `review-z-focus-${Date.now()}`
+    await saveTaskWithNotes(page, groupedTitle, 1)
+    await saveTaskWithNotes(page, remainingTitle, 2)
+
+    await page.getByRole('button', { name: '変更を反映（5）' }).click()
+    const review = page.getByRole('dialog', { name: '変更を反映' })
+    const groupedTask = review.locator('[data-change-content-kind="task"]')
+      .filter({ hasText: groupedTitle })
+    const groupedRow = groupedTask.locator(
+      ':scope > .draft-cancellation-row',
+    )
+    const groupedEdit = groupedRow.getByRole('button', {
+      name: new RegExp(groupedTitle),
+    })
+    const groupedCancel = groupedRow.getByRole('button', {
+      name: '下書きを取り消す',
+    })
+
+    await groupedEdit.hover()
+    await expect(groupedCancel).toHaveCSS('opacity', '1')
+    await groupedCancel.click()
+    await expect(review.getByText(groupedTitle)).toHaveCount(0)
+    await expect(review.getByText('review note 1', { exact: true }))
+      .toHaveCount(1)
+    await expect(review.getByText('下書き 3件', { exact: true })).toBeVisible()
+    await expect(review.getByRole('button', {
+      name: new RegExp(remainingTitle),
+    })).toBeFocused()
+
+    const firstNoteRow = review.locator('[data-draft-cancellation-id]')
+      .filter({ hasText: 'review note 1' })
+    const firstNote = firstNoteRow.getByRole('button', {
+      name: /review note 1/,
+    })
+    await firstNote.focus()
+    await page.keyboard.press('Tab')
+    const noteCancel = firstNoteRow.getByRole('button', {
+      name: '下書きを取り消す',
+    })
+    await expect(noteCancel).toBeFocused()
+    await page.keyboard.press('Enter')
+
+    await expect(review.getByText('review note 1', { exact: true }))
+      .toHaveCount(0)
+    await expect(review.getByText(remainingTitle)).toBeVisible()
+    await expect(review.getByRole('button', { name: /review note 2/ }))
+      .toBeFocused()
+  })
+
+  test('reveals one mobile cancellation action without stealing vertical intent or row taps', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'webkit-iphone')
+    await page.goto('/')
+    await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+    const title = `review-swipe-${Date.now()}`
+    await saveTaskWithNotes(page, title, 0)
+    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+
+    const review = page.getByRole('dialog', { name: '変更を反映' })
+    const row = review.locator('[data-draft-cancellation-id]').filter({
+      hasText: title,
+    })
+    const cancel = row.getByRole('button', { name: '下書きを取り消す' })
+    const edit = row.getByRole('button', { name: new RegExp(title) })
+
+    await dispatchTouchPointer(row, [
+      { x: 220, y: 80 },
+      { x: 200, y: 83 },
+    ])
+    await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
+
+    const verticalMovePrevented = await dispatchTouchPointer(row, [
+      { x: 220, y: 80 },
+      { x: 216, y: 120 },
+    ])
+    expect(verticalMovePrevented).toBe(false)
+    await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
+
+    await dispatchTouchPointer(row, [
+      { x: 220, y: 80 },
+      { x: 170, y: 82 },
+    ])
+    await expect(row).toHaveAttribute('data-cancellation-open', 'true')
+    await expect(cancel).toHaveAttribute('aria-label', '下書きを取り消す')
+
+    await edit.tap()
+    await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
+    await expect(page.getByRole('dialog', { name: 'タスクを追加' }))
+      .toHaveCount(0)
+
+    await dispatchTouchPointer(row, [
+      { x: 220, y: 80 },
+      { x: 160, y: 81 },
+    ])
+    await cancel.tap()
+    await expect(review.getByText(title)).toHaveCount(0)
+    await expect(review.getByText('変更内容はありません。')).toBeVisible()
+    await expect(review.getByRole('button', { name: '確定' })).toBeDisabled()
+    await expect(review.getByRole('button', { name: '戻る' })).toBeFocused()
   })
 
   test('submits one mixed batch and exposes a stale-refresh recovery', async ({
@@ -234,4 +354,38 @@ async function saveTimetableChange(page: Page) {
   await editor.getByRole('button', { name: '月3', exact: true }).click()
   await editor.getByRole('button', { name: '下書きを保存' }).click()
   await layerDialog.getByRole('button', { name: '閉じる' }).click()
+}
+
+async function dispatchTouchPointer(
+  locator: ReturnType<Page['locator']>,
+  points: Array<{ x: number; y: number }>,
+) {
+  return locator.evaluate((element, touchPoints) => {
+    const pointerId = 67
+    const dispatch = (
+      type: 'pointerdown' | 'pointermove' | 'pointerup',
+      point: { x: number; y: number },
+    ) => {
+      const PointerEventConstructor =
+        element.ownerDocument.defaultView!.PointerEvent
+      const event = new PointerEventConstructor(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId,
+        pointerType: 'touch',
+        clientX: point.x,
+        clientY: point.y,
+        isPrimary: true,
+      })
+      element.dispatchEvent(event)
+      return event.defaultPrevented
+    }
+    dispatch('pointerdown', touchPoints[0])
+    let movePrevented = false
+    for (const point of touchPoints.slice(1)) {
+      movePrevented = dispatch('pointermove', point) || movePrevented
+    }
+    dispatch('pointerup', touchPoints.at(-1)!)
+    return movePrevented
+  }, points)
 }

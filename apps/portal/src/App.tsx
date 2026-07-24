@@ -7,6 +7,7 @@ import {
   type FocusEvent as ReactFocusEvent,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
@@ -111,6 +112,7 @@ import {
   DraftLogoutConfirmationDialog,
   StaleDirectChangeRefreshAction,
 } from "./directChangeReviewView";
+import { DraftCancellationRow } from "./draftCancellationRow";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -543,12 +545,18 @@ function App() {
   const [pendingEditorDismissal, setPendingEditorDismissal] =
     useState<PendingEditorDismissal | null>(null);
   const [changeContentOpen, setChangeContentOpen] = useState(false);
+  const [revealedDraftCancellationId, setRevealedDraftCancellationId] =
+    useState<string | null>(null);
   const [draftExitConfirmationOpen, setDraftExitConfirmationOpen] =
     useState(false);
   const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
   const [timetableEditorRefreshNeeded, setTimetableEditorRefreshNeeded] =
     useState(false);
   const changeContentReturnRef = useRef(false);
+  const changeContentDialogRef = useRef<HTMLElement>(null);
+  const changeContentBackRef = useRef<HTMLButtonElement>(null);
+  const pendingDraftCancellationFocusRef =
+    useRef<string | "back" | null>(null);
   const pendingChangeContentTimetableRef =
     useRef<PendingChangeContentTimetable | null>(null);
   const openLayerReplacementRef = useRef<
@@ -641,6 +649,7 @@ function App() {
       setLogoutConfirmationOpen(false);
     } else if (changeContentOpen) {
       setChangeContentOpen(false);
+      setRevealedDraftCancellationId(null);
     } else {
       closeTimetableDialogFlow();
     }
@@ -1680,9 +1689,119 @@ function App() {
     );
   }
 
+  useLayoutEffect(() => {
+    const focusTarget = pendingDraftCancellationFocusRef.current;
+    pendingDraftCancellationFocusRef.current = null;
+    if (focusTarget === null) return;
+    if (focusTarget === "back") {
+      changeContentBackRef.current?.focus();
+    } else {
+      const row = changeContentDialogRef.current?.querySelector<HTMLElement>(
+        `[data-draft-cancellation-id="${CSS.escape(
+          focusTarget,
+        )}"]`,
+      );
+      row?.querySelector<HTMLElement>(
+        ".draft-cancellation-content > button, " +
+          ".draft-cancellation-content [role='button'], " +
+          ".draft-cancellation-content button",
+      )?.focus();
+    }
+  }, [timetableEditor.draftCount]);
+
+  function nextDraftCancellationFocus(
+    draftId: string,
+    cancelledDraftIds: ReadonlySet<string>,
+  ) {
+    const rows = Array.from(
+      changeContentDialogRef.current?.querySelectorAll<HTMLElement>(
+        "[data-draft-cancellation-id]",
+      ) ?? [],
+    );
+    const index = rows.findIndex(
+      (row) => row.dataset.draftCancellationId === draftId,
+    );
+    const next = rows.slice(index + 1).find(
+      (row) =>
+        row.dataset.draftCancellationId &&
+        !cancelledDraftIds.has(row.dataset.draftCancellationId),
+    );
+    const previous = rows.slice(0, index).reverse().find(
+      (row) =>
+        row.dataset.draftCancellationId &&
+        !cancelledDraftIds.has(row.dataset.draftCancellationId),
+    );
+    return next?.dataset.draftCancellationId ??
+      previous?.dataset.draftCancellationId ??
+      "back";
+  }
+
+  function cancelChangeContentDraft(
+    item:
+      | ChangeContentTimetableItem
+      | ChangeContentTaskItem
+      | Extract<ChangeContentNoteItem, { source: "draft" }>,
+  ) {
+    const cancelledDraftIds = new Set([item.sourceId!]);
+    if (item.kind === "task" && item.draft?.changeKind === "add") {
+      for (const child of item.children) {
+        if (child.source === "draft") {
+          cancelledDraftIds.add(child.sourceId);
+        }
+      }
+    }
+    const focusTarget = nextDraftCancellationFocus(
+      item.sourceId!,
+      cancelledDraftIds,
+    );
+    pendingDraftCancellationFocusRef.current = focusTarget;
+    const result = item.kind === "timetable"
+      ? timetableEditorClient.restoreServerState(
+          item.targetScopeType,
+          item.changeDate,
+          item.periodNumber,
+        )
+      : item.kind === "task"
+        ? timetableEditorClient.removeTaskDraft(item.sourceId!)
+        : timetableEditorClient.removeNoteDraft(item.sourceId);
+    if (
+      result.status !== "removed" &&
+      result.status !== "removed-noop"
+    ) {
+      pendingDraftCancellationFocusRef.current = null;
+      return;
+    }
+    setRevealedDraftCancellationId(null);
+  }
+
+  function cancellationRow(
+    draftId: string,
+    onCancel: () => void,
+    content: ReactNode,
+  ) {
+    return (
+      <DraftCancellationRow
+        key={draftId}
+        draftId={draftId}
+        open={revealedDraftCancellationId === draftId}
+        onInteractionStart={() => {
+          setRevealedDraftCancellationId((current) =>
+            current === draftId ? current : null
+          );
+        }}
+        onOpenChange={(open) =>
+          setRevealedDraftCancellationId(open ? draftId : null)
+        }
+        onCancel={onCancel}
+      >
+        {content}
+      </DraftCancellationRow>
+    );
+  }
+
   function changeContentNoteCard(item: ChangeContentNoteItem) {
     const draft = item.source === "draft";
-    return (
+    const card = (
       <div
         className={item.conflicted ? "change-content-conflicted-note" : undefined}
         data-change-content-kind="note"
@@ -1717,18 +1836,26 @@ function App() {
         />
       </div>
     );
+    return draft
+      ? cancellationRow(
+          item.sourceId,
+          () => cancelChangeContentDraft(item),
+          card,
+        )
+      : card;
   }
 
   function changeContentTimetableCard(item: ChangeContentTimetableItem) {
     const replacement = item.replacement ?? item.serverReplacement;
     const removed = item.changeKind === "remove";
-    return (
+    return cancellationRow(
+      item.sourceId,
+      () => cancelChangeContentDraft(item),
       <article
         aria-label={removed ? "時間割変更の削除予定" : undefined}
         className={`task-entry task-draft change-content-preview-card${
           removed ? " task-removal-draft" : ""
         }${item.conflicted ? " change-content-conflicted" : ""}`}
-        key={item.id}
       >
         <button
           className="task-item"
@@ -1761,7 +1888,7 @@ function App() {
             label="時間割変更の削除予定"
           />
         ) : null}
-      </article>
+      </article>,
     );
   }
 
@@ -1857,13 +1984,17 @@ function App() {
           data-change-kind={item.draft?.changeKind}
         >
           {item.draft ? (
-            <button
-              className="task-item"
-              type="button"
-              onClick={() => openChangeContentTask(item)}
-            >
-              {taskContent}
-            </button>
+            cancellationRow(
+              item.sourceId!,
+              () => cancelChangeContentDraft(item),
+              <button
+                className="task-item"
+                type="button"
+                onClick={() => openChangeContentTask(item)}
+              >
+                {taskContent}
+              </button>,
+            )
           ) : (
             <div className="task-item">{taskContent}</div>
           )}
@@ -3938,6 +4069,7 @@ function App() {
           {changeContentOpen && changeContentControls.reviewVisible ? (
             <div className="editor-dialog-backdrop" role="presentation">
               <section
+                ref={changeContentDialogRef}
                 className="timetable-editor-dialog change-content-dialog"
                 role="dialog"
                 aria-modal="true"
@@ -3946,16 +4078,19 @@ function App() {
                   if (event.key !== "Escape" || event.defaultPrevented) return;
                   event.preventDefault();
                   setChangeContentOpen(false);
+                  setRevealedDraftCancellationId(null);
                   changeContentReturnRef.current = false;
                 }}
               >
                 <header className="editor-dialog-header">
                   <button
+                    ref={changeContentBackRef}
                     className="icon-button"
                     type="button"
                     aria-label="戻る"
                     onClick={() => {
                       setChangeContentOpen(false);
+                      setRevealedDraftCancellationId(null);
                       changeContentReturnRef.current = false;
                     }}
                   >
@@ -3980,7 +4115,10 @@ function App() {
                     確定
                   </button>
                 </header>
-                <div className="change-content-body">
+                <div
+                  className="change-content-body"
+                  onScroll={() => setRevealedDraftCancellationId(null)}
+                >
                   {changeContentItems.length === 0 ? (
                     <p className="change-content-empty">
                       変更内容はありません。

@@ -268,6 +268,31 @@ type NoteHistoryDialog = {
   state: NoteEditHistoryState;
 };
 
+type NoteDialogParent = "task-detail" | "daily-lesson-detail";
+
+type NoteDialogReturnTarget = {
+  parent: NoteDialogParent;
+  noteId: string;
+  scrollTop: number;
+};
+
+const NOTE_DIALOG_PARENT = {
+  "task-detail": {
+    dialogSelector: ".task-detail-dialog",
+    scrollContainerSelector: ".editor-dialog-body",
+    backLabel: "タスクの詳細に戻る",
+  },
+  "daily-lesson-detail": {
+    dialogSelector: ".timetable-layer-dialog",
+    scrollContainerSelector: null,
+    backLabel: "時間割の変更状況に戻る",
+  },
+} as const satisfies Record<NoteDialogParent, {
+  dialogSelector: string;
+  scrollContainerSelector: string | null;
+  backLabel: string;
+}>;
+
 type NoteDraftBasis =
   | { activeNote: DailyPlanNoteForCache }
   | { beforeBody: string | null };
@@ -581,6 +606,8 @@ function App() {
     useState<TaskHistoryDialog | null>(null);
   const [noteHistoryDialog, setNoteHistoryDialog] =
     useState<NoteHistoryDialog | null>(null);
+  const [noteDialogReturnTarget, setNoteDialogReturnTarget] =
+    useState<NoteDialogReturnTarget | null>(null);
   const [taskLessonNamesExpanded, setTaskLessonNamesExpanded] =
     useState(false);
   const [taskLessonNameListOpen, setTaskLessonNameListOpen] =
@@ -639,7 +666,7 @@ function App() {
     if (pendingEditorDismissal) {
       setPendingEditorDismissal(null);
     } else if (noteHistoryDialog) {
-      setNoteHistoryDialog(null);
+      goBackFromNoteHistory();
     } else if (noteEditorForm) {
       requestNoteEditorClose();
     } else if (taskHistoryDialog) {
@@ -1400,13 +1427,12 @@ function App() {
     timetableLayerCacheRef.current.clear();
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
-    setNoteEditorForm(null);
+    clearNoteDialogState();
     setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
     setTaskDetail(null);
     setTaskHistoryDialog(null);
-    setNoteHistoryDialog(null);
     setTimetableLayerDialog(null);
     setTimetableEditorOptions(null);
     setReferencePickerOpen(false);
@@ -1433,7 +1459,7 @@ function App() {
     setDraftExitConfirmationOpen(false);
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
-    setNoteEditorForm(null);
+    clearNoteDialogState();
     setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
     setPendingEditorDismissal(null);
@@ -1447,7 +1473,7 @@ function App() {
     if (timetableEditorClient.shouldConfirmExit()) {
       setTimetableEditorForm(null);
       setTaskEditorForm(null);
-      setNoteEditorForm(null);
+      clearNoteDialogState();
       setTaskRemovalConfirmation(null);
       clearEditorInitialForms();
       setPendingEditorDismissal(null);
@@ -1483,8 +1509,12 @@ function App() {
     setTaskEditorForm(form);
   }
 
-  function openNoteEditorForm(form: NoteEditorForm) {
+  function openNoteEditorForm(
+    form: NoteEditorForm,
+    returnTarget: NoteDialogReturnTarget | null = null,
+  ) {
     editorInitialFormsRef.current.note = form;
+    setNoteDialogReturnTarget(returnTarget);
     setNoteEditorForm(form);
   }
 
@@ -1494,6 +1524,13 @@ function App() {
       task: null,
       note: null,
     };
+  }
+
+  function clearNoteDialogState() {
+    setNoteEditorForm(null);
+    setNoteHistoryDialog(null);
+    setNoteDialogReturnTarget(null);
+    editorInitialFormsRef.current.note = null;
   }
 
   function editorFormIsDirty(editor: EditorKind) {
@@ -1542,11 +1579,12 @@ function App() {
   }
 
   function closeNoteEditorFlow() {
-    setNoteEditorForm(null);
-    editorInitialFormsRef.current.note = null;
+    const returnTarget = noteDialogReturnTarget;
+    clearNoteDialogState();
     setLessonNameListOpen(false);
     setActiveLessonNameOption(-1);
     returnToChangeContentIfNeeded();
+    if (returnTarget) restoreNoteDialogParent(returnTarget);
   }
 
   function requestTaskEditorClose() {
@@ -1560,6 +1598,24 @@ function App() {
   function closeNoteHistoryFlow() {
     setNoteHistoryDialog(null);
     if (!requestEditorDismissal("note")) closeNoteEditorFlow();
+  }
+
+  function goBackFromNoteHistory() {
+    setNoteHistoryDialog(null);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(
+        ".note-detail-dialog .note-detail-actions button",
+      )?.focus();
+    });
+  }
+
+  function closeAllNoteDialogs() {
+    clearNoteDialogState();
+    setTaskDetail(null);
+    setTaskHistoryDialog(null);
+    setTimetableHistoryDialog(null);
+    setTimetableLayerDialog(null);
+    pendingChangeContentTimetableRef.current = null;
   }
 
   function taskEditingSnapshotFromChangeItem(item: ChangeContentTaskItem) {
@@ -2048,6 +2104,39 @@ function App() {
       : null;
   }
 
+  function captureNoteDialogReturnTarget(
+    parent: NoteDialogParent,
+    noteId: string,
+  ): NoteDialogReturnTarget {
+    const { scrollContainer } = noteDialogParentElements(parent);
+    return {
+      parent,
+      noteId,
+      scrollTop: scrollContainer?.scrollTop ?? 0,
+    };
+  }
+
+  function restoreNoteDialogParent(target: NoteDialogReturnTarget) {
+    window.requestAnimationFrame(() => {
+      const { dialog, scrollContainer } =
+        noteDialogParentElements(target.parent);
+      const note = Array.from(
+        dialog?.querySelectorAll<HTMLElement>("[data-note-id]") ?? [],
+      ).find((candidate) => candidate.dataset.noteId === target.noteId);
+      note?.focus({ preventScroll: true });
+      if (scrollContainer) scrollContainer.scrollTop = target.scrollTop;
+    });
+  }
+
+  function noteDialogParentElements(parent: NoteDialogParent) {
+    const config = NOTE_DIALOG_PARENT[parent];
+    const dialog = document.querySelector<HTMLElement>(config.dialogSelector);
+    const scrollContainer = config.scrollContainerSelector
+      ? dialog?.querySelector<HTMLElement>(config.scrollContainerSelector)
+      : dialog;
+    return { dialog, scrollContainer };
+  }
+
   async function loadReferenceScopeOptions() {
     setReferenceScopeOptions({ status: "loading" });
     try {
@@ -2106,38 +2195,48 @@ function App() {
       : null;
   }
 
-  function openNoteUpdateEditor(note: DailyPlanNoteForCache) {
-    openNoteEditorForm({
-      body: note.body,
-      schoolDate: noteSchoolDate(note),
-      periodNumber: notePeriodNumber(note),
-      targetScopeType: note.targetScopeType,
-      editingNote: note,
-      editingDraft: null,
-      removalPlanned: false,
-      relatedTask: null,
-    });
+  function openNoteUpdateEditor(
+    note: DailyPlanNoteForCache,
+    returnTarget?: NoteDialogReturnTarget,
+  ) {
+    openNoteEditorForm(
+      {
+        body: note.body,
+        schoolDate: noteSchoolDate(note),
+        periodNumber: notePeriodNumber(note),
+        targetScopeType: note.targetScopeType,
+        editingNote: note,
+        editingDraft: null,
+        removalPlanned: false,
+        relatedTask: null,
+      },
+      returnTarget,
+    );
   }
 
   function openNoteDraftEditor(
     draft: NoteDraft,
     basis?: NoteDraftBasis,
+    returnTarget?: NoteDialogReturnTarget,
   ) {
     const editingNote = draft.changeKind === "add"
       ? null
       : basis && "activeNote" in basis
         ? basis.activeNote
         : reflectedNoteFromDraft(draft, basis?.beforeBody) ?? null;
-    openNoteEditorForm({
-      body: draft.body,
-      schoolDate: draft.schoolDate,
-      periodNumber: draft.periodNumber,
-      targetScopeType: draft.targetScopeType,
-      editingNote,
-      editingDraft: draft,
-      removalPlanned: draft.changeKind === "remove",
-      relatedTask: null,
-    });
+    openNoteEditorForm(
+      {
+        body: draft.body,
+        schoolDate: draft.schoolDate,
+        periodNumber: draft.periodNumber,
+        targetScopeType: draft.targetScopeType,
+        editingNote,
+        editingDraft: draft,
+        removalPlanned: draft.changeKind === "remove",
+        relatedTask: null,
+      },
+      returnTarget,
+    );
   }
 
   function openTaskNoteEditor(
@@ -2150,17 +2249,21 @@ function App() {
     },
     note?: DailyPlanNoteForCache,
     draft?: NoteDraft,
+    returnTarget?: NoteDialogReturnTarget,
   ) {
-    openNoteEditorForm({
-      body: draft?.body ?? note?.body ?? "",
-      schoolDate: null,
-      periodNumber: null,
-      targetScopeType: task.targetScopeType,
-      editingNote: note ?? null,
-      editingDraft: draft ?? null,
-      removalPlanned: draft?.changeKind === "remove",
-      relatedTask: task,
-    });
+    openNoteEditorForm(
+      {
+        body: draft?.body ?? note?.body ?? "",
+        schoolDate: null,
+        periodNumber: null,
+        targetScopeType: task.targetScopeType,
+        editingNote: note ?? null,
+        editingDraft: draft ?? null,
+        removalPlanned: draft?.changeKind === "remove",
+        relatedTask: task,
+      },
+      returnTarget,
+    );
   }
 
   function reflectedNoteFromDraft(
@@ -2455,8 +2558,18 @@ function App() {
           conflicted: note.conflicted,
           onOpen: notesOpenDetail
             ? () => item.activeNote
-              ? openTaskNoteEditor(task, item.activeNote, note)
-              : openTaskNoteEditor(task, undefined, note)
+              ? openTaskNoteEditor(
+                  task,
+                  item.activeNote,
+                  note,
+                  captureNoteDialogReturnTarget("task-detail", note.sourceId),
+                )
+              : openTaskNoteEditor(
+                  task,
+                  undefined,
+                  note,
+                  captureNoteDialogReturnTarget("task-detail", note.sourceId),
+                )
             : undefined,
         };
       }
@@ -2476,7 +2589,12 @@ function App() {
         noteId: note.noteId,
         body: note.body,
         onOpen: notesOpenDetail
-          ? () => openTaskNoteEditor(task, note)
+          ? () => openTaskNoteEditor(
+              task,
+              note,
+              undefined,
+              captureNoteDialogReturnTarget("task-detail", note.noteId),
+            )
           : undefined,
       };
     });
@@ -2588,6 +2706,10 @@ function App() {
             ? () => openNoteDraftEditor(
                 note,
                 item.activeNote ? { activeNote: item.activeNote } : undefined,
+                captureNoteDialogReturnTarget(
+                  "daily-lesson-detail",
+                  note.sourceId,
+                ),
               )
             : undefined,
         };
@@ -2600,7 +2722,13 @@ function App() {
           ? undefined
           : scopeLabel(note.targetScopeType, scopeContext),
         onOpen: notesOpenDetail
-          ? () => openNoteUpdateEditor(note)
+          ? () => openNoteUpdateEditor(
+              note,
+              captureNoteDialogReturnTarget(
+                "daily-lesson-detail",
+                note.noteId,
+              ),
+            )
           : undefined,
       };
     });
@@ -4151,6 +4279,11 @@ function App() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="reference-scope-title"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape" || event.defaultPrevented) return;
+                  event.preventDefault();
+                  setReferencePickerOpen(false);
+                }}
               >
                 <header className="editor-dialog-header">
                   <h2 id="reference-scope-title">ほかの範囲を参照</h2>
@@ -4158,6 +4291,7 @@ function App() {
                     className="icon-button"
                     type="button"
                     aria-label="閉じる"
+                    autoFocus
                     onClick={() => setReferencePickerOpen(false)}
                   >
                     ×
@@ -4222,6 +4356,7 @@ function App() {
               body={noteEditorForm.body}
               details={noteDetailValues}
               editing={timetableEditor.editing}
+              hidden={Boolean(noteHistoryDialog)}
               removalPlanned={noteEditorForm.removalPlanned}
               onBodyChange={(body) => setNoteEditorForm((current) =>
                 current ? { ...current, body } : current)}
@@ -4229,13 +4364,19 @@ function App() {
                 setNoteEditorForm((current) => current
                   ? { ...current, removalPlanned }
                   : current)}
-              onBack={requestNoteEditorClose}
+              onBack={timetableEditor.editing || noteDialogReturnTarget
+                ? requestNoteEditorClose
+                : undefined}
+              backLabel={noteDialogReturnTarget
+                ? NOTE_DIALOG_PARENT[noteDialogReturnTarget.parent].backLabel
+                : "戻る"}
+              onClose={closeAllNoteDialogs}
               onSave={saveCurrentNoteDraft}
               onOpenHistory={noteEditorForm.editingNote
                 ? () => openNoteHistory(noteEditorForm.editingNote!)
                 : undefined}
             />
-          ) : noteEditorForm ? (
+          ) : noteEditorForm && !noteHistoryDialog ? (
             <EditorDialogShell
               title={noteEditorForm.relatedTask
                 ? "ノートを書く"
@@ -4467,8 +4608,7 @@ function App() {
             </EditorDialogShell>
           ) : null}
 
-          {taskDetail && !noteEditorForm && !noteHistoryDialog &&
-            !taskHistoryDialog && !taskRemovalConfirmation ? (
+          {taskDetail && !taskHistoryDialog && !taskRemovalConfirmation ? (
             <TaskDetailDialog
               task={taskDetail.task}
               taskScopeLabel={scopeLabel(
@@ -4502,6 +4642,7 @@ function App() {
                 timetableEditor.atLimit || timetableEditor.submitting
               }
               removalCheckboxAutoFocus={taskRemovalCheckboxFocusRequested}
+              hidden={Boolean(noteEditorForm || noteHistoryDialog)}
               onClose={taskEditorForm?.editingTask
                 ? requestTaskEditorClose
                 : () => setTaskDetail(null)}
@@ -4585,8 +4726,10 @@ function App() {
             <NoteEditHistoryDialog
               targetScopeContext={targetScopeContext}
               state={noteHistoryDialog.state}
-              onBack={() => setNoteHistoryDialog(null)}
-              onClose={closeNoteHistoryFlow}
+              onBack={goBackFromNoteHistory}
+              onClose={timetableEditor.editing
+                ? closeNoteHistoryFlow
+                : closeAllNoteDialogs}
               onRetry={() => setNoteHistoryDialog((current) =>
                 current ? {
                   ...current,
@@ -4728,8 +4871,13 @@ function App() {
           ) : null}
 
           {timetableLayerDialog && !timetableEditorForm &&
-            !timetableHistoryDialog && !noteEditorForm && !noteHistoryDialog ? (
-            <div className="editor-dialog-backdrop" role="presentation">
+            !timetableHistoryDialog ? (
+            <div
+              className="editor-dialog-backdrop"
+              role="presentation"
+              aria-hidden={Boolean(noteEditorForm || noteHistoryDialog)}
+              inert={Boolean(noteEditorForm || noteHistoryDialog)}
+            >
               <section
                 className="timetable-editor-dialog timetable-layer-dialog"
                 role="dialog"

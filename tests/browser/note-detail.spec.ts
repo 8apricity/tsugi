@@ -61,6 +61,9 @@ test.describe('authenticated Daily Plan Note detail', () => {
       .getByRole('button', { name: 'ノートの詳細に戻る' })
       .click()
     await expect(readOnlyDetail).toBeVisible()
+    await expect(
+      readOnlyDetail.getByRole('button', { name: '編集履歴' }),
+    ).toBeFocused()
     await readOnlyDetail.getByRole('button', { name: '閉じる' }).click()
 
     await noteCard.click()
@@ -201,11 +204,47 @@ test.describe('authenticated Daily Plan Note detail', () => {
     const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
     await expect(noteDetail).toContainText(`タスク「${taskTitle}」`)
     await expect(taskDetail).toHaveCount(0)
-    await noteDetail.getByRole('button', { name: '閉じる' }).click()
+    await expect(
+      noteDetail.getByRole('button', { name: 'タスクの詳細に戻る' }),
+    ).toBeVisible()
+    await expect(
+      noteDetail.getByRole('button', { name: '閉じる' }),
+    ).toBeFocused()
+    await noteDetail
+      .getByRole('button', { name: 'タスクの詳細に戻る' })
+      .click()
     await expect(noteDetail).toHaveCount(0)
     await expect(taskDetail).toBeVisible()
+    await expect(relatedNote).toBeFocused()
 
-    await taskDetail.getByRole('button', { name: '閉じる' }).click()
+    await relatedNote.click()
+    await page.goBack()
+    await expect(noteDetail).toHaveCount(0)
+    await expect(taskDetail).toBeVisible()
+    await expect(relatedNote).toBeFocused()
+
+    await relatedNote.click()
+    await noteDetail.getByRole('button', { name: '閉じる' }).click()
+    await expect(noteDetail).toHaveCount(0)
+    await expect(taskDetail).toHaveCount(0)
+
+    await taskCard.locator('.task-item').click()
+    await expect(taskDetail).toBeVisible()
+    await relatedNote.click()
+    await noteDetail.getByRole('button', { name: '編集履歴' }).click()
+    const nestedHistory = page.getByRole('dialog', {
+      name: 'ノートの編集履歴',
+    })
+    await expect(nestedHistory).toBeVisible()
+    await expect(page.getByRole('dialog')).toHaveCount(1)
+    await expect(
+      nestedHistory.getByRole('button', { name: '閉じる' }),
+    ).toBeFocused()
+    await nestedHistory.getByRole('button', { name: '閉じる' }).click()
+    await expect(nestedHistory).toHaveCount(0)
+    await expect(noteDetail).toHaveCount(0)
+    await expect(taskDetail).toHaveCount(0)
+
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
     await taskCard.locator('.task-item').click()
     const editableTaskDetail = page.getByRole('dialog', { name: 'タスクを編集' })

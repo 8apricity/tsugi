@@ -948,6 +948,11 @@ button.period-inspect-button:active {
   touch-action: pan-y;
 }
 
+.editor-dialog-backdrop[aria-hidden="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 html.page-scroll-locked,
 body.page-scroll-locked {
   overflow: hidden;

@@ -3,7 +3,7 @@ import type { VisibleTask } from './taskListView'
 import { formatDueDate } from './uiCopy'
 import { lifecycleLabel, type LifecycleKind } from './editorLifecycle'
 import { LifecycleIcon } from './editorLifecycleView'
-import { EditorDialogShell } from './dialogFoundation'
+import { EditorDialogShell, ReadOnlyDialogShell } from './dialogFoundation'
 
 export function TaskDetailDialog({
   task,
@@ -16,6 +16,7 @@ export function TaskDetailDialog({
   notes,
   addNoteDisabled = false,
   removalCheckboxAutoFocus = false,
+  hidden = false,
   onClose,
   onSave,
   onNoteBodyChange,
@@ -40,6 +41,7 @@ export function TaskDetailDialog({
   notes: ReactNode
   addNoteDisabled?: boolean
   removalCheckboxAutoFocus?: boolean
+  hidden?: boolean
   onClose: () => void
   onSave?: (event: FormEvent<HTMLFormElement>) => void
   onNoteBodyChange?: (index: number, body: string) => void
@@ -58,6 +60,7 @@ export function TaskDetailDialog({
         titleId="task-detail-title"
         formId="task-detail-form"
         className="task-editor-dialog task-detail-dialog"
+        hidden={hidden}
         onBack={onClose}
       >
         <form id="task-detail-form" onSubmit={onSave}>
@@ -98,84 +101,70 @@ export function TaskDetailDialog({
   }
 
   return (
-    <div className="editor-dialog-backdrop" role="presentation">
-      <section
-        className="timetable-editor-dialog task-detail-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="task-detail-title"
-      >
-        <header className="editor-dialog-header">
-          <h2 id="task-detail-title">タスクの詳細</h2>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="閉じる"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </header>
-        <div className="editor-dialog-body">
-          <dl className="detail-list">
-            <div><dt>タイトル</dt><dd>{task.title}</dd></div>
-            <div><dt>期限</dt><dd>{task.dueDate ? formatDueDate(task.dueDate, referenceSchoolDate) : "期限なし"}</dd></div>
-            <div><dt>関連する授業</dt><dd>{task.relatedLessonName ?? "なし"}</dd></div>
-            <div><dt>変更適用範囲</dt><dd>{taskScopeLabel}</dd></div>
-            {draftLifecycle ? (
-              <div>
-                <dt>状態</dt>
-                <dd className="lifecycle-summary">
-                  <LifecycleIcon
-                    kind={draftLifecycle.kind}
-                    conflicted={draftLifecycle.conflicted}
-                  />
-                  <span>
-                    {lifecycleLabel(
-                      draftLifecycle.kind,
-                      draftLifecycle.conflicted,
-                    )}
-                  </span>
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-          {notes}
-          <div className="editor-dialog-actions">
-            {onOpenHistory ? (
-              <button className="button-secondary" type="button" onClick={onOpenHistory}>
-                編集履歴
-              </button>
-            ) : null}
-            {onAddNote ? (
-              <button
-                className="button-secondary"
-                type="button"
-                disabled={addNoteDisabled}
-                onClick={onAddNote}
-              >
-                ノートを書く
-              </button>
-            ) : null}
-            {onEdit ? (
-              <button className="button-secondary" type="button" onClick={onEdit}>
-                編集
-              </button>
-            ) : null}
-            {onCancelDraft ? (
-              <button className="button-secondary" type="button" onClick={onCancelDraft}>
-                下書きを取り消す
-              </button>
-            ) : null}
-            {onRemove ? (
-              <button className="button-danger" type="button" onClick={onRemove}>
-                削除予定にする
-              </button>
-            ) : null}
+    <ReadOnlyDialogShell
+      title="タスクの詳細"
+      titleId="task-detail-title"
+      className="task-detail-dialog"
+      hidden={hidden}
+      onClose={onClose}
+    >
+      <dl className="detail-list">
+        <div><dt>タイトル</dt><dd>{task.title}</dd></div>
+        <div><dt>期限</dt><dd>{task.dueDate ? formatDueDate(task.dueDate, referenceSchoolDate) : "期限なし"}</dd></div>
+        <div><dt>関連する授業</dt><dd>{task.relatedLessonName ?? "なし"}</dd></div>
+        <div><dt>変更適用範囲</dt><dd>{taskScopeLabel}</dd></div>
+        {draftLifecycle ? (
+          <div>
+            <dt>状態</dt>
+            <dd className="lifecycle-summary">
+              <LifecycleIcon
+                kind={draftLifecycle.kind}
+                conflicted={draftLifecycle.conflicted}
+              />
+              <span>
+                {lifecycleLabel(
+                  draftLifecycle.kind,
+                  draftLifecycle.conflicted,
+                )}
+              </span>
+            </dd>
           </div>
-        </div>
-      </section>
-    </div>
+        ) : null}
+      </dl>
+      {notes}
+      <div className="editor-dialog-actions">
+        {onOpenHistory ? (
+          <button className="button-secondary" type="button" onClick={onOpenHistory}>
+            編集履歴
+          </button>
+        ) : null}
+        {onAddNote ? (
+          <button
+            className="button-secondary"
+            type="button"
+            disabled={addNoteDisabled}
+            onClick={onAddNote}
+          >
+            ノートを書く
+          </button>
+        ) : null}
+        {onEdit ? (
+          <button className="button-secondary" type="button" onClick={onEdit}>
+            編集
+          </button>
+        ) : null}
+        {onCancelDraft ? (
+          <button className="button-secondary" type="button" onClick={onCancelDraft}>
+            下書きを取り消す
+          </button>
+        ) : null}
+        {onRemove ? (
+          <button className="button-danger" type="button" onClick={onRemove}>
+            削除予定にする
+          </button>
+        ) : null}
+      </div>
+    </ReadOnlyDialogShell>
   )
 }
 

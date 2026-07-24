@@ -48,6 +48,7 @@ export function NoteEditHistoryDialog({
             className="icon-button"
             type="button"
             aria-label="閉じる"
+            autoFocus
             onClick={onClose}
           >
             ×

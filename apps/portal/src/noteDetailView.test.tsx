@@ -18,7 +18,7 @@ describe('Note detail view', () => {
         removalPlanned={false}
         onBodyChange={() => undefined}
         onRemovalPlannedChange={() => undefined}
-        onBack={() => undefined}
+        onClose={() => undefined}
         onSave={() => undefined}
         onOpenHistory={() => undefined}
       />,
@@ -43,6 +43,35 @@ describe('Note detail view', () => {
     expect(markup).not.toContain('disabled')
   })
 
+  it('separates returning to a parent detail from closing the dialog stack', () => {
+    const markup = renderToStaticMarkup(
+      <NoteDetailDialog
+        body="親から開いたノート"
+        details={details}
+        editing={false}
+        removalPlanned={false}
+        onBodyChange={() => undefined}
+        onRemovalPlannedChange={() => undefined}
+        onBack={() => undefined}
+        backLabel="タスクの詳細に戻る"
+        onClose={() => undefined}
+        onSave={() => undefined}
+      />,
+    )
+
+    const header = dialogHeader(markup)
+    expect(header).toContain('aria-label="タスクの詳細に戻る"')
+    expect(header).toContain('<h2 id="note-detail-title">ノートの詳細</h2>')
+    expect(header).toContain('aria-label="閉じる"')
+    expect(header).toContain('autofocus')
+    expect(header.indexOf('aria-label="タスクの詳細に戻る"')).toBeLessThan(
+      header.indexOf('<h2'),
+    )
+    expect(header.indexOf('<h2')).toBeLessThan(
+      header.indexOf('aria-label="閉じる"'),
+    )
+  })
+
   it('directly edits Body and disables only Body while removal is checked', () => {
     const markup = renderToStaticMarkup(
       <NoteDetailDialog
@@ -53,6 +82,7 @@ describe('Note detail view', () => {
         onBodyChange={() => undefined}
         onRemovalPlannedChange={() => undefined}
         onBack={() => undefined}
+        onClose={() => undefined}
         onSave={() => undefined}
         onOpenHistory={() => undefined}
       />,

@@ -134,7 +134,16 @@ test.describe('draft lifecycle', () => {
 
     await page.getByRole('button', { name: 'メニュー' }).click()
     await page.getByRole('button', { name: 'ほかの範囲を参照' }).click()
-    const picker = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
+    let picker = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
+    await expect(
+      picker.getByRole('button', { name: '閉じる' }),
+    ).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(picker).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'メニュー' }).click()
+    await page.getByRole('button', { name: 'ほかの範囲を参照' }).click()
+    picker = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
     await picker.getByRole('button', { name: '参照する' }).click()
 
     await expect(page.getByRole('status').filter({ hasText: '参照中' }))

@@ -31,6 +31,7 @@ describe('Note Edit History view', () => {
     expect(header).toContain('aria-label="ノートの詳細に戻る"')
     expect(header).toContain('<h2 id="note-history-title">ノートの編集履歴</h2>')
     expect(header).toContain('aria-label="閉じる"')
+    expect(header).toContain('autofocus')
     expect(header.indexOf('aria-label="ノートの詳細に戻る"')).toBeLessThan(
       header.indexOf('<h2'),
     )

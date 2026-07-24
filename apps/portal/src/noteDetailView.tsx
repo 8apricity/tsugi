@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { EditorDialogShell } from './dialogFoundation'
+import { EditorDialogShell, ReadOnlyDialogShell } from './dialogFoundation'
 
 export type NoteDetailValue = {
   label: string
@@ -13,7 +13,10 @@ type NoteDetailDialogProps = {
   removalPlanned: boolean
   onBodyChange(body: string): void
   onRemovalPlannedChange(removalPlanned: boolean): void
-  onBack(): void
+  onBack?: () => void
+  backLabel?: string
+  hidden?: boolean
+  onClose(): void
   onSave(): void
   onOpenHistory?: () => void
 }
@@ -26,7 +29,8 @@ export function NoteDetailDialog(props: NoteDetailDialogProps) {
         titleId="note-detail-title"
         formId="note-detail-form"
         className="note-editor-dialog note-detail-dialog"
-        onBack={props.onBack}
+        hidden={props.hidden}
+        onBack={props.onBack ?? props.onClose}
       >
         <form
           id="note-detail-form"
@@ -69,41 +73,24 @@ export function NoteDetailDialog(props: NoteDetailDialogProps) {
   }
 
   return (
-    <div className="editor-dialog-backdrop" role="presentation">
-      <section
-        className="timetable-editor-dialog note-detail-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="note-detail-title"
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape' || event.defaultPrevented) return
-          event.preventDefault()
-          props.onBack()
-        }}
-      >
-        <header className="editor-dialog-header">
-          <h2 id="note-detail-title">ノートの詳細</h2>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="閉じる"
-            onClick={props.onBack}
-          >
-            ×
-          </button>
-        </header>
-        <div className="editor-dialog-body">
-          <section className="note-detail-body" aria-labelledby="note-body-title">
-            <h3 id="note-body-title">本文</h3>
-            <p>{props.body}</p>
-          </section>
-          <NoteDetailSupplement
-            details={props.details}
-            onOpenHistory={props.onOpenHistory}
-          />
-        </div>
+    <ReadOnlyDialogShell
+      title="ノートの詳細"
+      titleId="note-detail-title"
+      className="note-detail-dialog"
+      backLabel={props.backLabel}
+      hidden={props.hidden}
+      onBack={props.onBack}
+      onClose={props.onClose}
+    >
+      <section className="note-detail-body" aria-labelledby="note-body-title">
+        <h3 id="note-body-title">本文</h3>
+        <p>{props.body}</p>
       </section>
-    </div>
+      <NoteDetailSupplement
+        details={props.details}
+        onOpenHistory={props.onOpenHistory}
+      />
+    </ReadOnlyDialogShell>
   )
 }
 

@@ -176,8 +176,19 @@ test('Daily Lesson Notes support multiple and Note-only creation plus detail upd
   await expect(
     noteDetail.getByRole('button', { name: '編集履歴' }),
   ).toBeVisible()
+  await expect(
+    noteDetail.getByRole('button', { name: '時間割の変更状況に戻る' }),
+  ).toBeVisible()
+  await noteDetail
+    .getByRole('button', { name: '時間割の変更状況に戻る' })
+    .click()
+  await expect(layerDialog).toBeVisible()
+  await expect(noteCard).toBeFocused()
+
+  await noteCard.click()
   await noteDetail.getByRole('button', { name: '閉じる' }).click()
-  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+  await expect(noteDetail).toHaveCount(0)
+  await expect(layerDialog).toHaveCount(0)
 
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
   await page.getByRole('button', { name: /^7限/ }).click()

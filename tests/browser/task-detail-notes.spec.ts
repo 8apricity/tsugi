@@ -89,12 +89,35 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
       (firstNoteBox!.x + firstNoteBox!.width),
   ).toBeLessThanOrEqual(23)
 
-  await relatedNotes.first().click()
+  await page.addStyleTag({
+    content: '.task-detail-dialog > .editor-dialog-body { max-height: 120px; }',
+  })
+  const detailScrollTop = await detail.locator('.editor-dialog-body')
+    .evaluate((element) => {
+      element.scrollTop = element.scrollHeight
+      return element.scrollTop
+    })
+  expect(detailScrollTop).toBeGreaterThan(0)
+
+  await relatedNotes.first().evaluate((element) => {
+    (element as unknown as { click(): void }).click()
+  })
   const noteDetail = page.getByRole('dialog', { name: 'ノートの詳細' })
   await expect(noteDetail).toContainText(/複数ノートの[12]件目/)
-  await noteDetail.getByRole('button', { name: '閉じる' }).click()
+  await noteDetail
+    .getByRole('button', { name: 'タスクの詳細に戻る' })
+    .click()
   await expect(detail).toBeVisible()
-  await detail.getByRole('button', { name: '閉じる' }).click()
+  await expect(relatedNotes.first()).toBeFocused()
+  await expect.poll(() =>
+    detail.locator('.editor-dialog-body')
+      .evaluate((element) => element.scrollTop)
+  ).toBe(detailScrollTop)
+
+  await relatedNotes.first().click()
+  await noteDetail.getByRole('button', { name: '閉じる' }).click()
+  await expect(noteDetail).toHaveCount(0)
+  await expect(detail).toHaveCount(0)
 
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
   await multipleTask.locator('.task-item').click()
@@ -135,7 +158,11 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await updatedTask.locator('.task-item').click()
   const updatedDetail = page.getByRole('dialog', { name: 'タスクの詳細' })
   await expect(updatedDetail).toContainText('編集時の追加ノート')
-  await updatedDetail.getByRole('button', { name: '閉じる' }).click()
+  await expect(
+    updatedDetail.getByRole('button', { name: '閉じる' }),
+  ).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(updatedDetail).toHaveCount(0)
 
   await page.getByRole('button', { name: 'この日の予定を編集' }).click()
 

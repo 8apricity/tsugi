@@ -26,6 +26,7 @@ describe('Task detail dialog', () => {
     )
 
     expect(markup).toContain('role="dialog"')
+    expect(markup).toContain('autofocus')
     expect(markup).toContain('変更後のタスク')
     expect(markup).toContain('7月11日まで')
     expect(markup).toContain('地理')

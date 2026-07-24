@@ -261,15 +261,20 @@ test.describe('authenticated Direct Change review', () => {
     await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
 
     await dispatchTouchPointerEvent(row, 'pointerdown', { x: 220, y: 80 })
-    await dispatchTouchPointerEvent(row, 'pointermove', { x: 204, y: 82 })
+    const diagonalMovePrevented = await dispatchTouchPointerEvent(
+      row,
+      'pointermove',
+      { x: 200, y: 97 },
+    )
+    expect(diagonalMovePrevented).toBe(true)
     await expect(cancel).toHaveCSS('opacity', '1')
     await expect.poll(async () => (await cancel.boundingBox())?.width)
-      .toBeCloseTo(16, 0)
+      .toBeCloseTo(20, 0)
 
-    await dispatchTouchPointerEvent(row, 'pointermove', { x: 170, y: 82 })
+    await dispatchTouchPointerEvent(row, 'pointermove', { x: 170, y: 122 })
     await expect.poll(async () => (await cancel.boundingBox())?.width)
       .toBeCloseTo(50, 0)
-    await dispatchTouchPointerEvent(row, 'pointerup', { x: 170, y: 82 })
+    await dispatchTouchPointerEvent(row, 'pointerup', { x: 170, y: 122 })
     await expect(row).toHaveAttribute('data-cancellation-open', 'true')
     await expect(cancel).toHaveAttribute('aria-label', '下書きを取り消す')
 
@@ -280,8 +285,10 @@ test.describe('authenticated Direct Change review', () => {
 
     await dispatchTouchPointer(row, [
       { x: 220, y: 80 },
-      { x: 170, y: 82 },
+      { x: 211, y: 90 },
+      { x: 170, y: 100 },
     ])
+    await expect(row).toHaveAttribute('data-cancellation-open', 'true')
     await edit.tap()
     await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
     await expect(page.getByRole('dialog', { name: 'タスクを追加' }))

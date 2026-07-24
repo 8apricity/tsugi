@@ -10,7 +10,8 @@ import {
 
 const ACTION_WIDTH_PX = 72
 const TAP_SLOP_PX = 8
-const HORIZONTAL_INTENT_RATIO = 1.25
+const HORIZONTAL_INTENT_RATIO = 1.05
+const VERTICAL_INTENT_RATIO = 1.35
 const REVEAL_THRESHOLD_PX = 36
 
 type Gesture = {
@@ -147,7 +148,10 @@ export const DraftCancellationRow = forwardRef<
             verticalDistance * HORIZONTAL_INTENT_RATIO
           ) {
             gesture.mode = 'horizontal'
-          } else if (verticalDistance > horizontalDistance) {
+          } else if (
+            verticalDistance >
+            horizontalDistance * VERTICAL_INTENT_RATIO
+          ) {
             gesture.mode = 'vertical'
             if (open) onOpenChange(false)
             setDragOffset(null)

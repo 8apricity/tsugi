@@ -89,6 +89,7 @@ export const DraftCancellationRow = forwardRef<
   const offset = dragOffset ?? (open ? -ACTION_WIDTH_PX : 0)
   const style = {
     '--draft-cancellation-offset': `${offset}px`,
+    '--draft-cancellation-action-width': `${Math.abs(offset)}px`,
   } as CSSProperties
 
   return (

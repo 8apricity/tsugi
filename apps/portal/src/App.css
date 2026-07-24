@@ -1109,6 +1109,7 @@ body.page-scroll-locked {
 
 .draft-cancellation-row {
   --draft-cancellation-offset: 0px;
+  --draft-cancellation-action-width: 0px;
   position: relative;
   min-width: 0;
   overflow: hidden;
@@ -1137,16 +1138,19 @@ body.page-scroll-locked {
   right: 0;
   bottom: 0;
   display: grid;
-  width: 72px;
+  width: var(--draft-cancellation-action-width);
   padding: 0;
   place-items: center;
   border: 0;
   border-radius: 0;
   background: #b42318;
   color: #fff;
+  overflow: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 160ms ease-out;
+  transition:
+    width 160ms ease-out,
+    opacity 160ms ease-out;
 }
 
 .draft-cancellation-action svg {
@@ -1161,6 +1165,7 @@ body.page-scroll-locked {
 
 .draft-cancellation-open > .draft-cancellation-action,
 .draft-cancellation-action:focus-visible {
+  width: 72px;
   opacity: 1;
   pointer-events: auto;
 }
@@ -1175,9 +1180,18 @@ body.page-scroll-locked {
 @media (hover: hover) and (pointer: fine) {
   .draft-cancellation-row:hover > .draft-cancellation-action,
   .draft-cancellation-row:focus-within > .draft-cancellation-action {
+    width: 72px;
     opacity: 1;
     pointer-events: auto;
   }
+}
+
+.draft-cancellation-row.draft-cancellation-dragging
+  > .draft-cancellation-action {
+  width: var(--draft-cancellation-action-width);
+  opacity: 1;
+  pointer-events: none;
+  transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

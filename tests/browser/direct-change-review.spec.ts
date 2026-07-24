@@ -260,10 +260,16 @@ test.describe('authenticated Direct Change review', () => {
     expect(verticalMovePrevented).toBe(false)
     await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
 
-    await dispatchTouchPointer(row, [
-      { x: 220, y: 80 },
-      { x: 170, y: 82 },
-    ])
+    await dispatchTouchPointerEvent(row, 'pointerdown', { x: 220, y: 80 })
+    await dispatchTouchPointerEvent(row, 'pointermove', { x: 204, y: 82 })
+    await expect(cancel).toHaveCSS('opacity', '1')
+    await expect.poll(async () => (await cancel.boundingBox())?.width)
+      .toBeCloseTo(16, 0)
+
+    await dispatchTouchPointerEvent(row, 'pointermove', { x: 170, y: 82 })
+    await expect.poll(async () => (await cancel.boundingBox())?.width)
+      .toBeCloseTo(50, 0)
+    await dispatchTouchPointerEvent(row, 'pointerup', { x: 170, y: 82 })
     await expect(row).toHaveAttribute('data-cancellation-open', 'true')
     await expect(cancel).toHaveAttribute('aria-label', '下書きを取り消す')
 
@@ -424,4 +430,26 @@ async function dispatchTouchPointer(
     dispatch('pointerup', touchPoints.at(-1)!)
     return movePrevented
   }, points)
+}
+
+async function dispatchTouchPointerEvent(
+  locator: ReturnType<Page['locator']>,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  point: { x: number; y: number },
+) {
+  return locator.evaluate((element, eventInput) => {
+    const PointerEventConstructor =
+      element.ownerDocument.defaultView!.PointerEvent
+    const event = new PointerEventConstructor(eventInput.type, {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 67,
+      pointerType: 'touch',
+      clientX: eventInput.point.x,
+      clientY: eventInput.point.y,
+      isPrimary: true,
+    })
+    element.dispatchEvent(event)
+    return event.defaultPrevented
+  }, { type, point })
 }

@@ -13,18 +13,25 @@ export type NoteEditHistoryState =
 export function NoteEditHistoryDialog({
   state,
   targetScopeContext,
+  hidden = false,
   onBack,
   onClose,
   onRetry,
 }: {
   state: NoteEditHistoryState
   targetScopeContext?: TargetScopeDisplayContext
+  hidden?: boolean
   onBack: () => void
   onClose: () => void
   onRetry: () => void
 }) {
   return (
-    <div className="editor-dialog-backdrop" role="presentation">
+    <div
+      className="editor-dialog-backdrop"
+      role="presentation"
+      aria-hidden={hidden || undefined}
+      inert={hidden || undefined}
+    >
       <section
         className="timetable-editor-dialog task-history-dialog note-history-dialog"
         role="dialog"

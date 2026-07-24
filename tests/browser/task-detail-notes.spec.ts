@@ -345,7 +345,12 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await changeContentRemovalConfirmation
     .getByRole('button', { name: '削除予定にする' })
     .click()
-  await expect(page.getByRole('dialog', { name: '変更を反映' })).toHaveCount(0)
+  const returnedChangeContent = page.getByRole('dialog', { name: '変更を反映' })
+  await expect(returnedChangeContent).toBeVisible()
+  await returnedChangeContent.getByRole('button', { name: '戻る' }).click()
+  await expect(returnedChangeContent).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /変更を反映（1）/ }))
+    .toBeFocused()
 
   const finalRemovalDraftTask = page.getByRole('article', {
     name: '削除予定のタスク。関連するノート3件も削除予定です',
@@ -353,7 +358,6 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   const finalRemovalTaskButton = finalRemovalDraftTask.getByRole('button', {
     name: new RegExp(updatedTitle),
   })
-  await expect(finalRemovalTaskButton).toBeFocused()
   await finalRemovalTaskButton.click()
   const directRemovalEditor = page.getByRole('dialog', {
     name: 'タスクを編集',

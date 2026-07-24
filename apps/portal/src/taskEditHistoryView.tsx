@@ -19,6 +19,7 @@ export function TaskEditHistoryDialog({
   targetScopeContext,
   referenceSchoolDate,
   state,
+  hidden = false,
   onBack,
   onClose,
   onRetry,
@@ -27,12 +28,18 @@ export function TaskEditHistoryDialog({
   targetScopeContext?: TargetScopeDisplayContext
   referenceSchoolDate?: string
   state: TaskEditHistoryState
+  hidden?: boolean
   onBack: () => void
   onClose: () => void
   onRetry: () => void
 }) {
   return (
-    <div className="editor-dialog-backdrop" role="presentation">
+    <div
+      className="editor-dialog-backdrop"
+      role="presentation"
+      aria-hidden={hidden || undefined}
+      inert={hidden || undefined}
+    >
       <section
         className="timetable-editor-dialog task-history-dialog"
         role="dialog"

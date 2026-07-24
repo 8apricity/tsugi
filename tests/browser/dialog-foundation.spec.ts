@@ -51,7 +51,19 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
       name: '入力内容を破棄しますか？',
     })
     await expect(discard).toBeVisible()
-    await discard.getByRole('button', { name: '編集を続ける' }).click()
+    await page.keyboard.press('Escape')
+    await expect(discard).toHaveCount(0)
+    await expect(
+      header.getByRole('button', { name: '戻る' }),
+    ).toBeFocused()
+
+    await page.goBack()
+    await expect(discard).toBeVisible()
+    await page.goBack()
+    await expect(discard).toHaveCount(0)
+    await expect(
+      header.getByRole('button', { name: '戻る' }),
+    ).toBeFocused()
 
     await page.goBack()
     await expect(discard).toBeVisible()

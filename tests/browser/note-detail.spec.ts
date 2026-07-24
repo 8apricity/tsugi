@@ -65,6 +65,7 @@ test.describe('authenticated Daily Plan Note detail', () => {
       readOnlyDetail.getByRole('button', { name: '編集履歴' }),
     ).toBeFocused()
     await readOnlyDetail.getByRole('button', { name: '閉じる' }).click()
+    await expect(noteCard).toBeFocused()
 
     await noteCard.click()
     await readOnlyDetail.getByRole('button', { name: '編集履歴' }).click()
@@ -227,6 +228,7 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await noteDetail.getByRole('button', { name: '閉じる' }).click()
     await expect(noteDetail).toHaveCount(0)
     await expect(taskDetail).toHaveCount(0)
+    await expect(taskCard.locator('.task-item')).toBeFocused()
 
     await taskCard.locator('.task-item').click()
     await expect(taskDetail).toBeVisible()

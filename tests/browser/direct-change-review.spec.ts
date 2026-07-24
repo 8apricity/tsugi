@@ -156,6 +156,70 @@ test.describe('authenticated Direct Change review', () => {
     await expect(review.getByRole('button', { name: '確定' })).toBeEnabled()
   })
 
+  test('returns one layer at a time from a Timetable draft editor', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+    await saveTimetableChange(page)
+
+    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+    const review = page.getByRole('dialog', { name: '変更を反映' })
+    await review.getByRole('button', { name: /月3/ }).click()
+
+    const layer = page.getByRole('dialog', { name: '時間割の変更状況' })
+    const editor = page.getByRole('dialog', { name: '時間割変更' })
+    await expect(editor).toBeVisible()
+    await editor.getByRole('button', { name: '戻る' }).click()
+
+    await expect(editor).toHaveCount(0)
+    await expect(layer).toBeVisible()
+    await expect(review).not.toBeVisible()
+
+    await layer.getByRole('button', { name: '戻る' }).click()
+    await expect(review).toBeVisible()
+  })
+
+  test('retains Timetable history beneath a change detail', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+    await saveTimetableChange(page)
+    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+    await page.getByRole('dialog', { name: '変更を反映' })
+      .getByRole('button', { name: '確定' })
+      .click()
+
+    const periodButton = page.getByRole('button', { name: /^1限/ })
+    await periodButton.click()
+    const layer = page.getByRole('dialog', { name: '時間割の変更状況' })
+    await layer.getByRole('button', { name: '3組のメニュー' }).click()
+    await layer.getByRole('menuitem', { name: '編集履歴' }).click()
+
+    const history = page.getByRole('dialog', { name: '編集履歴' })
+    const historyBackdrop = page
+      .locator('[aria-labelledby="timetable-history-title"]')
+      .locator('..')
+    const entry = history.locator('.history-row').first()
+    await expect(entry).toBeVisible()
+    await entry.click()
+
+    const detail = page.getByRole('dialog', { name: '変更の詳細' })
+    await expect(detail).toBeVisible()
+    await expect(historyBackdrop).toHaveAttribute('aria-hidden', 'true')
+    await expect(historyBackdrop).toHaveAttribute('inert', '')
+
+    await detail.getByRole('button', { name: '編集履歴に戻る' }).click()
+    await expect(history).toBeVisible()
+    await expect(entry).toBeFocused()
+
+    await history.getByRole('button', { name: '閉じる' }).click()
+    await expect(history).toHaveCount(0)
+    await expect(layer).toHaveCount(0)
+    await expect(periodButton).toBeFocused()
+  })
+
   test('cancels Task groups by pointer and restores keyboard focus after Note cancellation', async ({
     page,
   }, testInfo) => {

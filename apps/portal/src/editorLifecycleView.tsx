@@ -83,6 +83,11 @@ export function DiscardConfirmationDialog({
         aria-modal="true"
         aria-labelledby="editor-discard-title"
         aria-describedby="editor-discard-description"
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || event.defaultPrevented) return
+          event.preventDefault()
+          onContinue()
+        }}
       >
         <h2 id="editor-discard-title">入力内容を破棄しますか？</h2>
         <p id="editor-discard-description">

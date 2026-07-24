@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode } from 'react'
+import { useEffect, useRef, type FormEvent, type ReactNode } from 'react'
 import type { VisibleTask } from './taskListView'
 import { formatDueDate } from './uiCopy'
 import { lifecycleLabel, type LifecycleKind } from './editorLifecycle'
@@ -53,6 +53,13 @@ export function TaskDetailDialog({
   onCancelDraft?: () => void
   onRemove?: () => void
 }) {
+  const removalCheckboxRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!removalCheckboxAutoFocus) return
+    removalCheckboxRef.current?.focus()
+  }, [removalCheckboxAutoFocus])
+
   if (mode === 'edit' && editForm && onSave) {
     return (
       <EditorDialogShell
@@ -86,6 +93,7 @@ export function TaskDetailDialog({
           ) : null}
           <label className="task-removal-checkbox">
             <input
+              ref={removalCheckboxRef}
               autoFocus={removalCheckboxAutoFocus}
               type="checkbox"
               checked={editForm.removalPlanned}

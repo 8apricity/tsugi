@@ -16,6 +16,13 @@ import { lockPageScroll } from "./pageScrollLock";
 import { EditorDialogShell } from "./dialogFoundation";
 import { useDialogBrowserBack } from "./dialogNavigation";
 import {
+  createDialogFlowClient,
+  type DialogFlowResult,
+  type DialogFocusTarget,
+  type DialogRoute,
+  type DialogRouteEntry,
+} from "./dialogFlow";
+import {
   createLessonNameComboboxClient,
   type LessonNameComboboxOption,
 } from "./lessonNameCombobox";
@@ -117,6 +124,17 @@ import {
   type DraftCancellationRowHandle,
 } from "./draftCancellationRow";
 
+function editorKindForDialogRoute(
+  route: DialogRoute | undefined,
+): EditorKind | null {
+  if (route?.kind === "task-editor") return "task";
+  if (route?.kind === "note-editor" || route?.kind === "note-detail") {
+    return "note";
+  }
+  if (route?.kind === "timetable-editor") return "timetable";
+  return null;
+}
+
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
 const DATE_PICKER_SCALE_DISTANCE_PX = 78;
@@ -186,6 +204,7 @@ type TaskEditorForm = Omit<NewTaskDraftForm, "relatedLessonName"> & {
 };
 
 type TimetableLayerDialog = {
+  routeInstanceId: string;
   schoolDate: string;
   periodNumber: number;
   requestId: number;
@@ -222,6 +241,8 @@ type DirectTimetableChangeDetail = TimetableChangeHistoryEntry & {
 };
 
 type TimetableHistoryDialog = {
+  routeInstanceId: string;
+  detailRouteInstanceId: string | null;
   targetScopeType: TargetScopeType;
   changeDate: string;
   periodNumber: number;
@@ -238,15 +259,14 @@ type TimetableHistoryDialog = {
 };
 
 type TaskHistoryDialog = {
+  routeInstanceId: string;
   task: DailyPlanTaskForCache;
-  returnTaskDetail: VisibleTaskListItem;
   requestId: number;
   state: TaskEditHistoryState;
 };
 
 type TaskRemovalConfirmation = {
   task: ActiveTaskForEditing;
-  returnTaskDetail: VisibleTaskListItem | null;
 };
 
 type NoteEditorForm = NewNoteDraftForm & {
@@ -263,18 +283,13 @@ type NoteEditorForm = NewNoteDraftForm & {
 };
 
 type NoteHistoryDialog = {
+  routeInstanceId: string;
   note: DailyPlanNoteForCache;
   requestId: number;
   state: NoteEditHistoryState;
 };
 
 type NoteDialogParent = "task-detail" | "daily-lesson-detail";
-
-type NoteDialogReturnTarget = {
-  parent: NoteDialogParent;
-  noteId: string;
-  scrollTop: number;
-};
 
 const NOTE_DIALOG_PARENT = {
   "task-detail": {
@@ -296,11 +311,6 @@ const NOTE_DIALOG_PARENT = {
 type NoteDraftBasis =
   | { activeNote: DailyPlanNoteForCache }
   | { beforeBody: string | null };
-
-type PendingEditorDismissal = {
-  editor: EditorKind;
-  destination: "close" | "back" | "exit-editing";
-};
 
 type EditorInitialForms = {
   timetable: TimetableEditorForm | null;
@@ -501,7 +511,6 @@ function App() {
   const [status, setStatus] = useState<RequestStatus>("checking");
   const [message, setMessage] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [referenceScopeOptions, setReferenceScopeOptions] =
     useState<ReferenceScopeOptionsState | null>(null);
   const [referencePickerScopeKey, setReferencePickerScopeKey] = useState("");
@@ -560,6 +569,18 @@ function App() {
     timetableEditorClient.getSnapshot,
     timetableEditorClient.getSnapshot,
   );
+  const [dialogFlow] = useState(createDialogFlowClient);
+  const dialogFlowSnapshot = useSyncExternalStore(
+    dialogFlow.subscribe,
+    dialogFlow.getSnapshot,
+    dialogFlow.getSnapshot,
+  );
+  const topDialogRoute = dialogFlowSnapshot.routes.at(-1);
+  const topDialogRouteIs = (kind: DialogRoute["kind"]) =>
+    topDialogRoute?.kind === kind;
+  const dialogRouteExists = (kind: DialogRoute["kind"]) =>
+    dialogFlowSnapshot.routes.some((route) => route.kind === kind);
+  const referencePickerOpen = dialogRouteExists("reference-picker");
   const [timetableEditorOptions, setTimetableEditorOptions] =
     useState<TimetableEditorOptions | null>(null);
   const [timetableEditorForm, setTimetableEditorForm] =
@@ -579,17 +600,11 @@ function App() {
     task: null,
     note: null,
   });
-  const [pendingEditorDismissal, setPendingEditorDismissal] =
-    useState<PendingEditorDismissal | null>(null);
-  const [changeContentOpen, setChangeContentOpen] = useState(false);
+  const changeContentOpen = dialogRouteExists("change-content");
   const [revealedDraftCancellationId, setRevealedDraftCancellationId] =
     useState<string | null>(null);
-  const [draftExitConfirmationOpen, setDraftExitConfirmationOpen] =
-    useState(false);
-  const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
   const [timetableEditorRefreshNeeded, setTimetableEditorRefreshNeeded] =
     useState(false);
-  const changeContentReturnRef = useRef(false);
   const changeContentBackRef = useRef<HTMLButtonElement>(null);
   const draftCancellationRowHandlesRef =
     useRef(new Map<string, DraftCancellationRowRegistration>());
@@ -597,6 +612,14 @@ function App() {
     useRef<PendingDraftCancellationFocus | null>(null);
   const pendingChangeContentTimetableRef =
     useRef<PendingChangeContentTimetable | null>(null);
+  const dialogScrollPositionsRef = useRef(new Map<string, number>());
+  const pendingNoteDialogScrollTopRef = useRef<number | null>(null);
+  const applyDialogFlowResultRef = useRef(applyDialogFlowResult);
+  const editorFormIsDirtyRef = useRef(editorFormIsDirty);
+  const dialogRoutePayloadIsValidRef = useRef(dialogRoutePayloadIsValid);
+  applyDialogFlowResultRef.current = applyDialogFlowResult;
+  editorFormIsDirtyRef.current = editorFormIsDirty;
+  dialogRoutePayloadIsValidRef.current = dialogRoutePayloadIsValid;
   const openLayerReplacementRef = useRef<
     (targetScopeType: TargetScopeType) => void
   >(() => undefined);
@@ -606,8 +629,6 @@ function App() {
     useState<TaskHistoryDialog | null>(null);
   const [noteHistoryDialog, setNoteHistoryDialog] =
     useState<NoteHistoryDialog | null>(null);
-  const [noteDialogReturnTarget, setNoteDialogReturnTarget] =
-    useState<NoteDialogReturnTarget | null>(null);
   const [taskLessonNamesExpanded, setTaskLessonNamesExpanded] =
     useState(false);
   const [taskLessonNameListOpen, setTaskLessonNameListOpen] =
@@ -634,21 +655,51 @@ function App() {
     useState<TimetableHistoryDialog | null>(null);
   const layerDialogSchoolDate = timetableLayerDialog?.schoolDate;
   const layerDialogRequestId = timetableLayerDialog?.requestId;
+  const layerDialogRouteInstanceId = timetableLayerDialog?.routeInstanceId;
   const [timetableEditorMessage, setTimetableEditorMessage] = useState<
     string | null
   >(null);
-  const timetableDialogOpen = Boolean(
-    timetableLayerDialog || timetableHistoryDialog || timetableEditorForm ||
-      taskEditorForm || noteEditorForm || taskRemovalConfirmation || taskDetail || taskHistoryDialog ||
-      noteHistoryDialog || referencePickerOpen || changeContentOpen ||
-      draftExitConfirmationOpen || logoutConfirmationOpen,
-  );
+  const dialogFlowActive = dialogFlowSnapshot.active;
 
   useEffect(() => {
-    if (!timetableDialogOpen) return;
+    const invalidRoute = dialogFlowSnapshot.routes.find(
+      (route) => !dialogRoutePayloadIsValidRef.current(route),
+    );
+    if (!invalidRoute) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      if (!dialogFlow.hasInstance(invalidRoute.instanceId)) return;
+      const editorKind = editorKindForDialogRoute(invalidRoute);
+      const dirty = editorKind
+        ? editorFormIsDirtyRef.current(editorKind)
+        : false;
+      applyDialogFlowResultRef.current(dialogFlow.invalidate(
+        invalidRoute.instanceId,
+        {
+          dirty,
+          cancelFocus: { kind: "active-dialog-control", control: "back" },
+        },
+      ));
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    dialogFlow,
+    dialogFlowSnapshot.routes,
+    noteEditorForm,
+    noteHistoryDialog,
+    taskDetail,
+    taskEditorForm,
+    taskHistoryDialog,
+    timetableEditorForm,
+    timetableHistoryDialog,
+    timetableLayerDialog,
+  ]);
+
+  useEffect(() => {
+    if (!dialogFlowActive) return;
 
     return lockPageScroll(document);
-  }, [timetableDialogOpen]);
+  }, [dialogFlowActive]);
 
   useEffect(() => {
     if (!dailyPlanTaskFocusRequestId) return;
@@ -662,38 +713,7 @@ function App() {
     return () => window.cancelAnimationFrame(frameId);
   }, [dailyPlanTaskFocusRequestId, timetableEditor.taskDrafts]);
 
-  useDialogBrowserBack(timetableDialogOpen, () => {
-    if (pendingEditorDismissal) {
-      setPendingEditorDismissal(null);
-    } else if (noteHistoryDialog) {
-      goBackFromNoteHistory();
-    } else if (noteEditorForm) {
-      requestNoteEditorClose();
-    } else if (taskHistoryDialog) {
-      goBackFromTaskHistory();
-    } else if (taskRemovalConfirmation) {
-      cancelTaskRemovalConfirmation();
-    } else if (taskEditorForm) {
-      requestTaskEditorClose();
-    } else if (timetableEditorForm) {
-      requestTimetableEditorClose("back");
-    } else if (taskDetail) {
-      setTaskDetail(null);
-    } else if (timetableHistoryDialog) {
-      goBackInTimetableHistoryDialog();
-    } else if (referencePickerOpen) {
-      setReferencePickerOpen(false);
-    } else if (draftExitConfirmationOpen) {
-      setDraftExitConfirmationOpen(false);
-    } else if (logoutConfirmationOpen) {
-      setLogoutConfirmationOpen(false);
-    } else if (changeContentOpen) {
-      setChangeContentOpen(false);
-      setRevealedDraftCancellationId(null);
-    } else {
-      closeTimetableDialogFlow();
-    }
-  });
+  useDialogBrowserBack(dialogFlowSnapshot.active, requestDialogBack);
 
   useEffect(() => {
     if (!timetableEditorMessage || timetableEditorRefreshNeeded) return;
@@ -874,11 +894,13 @@ function App() {
     if (
       layerDialogSchoolDate === undefined ||
       layerDialogRequestId === undefined ||
+      layerDialogRouteInstanceId === undefined ||
       !schoolYearRange
     )
       return;
     const schoolDate = layerDialogSchoolDate;
     const requestId = layerDialogRequestId;
+    const routeInstanceId = layerDialogRouteInstanceId;
     const cache = timetableLayerCacheRef.current;
     const { missingRanges } = cache.selectWindow(
       schoolDate,
@@ -887,7 +909,12 @@ function App() {
       timetableEditor.draftDates,
     );
     setTimetableLayerDialog((current) => {
-      if (!current || current.schoolDate !== schoolDate) return current;
+      if (
+        !dialogFlow.hasInstance(routeInstanceId) ||
+        !current ||
+        current.routeInstanceId !== routeInstanceId ||
+        current.schoolDate !== schoolDate
+      ) return current;
       const cached = cache.get(current.schoolDate, current.periodNumber);
       return cached ? { ...current, state: cached } : current;
     });
@@ -915,6 +942,8 @@ function App() {
         timetableEditorClient.reconcileLayerStates(states);
         setTimetableLayerDialog((current) => {
           if (
+            !dialogFlow.hasInstance(routeInstanceId) ||
+            current?.routeInstanceId !== routeInstanceId ||
             current?.schoolDate !== schoolDate ||
             current.requestId !== requestId
           )
@@ -927,6 +956,8 @@ function App() {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setTimetableLayerDialog((current) => {
           if (
+            !dialogFlow.hasInstance(routeInstanceId) ||
+            current?.routeInstanceId !== routeInstanceId ||
             current?.schoolDate !== schoolDate ||
             current.requestId !== requestId ||
             cache.get(current.schoolDate, current.periodNumber)
@@ -937,8 +968,10 @@ function App() {
       });
     return () => controller.abort();
   }, [
+    dialogFlow,
     layerDialogSchoolDate,
     layerDialogRequestId,
+    layerDialogRouteInstanceId,
     schoolYearRange,
     timetableEditor.draftDates,
     timetableEditorClient,
@@ -968,6 +1001,7 @@ function App() {
       changeDate,
       periodNumber,
       requestId,
+      routeInstanceId,
     } = timetableHistoryDialog;
     const controller = new AbortController();
     const url = new URL("/api/timetable-changes/history", window.location.origin);
@@ -981,7 +1015,9 @@ function App() {
       })
       .then((history) => {
         setTimetableHistoryDialog((current) =>
-          current?.requestId === requestId &&
+          dialogFlow.hasInstance(routeInstanceId) &&
+          current?.routeInstanceId === routeInstanceId &&
+          current.requestId === requestId &&
           current.targetScopeType === targetScopeType &&
           current.changeDate === changeDate &&
           current.periodNumber === periodNumber
@@ -992,7 +1028,9 @@ function App() {
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setTimetableHistoryDialog((current) =>
-          current?.requestId === requestId &&
+          dialogFlow.hasInstance(routeInstanceId) &&
+          current?.routeInstanceId === routeInstanceId &&
+          current.requestId === requestId &&
           current.targetScopeType === targetScopeType &&
           current.changeDate === changeDate &&
           current.periodNumber === periodNumber
@@ -1001,13 +1039,13 @@ function App() {
         );
       });
     return () => controller.abort();
-  }, [timetableHistoryDialog]);
+  }, [dialogFlow, timetableHistoryDialog]);
 
   useEffect(() => {
     if (!taskHistoryDialog || taskHistoryDialog.state.status !== "loading") {
       return;
     }
-    const { task, requestId } = taskHistoryDialog;
+    const { task, requestId, routeInstanceId } = taskHistoryDialog;
     const { taskId } = task;
     const controller = new AbortController();
     fetch(`/api/tasks/${encodeURIComponent(taskId)}/history`, {
@@ -1021,7 +1059,10 @@ function App() {
       })
       .then((history) => {
         setTaskHistoryDialog((current) =>
-          current?.task.taskId === taskId && current.requestId === requestId
+          dialogFlow.hasInstance(routeInstanceId) &&
+          current?.routeInstanceId === routeInstanceId &&
+          current.task.taskId === taskId &&
+          current.requestId === requestId
             ? { ...current, state: history }
             : current,
         );
@@ -1029,19 +1070,22 @@ function App() {
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setTaskHistoryDialog((current) =>
-          current?.task.taskId === taskId && current.requestId === requestId
+          dialogFlow.hasInstance(routeInstanceId) &&
+          current?.routeInstanceId === routeInstanceId &&
+          current.task.taskId === taskId &&
+          current.requestId === requestId
             ? { ...current, state: { status: "error" } }
             : current,
         );
       });
     return () => controller.abort();
-  }, [taskHistoryDialog]);
+  }, [dialogFlow, taskHistoryDialog]);
 
   useEffect(() => {
     if (!noteHistoryDialog || noteHistoryDialog.state.status !== "loading") {
       return;
     }
-    const { note, requestId } = noteHistoryDialog;
+    const { note, requestId, routeInstanceId } = noteHistoryDialog;
     const controller = new AbortController();
     fetch(`/api/notes/${encodeURIComponent(note.noteId)}/history`, {
       signal: controller.signal,
@@ -1054,7 +1098,10 @@ function App() {
       })
       .then((history) => {
         setNoteHistoryDialog((current) =>
-          current?.note.noteId === note.noteId && current.requestId === requestId
+          dialogFlow.hasInstance(routeInstanceId) &&
+          current?.routeInstanceId === routeInstanceId &&
+          current.note.noteId === note.noteId &&
+          current.requestId === requestId
             ? { ...current, state: history }
             : current,
         );
@@ -1062,13 +1109,16 @@ function App() {
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setNoteHistoryDialog((current) =>
-          current?.note.noteId === note.noteId && current.requestId === requestId
+          dialogFlow.hasInstance(routeInstanceId) &&
+          current?.routeInstanceId === routeInstanceId &&
+          current.note.noteId === note.noteId &&
+          current.requestId === requestId
             ? { ...current, state: { status: "error" } }
             : current,
         );
       });
     return () => controller.abort();
-  }, [noteHistoryDialog]);
+  }, [dialogFlow, noteHistoryDialog]);
 
   useEffect(() => {
     if (dailyPlanState.status !== "ready") return;
@@ -1408,14 +1458,15 @@ function App() {
   function requestLogout() {
     setMenuOpen(false);
     if (timetableEditor.draftCount > 0) {
-      setLogoutConfirmationOpen(true);
+      dialogFlow.openLogoutConfirmation();
       return;
     }
     void logout();
   }
 
   async function logout() {
-    setLogoutConfirmationOpen(false);
+    dialogFlow.cancelOverlay();
+    applyDialogFlowResult(dialogFlow.closeAll());
     await fetch("/api/auth/session", { method: "DELETE" }).catch(() => undefined);
     setStudentAccount(null);
     setSchoolEmail(null);
@@ -1430,20 +1481,15 @@ function App() {
     clearNoteDialogState();
     setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
-    setPendingEditorDismissal(null);
     setTaskDetail(null);
     setTaskHistoryDialog(null);
     setTimetableLayerDialog(null);
     setTimetableEditorOptions(null);
-    setReferencePickerOpen(false);
     setReferenceScopeOptions(null);
     setReferencePickerScopeKey("");
     setReferenceScope(null);
     setMenuOpen(false);
-    setChangeContentOpen(false);
-    setDraftExitConfirmationOpen(false);
     setTimetableEditorRefreshNeeded(false);
-    changeContentReturnRef.current = false;
     pendingChangeContentTimetableRef.current = null;
     setStatus("idle");
     setMessage("ログアウトしました。");
@@ -1455,16 +1501,14 @@ function App() {
   }
 
   function finishLeavingTimetableEditing() {
+    dialogFlow.cancelOverlay();
+    applyDialogFlowResult(dialogFlow.closeAll());
     timetableEditorClient.exitEditing();
-    setDraftExitConfirmationOpen(false);
     setTimetableEditorForm(null);
     setTaskEditorForm(null);
     clearNoteDialogState();
     setTaskRemovalConfirmation(null);
     clearEditorInitialForms();
-    setPendingEditorDismissal(null);
-    setChangeContentOpen(false);
-    changeContentReturnRef.current = false;
     pendingChangeContentTimetableRef.current = null;
     setTimetableEditorMessage(null);
   }
@@ -1476,8 +1520,7 @@ function App() {
       clearNoteDialogState();
       setTaskRemovalConfirmation(null);
       clearEditorInitialForms();
-      setPendingEditorDismissal(null);
-      setDraftExitConfirmationOpen(true);
+      dialogFlow.openDraftExitConfirmation();
       return;
     }
     finishLeavingTimetableEditing();
@@ -1491,30 +1534,91 @@ function App() {
         : noteEditorForm
           ? "note"
           : null;
-    if (
-      openEditor &&
-      requestEditorDismissal(openEditor, "exit-editing")
-    ) return;
-    requestDraftWorkspaceExit();
+    const dirty = openEditor ? editorFormIsDirty(openEditor) : false;
+    applyDialogFlowResult(dialogFlow.requestExitEditing({
+      dirty,
+      cancelFocus: { kind: "active-dialog-control", control: "back" },
+    }));
   }
 
-  function returnToChangeContentIfNeeded() {
-    if (!changeContentReturnRef.current) return;
-    changeContentReturnRef.current = false;
-    setChangeContentOpen(true);
+  function currentRouteInstanceId(kind: DialogRoute["kind"]) {
+    const route = dialogFlow.getSnapshot().routes.at(-1);
+    return route?.kind === kind ? route.instanceId : null;
   }
 
-  function openTaskEditorForm(form: TaskEditorForm) {
+  function openTaskEditorForm(
+    form: TaskEditorForm,
+    returnFocus?: DialogFocusTarget,
+  ) {
+    const rootReturnFocus: DialogFocusTarget | undefined =
+      dialogFlow.getSnapshot().routes.length === 0
+        ? form.editingTask
+          ? { kind: "task-item", taskId: form.editingTask.taskId }
+          : form.editingDraft
+            ? { kind: "task-item", taskId: form.editingDraft.sourceId }
+          : { kind: "flow-trigger", control: "task" }
+        : returnFocus;
+    const transition = dialogFlow.openTaskEditor({
+      ...(form.editingTask ? { taskId: form.editingTask.taskId } : {}),
+      ...(form.editingDraft ? { draftId: form.editingDraft.sourceId } : {}),
+      returnFocus: rootReturnFocus,
+    });
+    if (transition.status === "rejected") return;
     editorInitialFormsRef.current.task = form;
     setTaskEditorForm(form);
   }
 
   function openNoteEditorForm(
     form: NoteEditorForm,
-    returnTarget: NoteDialogReturnTarget | null = null,
+    returnFocus?: DialogFocusTarget,
   ) {
+    if (
+      topDialogRoute?.kind === "task-editor" &&
+      editorFormIsDirty("task")
+    ) {
+      setTimetableEditorMessage(
+        "先にタスクの入力内容を保存するか、元に戻してください。",
+      );
+      return;
+    }
+    const resolvedReturnFocus = returnFocus ??
+      (dialogFlow.getSnapshot().routes.length === 0
+        ? form.editingDraft || form.editingNote
+          ? {
+              kind: "note-item" as const,
+              noteId: form.editingDraft?.sourceId ?? form.editingNote!.noteId,
+            }
+          : { kind: "flow-trigger" as const, control: "note" as const }
+        : undefined);
+    const reflectedDetail = Boolean(
+      form.editingNote ||
+      (form.editingDraft && form.editingDraft.changeKind !== "add"),
+    );
+    const transition = reflectedDetail
+      ? dialogFlow.openNoteDetail({
+          noteId: form.editingDraft?.sourceId ?? form.editingNote!.noteId,
+          returnFocus: resolvedReturnFocus,
+        })
+      : dialogFlow.openNoteEditor({
+          ...(form.editingDraft ? { draftId: form.editingDraft.sourceId } : {}),
+          returnFocus: resolvedReturnFocus,
+        });
+    if (transition?.status === "rejected") {
+      pendingNoteDialogScrollTopRef.current = null;
+      return;
+    }
+    const noteRoute = dialogFlow.getSnapshot().routes.at(-1);
+    if (
+      pendingNoteDialogScrollTopRef.current !== null &&
+      (noteRoute?.kind === "note-detail" || noteRoute?.kind === "note-editor")
+    ) {
+      dialogScrollPositionsRef.current.set(
+        noteRoute.instanceId,
+        pendingNoteDialogScrollTopRef.current,
+      );
+    }
+    pendingNoteDialogScrollTopRef.current = null;
     editorInitialFormsRef.current.note = form;
-    setNoteDialogReturnTarget(returnTarget);
     setNoteEditorForm(form);
   }
 
@@ -1529,8 +1633,251 @@ function App() {
   function clearNoteDialogState() {
     setNoteEditorForm(null);
     setNoteHistoryDialog(null);
-    setNoteDialogReturnTarget(null);
     editorInitialFormsRef.current.note = null;
+  }
+
+  function dialogRoutePayloadIsValid(route: DialogRouteEntry) {
+    switch (route.kind) {
+      case "task-detail":
+        return taskDetail?.task.taskId === route.taskId;
+      case "task-editor":
+        return Boolean(taskEditorForm);
+      case "note-detail":
+      case "note-editor":
+        return Boolean(noteEditorForm);
+      case "task-history":
+        return taskHistoryDialog?.routeInstanceId === route.instanceId &&
+          taskHistoryDialog.task.taskId === route.taskId;
+      case "note-history":
+        return noteHistoryDialog?.routeInstanceId === route.instanceId &&
+          noteHistoryDialog.note.noteId === route.noteId;
+      case "timetable-layer":
+        return timetableLayerDialog?.routeInstanceId === route.instanceId &&
+          timetableLayerDialog.schoolDate === route.schoolDate &&
+          timetableLayerDialog.periodNumber === route.periodNumber;
+      case "timetable-editor":
+        return Boolean(
+          timetableEditorForm &&
+          timetableEditorForm.changeDate === route.schoolDate &&
+          timetableEditorForm.periodNumber === route.periodNumber &&
+          timetableEditorForm.targetScopeType === route.targetScopeType,
+        );
+      case "timetable-history":
+        return timetableHistoryDialog?.routeInstanceId === route.instanceId &&
+          timetableHistoryDialog.changeDate === route.schoolDate &&
+          timetableHistoryDialog.periodNumber === route.periodNumber &&
+          timetableHistoryDialog.targetScopeType === route.targetScopeType;
+      case "timetable-change-detail":
+        return timetableHistoryDialog?.detailRouteInstanceId ===
+          route.instanceId;
+      case "reference-picker":
+      case "change-content":
+        return true;
+    }
+  }
+
+  function clearRemovedDialogRoute(route: DialogRouteEntry) {
+    dialogScrollPositionsRef.current.delete(route.instanceId);
+    if (route.kind === "note-history") {
+      setNoteHistoryDialog(null);
+    } else if (route.kind === "note-detail" || route.kind === "note-editor") {
+      clearNoteDialogState();
+      setLessonNameListOpen(false);
+      setActiveLessonNameOption(-1);
+    } else if (route.kind === "task-history") {
+      setTaskHistoryDialog(null);
+    } else if (route.kind === "task-editor") {
+      setTaskEditorForm(null);
+      editorInitialFormsRef.current.task = null;
+      setTaskLessonNameListOpen(false);
+      setActiveTaskLessonNameOption(-1);
+      if (
+        !dialogFlow.getSnapshot().routes.some(
+          (candidate) => candidate.kind === "task-detail",
+        )
+      ) {
+        setTaskDetail(null);
+      }
+    } else if (route.kind === "task-detail") {
+      setTaskDetail(null);
+    } else if (route.kind === "timetable-change-detail") {
+      setTimetableHistoryDialog((current) =>
+        current
+          ? { ...current, detail: null, detailRouteInstanceId: null }
+          : current
+      );
+    } else if (route.kind === "timetable-history") {
+      setTimetableHistoryDialog(null);
+    } else if (route.kind === "timetable-editor") {
+      setTimetableEditorForm(null);
+      editorInitialFormsRef.current.timetable = null;
+    } else if (route.kind === "timetable-layer") {
+      setTimetableLayerDialog(null);
+      pendingChangeContentTimetableRef.current = null;
+    } else if (route.kind === "change-content") {
+      setRevealedDraftCancellationId(null);
+    }
+  }
+
+  function restoreDialogFocus(
+    target: DialogFocusTarget | undefined,
+    scrollTop?: number,
+  ) {
+    if (!target) return;
+    window.requestAnimationFrame(() => {
+      if (target.kind === "task-note" || target.kind === "daily-lesson-note") {
+        const parent = target.kind === "task-note"
+          ? "task-detail"
+          : "daily-lesson-detail";
+        const { dialog, scrollContainer } = noteDialogParentElements(parent);
+        const note = Array.from(
+          dialog?.querySelectorAll<HTMLElement>("[data-note-id]") ?? [],
+        ).find((candidate) => candidate.dataset.noteId === target.noteId);
+        note?.focus({ preventScroll: true });
+        if (scrollContainer && scrollTop !== undefined) {
+          scrollContainer.scrollTop = scrollTop;
+        }
+        return;
+      }
+      if (target.kind === "task-history-trigger") {
+        document.querySelector<HTMLButtonElement>(
+          ".task-detail-dialog .task-detail-actions button",
+        )?.focus();
+        return;
+      }
+      if (target.kind === "note-history-trigger") {
+        document.querySelector<HTMLButtonElement>(
+          ".note-detail-dialog .note-detail-actions button",
+        )?.focus();
+        return;
+      }
+      if (target.kind === "timetable-history-entry") {
+        document.querySelector<HTMLElement>(
+          `[data-change-id="${target.sharedInformationChangeId}"]`,
+        )?.focus();
+        return;
+      }
+      if (target.kind === "task-item") {
+        document.querySelector<HTMLElement>(
+          `.task-item[data-task-id="${target.taskId}"]`,
+        )?.focus();
+        return;
+      }
+      if (target.kind === "note-item") {
+        Array.from(
+          document.querySelectorAll<HTMLElement>("[data-note-id]"),
+        ).find((candidate) => candidate.dataset.noteId === target.noteId)
+          ?.focus();
+        return;
+      }
+      if (target.kind === "daily-lesson") {
+        document.querySelector<HTMLElement>(
+          `.period-inspect-button[data-school-date="${target.schoolDate}"][data-period="${target.periodNumber}"]`,
+        )?.focus();
+        return;
+      }
+      if (target.kind === "change-content-item") {
+        const container = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-change-content-id]"),
+        ).find(
+          (candidate) =>
+            candidate.dataset.changeContentId === target.itemId,
+        );
+        const control = container?.matches("button, [role='button']")
+          ? container
+          : container?.querySelector<HTMLElement>("button, [role='button']");
+        control?.focus();
+        return;
+      }
+      if (target.kind === "timetable-layer-action") {
+        const row = document.querySelector<HTMLElement>(
+          `.layer-row-shell[data-target-scope-type="${target.targetScopeType}"]`,
+        );
+        row?.querySelector<HTMLElement>(
+          target.action === "edit"
+            ? ".timetable-layer-row.editable"
+            : ".layer-kebab-button",
+        )?.focus();
+        return;
+      }
+      if (target.kind === "active-dialog-control") {
+        const dialogs = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[role='dialog'], [role='alertdialog']",
+          ),
+        );
+        const activeDialog = dialogs.reverse().find(
+          (dialog) =>
+            !dialog.closest("[inert]") &&
+            dialog.getAttribute("aria-hidden") !== "true",
+        );
+        activeDialog?.querySelector<HTMLButtonElement>(
+          `button[aria-label="${target.control === "back" ? "戻る" : "閉じる"}"]`,
+        )?.focus();
+        return;
+      }
+      const selector = {
+        "change-content": ".change-content-button",
+        "reference-picker": ".menu-area > button",
+        task: ".task-add-button:not(.note-add-button)",
+        note: ".note-add-button",
+        "timetable-layer": ".daily-lesson-button",
+      }[target.control];
+      document.querySelector<HTMLElement>(selector)?.focus();
+    });
+  }
+
+  function applyDialogFlowResult(result: DialogFlowResult) {
+    if (result.status !== "changed") return;
+    const scrollTop = result.removedRoutes
+      .map((route) => dialogScrollPositionsRef.current.get(route.instanceId))
+      .find((position) => position !== undefined);
+    [...result.removedRoutes].reverse().forEach(clearRemovedDialogRoute);
+    restoreDialogFocus(result.focusTarget, scrollTop);
+    if (result.completedAction === "exit-editing") {
+      requestDraftWorkspaceExit();
+    }
+  }
+
+  function topDialogIsDirty() {
+    const editorKind = editorKindForDialogRoute(topDialogRoute);
+    return editorKind ? editorFormIsDirty(editorKind) : false;
+  }
+
+  function flowContainsDirtyEditor() {
+    return dialogFlowSnapshot.routes.some((route) => {
+      const editorKind = editorKindForDialogRoute(route);
+      return editorKind ? editorFormIsDirty(editorKind) : false;
+    });
+  }
+
+  function clearCancelledDialogOverlay(
+    overlay: typeof dialogFlowSnapshot.overlay,
+  ) {
+    if (overlay?.kind === "task-removal-confirmation") {
+      cancelTaskRemovalConfirmation();
+    }
+  }
+
+  function requestDialogBack() {
+    const overlay = dialogFlowSnapshot.overlay;
+    const result = dialogFlow.back({
+      dirty: topDialogIsDirty(),
+      cancelFocus: { kind: "active-dialog-control", control: "back" },
+    });
+    if (overlay && result.status === "changed") {
+      clearCancelledDialogOverlay(overlay);
+    }
+    applyDialogFlowResult(result);
+  }
+
+  function requestDialogCloseAll() {
+    applyDialogFlowResult(
+      dialogFlow.closeAll({
+        dirty: flowContainsDirtyEditor(),
+        cancelFocus: { kind: "active-dialog-control", control: "close" },
+      }),
+    );
   }
 
   function editorFormIsDirty(editor: EditorKind) {
@@ -1558,64 +1905,28 @@ function App() {
     );
   }
 
-  function requestEditorDismissal(
-    editor: EditorKind,
-    destination: PendingEditorDismissal["destination"] = "close",
-  ) {
-    if (editorFormIsDirty(editor)) {
-      setPendingEditorDismissal({ editor, destination });
-      return true;
-    }
-    return false;
-  }
-
   function closeTaskEditorFlow() {
-    setTaskDetail(null);
-    setTaskEditorForm(null);
-    editorInitialFormsRef.current.task = null;
-    setTaskLessonNameListOpen(false);
-    setActiveTaskLessonNameOption(-1);
-    returnToChangeContentIfNeeded();
+    applyDialogFlowResult(dialogFlow.completeCurrent());
   }
 
   function closeNoteEditorFlow() {
-    const returnTarget = noteDialogReturnTarget;
-    clearNoteDialogState();
-    setLessonNameListOpen(false);
-    setActiveLessonNameOption(-1);
-    returnToChangeContentIfNeeded();
-    if (returnTarget) restoreNoteDialogParent(returnTarget);
+    applyDialogFlowResult(dialogFlow.completeCurrent());
   }
 
   function requestTaskEditorClose() {
-    if (!requestEditorDismissal("task")) closeTaskEditorFlow();
+    requestDialogBack();
   }
 
   function requestNoteEditorClose() {
-    if (!requestEditorDismissal("note")) closeNoteEditorFlow();
-  }
-
-  function closeNoteHistoryFlow() {
-    setNoteHistoryDialog(null);
-    if (!requestEditorDismissal("note")) closeNoteEditorFlow();
+    requestDialogBack();
   }
 
   function goBackFromNoteHistory() {
-    setNoteHistoryDialog(null);
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLButtonElement>(
-        ".note-detail-dialog .note-detail-actions button",
-      )?.focus();
-    });
+    requestDialogBack();
   }
 
   function closeAllNoteDialogs() {
-    clearNoteDialogState();
-    setTaskDetail(null);
-    setTaskHistoryDialog(null);
-    setTimetableHistoryDialog(null);
-    setTimetableLayerDialog(null);
-    pendingChangeContentTimetableRef.current = null;
+    requestDialogCloseAll();
   }
 
   function taskEditingSnapshotFromChangeItem(item: ChangeContentTaskItem) {
@@ -1653,25 +1964,29 @@ function App() {
 
   function openChangeContentNote(item: ChangeContentNoteItem) {
     if (item.source !== "draft") return;
-    setChangeContentOpen(false);
-    changeContentReturnRef.current = true;
     if (item.relatedTask) {
       openTaskNoteEditor(
         item.relatedTask,
         reflectedNoteFromDraft(item.draft, item.beforeBody),
         item.draft,
+        { kind: "change-content-item", itemId: item.id },
       );
       return;
     }
-    openNoteDraftEditor(item.draft, { beforeBody: item.beforeBody });
+    openNoteDraftEditor(
+      item.draft,
+      { beforeBody: item.beforeBody },
+      { kind: "change-content-item", itemId: item.id },
+    );
   }
 
   function openChangeContentTask(item: ChangeContentTaskItem) {
     if (!item.draft) return;
-    setChangeContentOpen(false);
-    changeContentReturnRef.current = true;
     if (item.draft.changeKind === "add") {
-      openTaskDraftEditor(item.draft);
+      openTaskDraftEditor(item.draft, {
+        kind: "change-content-item",
+        itemId: item.id,
+      });
       return;
     }
     const activeTask = dailyPlanClient
@@ -1690,14 +2005,33 @@ function App() {
       ...(activeTask ? { activeTask } : {}),
       editingTask,
     });
-    openTaskUpdateEditor(editingTask, visibleTask);
+    openTaskUpdateEditor(editingTask, visibleTask, {
+      kind: "change-content-item",
+      itemId: item.id,
+    });
   }
 
-  function openTimetableEditorAt(schoolDate: string, periodNumber: number) {
+  function openTimetableEditorAt(
+    schoolDate: string,
+    periodNumber: number,
+    returnFocus?: DialogFocusTarget,
+  ) {
+    const transition = dialogFlow.openTimetableLayer({
+      schoolDate,
+      periodNumber,
+      returnFocus: returnFocus ??
+        (dialogFlow.getSnapshot().routes.length === 0
+          ? { kind: "daily-lesson", schoolDate, periodNumber }
+          : undefined),
+    });
+    if (transition.status === "rejected") return;
+    const routeInstanceId = currentRouteInstanceId("timetable-layer");
+    if (!routeInstanceId) return;
     setTimetableEditorForm(null);
     editorInitialFormsRef.current.timetable = null;
     const cached = timetableLayerCacheRef.current.get(schoolDate, periodNumber);
     setTimetableLayerDialog({
+      routeInstanceId,
       schoolDate,
       periodNumber,
       requestId: 0,
@@ -1706,15 +2040,17 @@ function App() {
   }
 
   function openChangeContentTimetable(item: ChangeContentTimetableItem) {
-    setChangeContentOpen(false);
-    changeContentReturnRef.current = true;
     pendingChangeContentTimetableRef.current = {
       changeDate: item.changeDate,
       periodNumber: item.periodNumber,
       targetScopeType: item.targetScopeType,
     };
     selectSchoolDate(item.changeDate, false);
-    openTimetableEditorAt(item.changeDate, item.periodNumber);
+    openTimetableEditorAt(
+      item.changeDate,
+      item.periodNumber,
+      { kind: "change-content-item", itemId: item.id },
+    );
   }
 
   function changeContentDateLabel(schoolDate: string | null) {
@@ -1849,6 +2185,7 @@ function App() {
     const card = (
       <div
         className={item.conflicted ? "change-content-conflicted-note" : undefined}
+        data-change-content-id={item.id}
         data-change-content-kind="note"
         data-change-kind={item.changeKind}
         data-change-content-projection={
@@ -1901,6 +2238,7 @@ function App() {
         className={`task-entry task-draft change-content-preview-card${
           removed ? " task-removal-draft" : ""
         }${item.conflicted ? " change-content-conflicted" : ""}`}
+        data-change-content-id={item.id}
       >
         <button
           className="task-item"
@@ -2026,6 +2364,7 @@ function App() {
             item.conflicted ? " change-content-conflicted" : ""
           }`}
           data-change-content-kind="task"
+          data-change-content-id={item.id}
           data-change-kind={item.draft?.changeKind}
         >
           {item.draft ? (
@@ -2104,28 +2443,35 @@ function App() {
       : null;
   }
 
-  function captureNoteDialogReturnTarget(
+  function captureNoteDialogFocusTarget(
     parent: NoteDialogParent,
     noteId: string,
-  ): NoteDialogReturnTarget {
+  ): DialogFocusTarget {
     const { scrollContainer } = noteDialogParentElements(parent);
+    pendingNoteDialogScrollTopRef.current = scrollContainer?.scrollTop ?? 0;
+    if (parent === "task-detail") {
+      return {
+        kind: "task-note",
+        taskId: taskDetail!.task.taskId,
+        noteId,
+      };
+    }
     return {
-      parent,
+      kind: "daily-lesson-note",
+      schoolDate: timetableLayerDialog!.schoolDate,
+      periodNumber: timetableLayerDialog!.periodNumber,
       noteId,
-      scrollTop: scrollContainer?.scrollTop ?? 0,
     };
   }
 
-  function restoreNoteDialogParent(target: NoteDialogReturnTarget) {
-    window.requestAnimationFrame(() => {
-      const { dialog, scrollContainer } =
-        noteDialogParentElements(target.parent);
-      const note = Array.from(
-        dialog?.querySelectorAll<HTMLElement>("[data-note-id]") ?? [],
-      ).find((candidate) => candidate.dataset.noteId === target.noteId);
-      note?.focus({ preventScroll: true });
-      if (scrollContainer) scrollContainer.scrollTop = target.scrollTop;
+  function openChangeContentDialog() {
+    const transition = dialogFlow.openChangeContent({
+      returnFocus: {
+        kind: "flow-trigger",
+        control: "change-content",
+      },
     });
+    if (transition.status === "rejected") return;
   }
 
   function noteDialogParentElements(parent: NoteDialogParent) {
@@ -2156,7 +2502,13 @@ function App() {
 
   function openReferencePicker() {
     setMenuOpen(false);
-    setReferencePickerOpen(true);
+    const transition = dialogFlow.openReferencePicker({
+      returnFocus: {
+        kind: "flow-trigger",
+        control: "reference-picker",
+      },
+    });
+    if (transition.status === "rejected") return;
     if (referenceScope) {
       setReferencePickerScopeKey(referenceScopeKey(referenceScope));
     }
@@ -2176,12 +2528,12 @@ function App() {
       referenceScope?.type === option.type &&
       referenceScope.value === option.value
     ) {
-      setReferencePickerOpen(false);
+      applyDialogFlowResult(dialogFlow.completeCurrent());
       return;
     }
     setReferenceDailyPlan(null);
     setReferenceScope(option);
-    setReferencePickerOpen(false);
+    applyDialogFlowResult(dialogFlow.completeCurrent());
   }
 
   function leaveReferenceScope() {
@@ -2197,7 +2549,7 @@ function App() {
 
   function openNoteUpdateEditor(
     note: DailyPlanNoteForCache,
-    returnTarget?: NoteDialogReturnTarget,
+    returnFocus?: DialogFocusTarget,
   ) {
     openNoteEditorForm(
       {
@@ -2210,14 +2562,14 @@ function App() {
         removalPlanned: false,
         relatedTask: null,
       },
-      returnTarget,
+      returnFocus,
     );
   }
 
   function openNoteDraftEditor(
     draft: NoteDraft,
     basis?: NoteDraftBasis,
-    returnTarget?: NoteDialogReturnTarget,
+    returnFocus?: DialogFocusTarget,
   ) {
     const editingNote = draft.changeKind === "add"
       ? null
@@ -2235,7 +2587,7 @@ function App() {
         removalPlanned: draft.changeKind === "remove",
         relatedTask: null,
       },
-      returnTarget,
+      returnFocus,
     );
   }
 
@@ -2249,7 +2601,7 @@ function App() {
     },
     note?: DailyPlanNoteForCache,
     draft?: NoteDraft,
-    returnTarget?: NoteDialogReturnTarget,
+    returnFocus?: DialogFocusTarget,
   ) {
     openNoteEditorForm(
       {
@@ -2262,7 +2614,7 @@ function App() {
         removalPlanned: draft?.changeKind === "remove",
         relatedTask: task,
       },
-      returnTarget,
+      returnFocus,
     );
   }
 
@@ -2307,7 +2659,18 @@ function App() {
   }
 
   function openNoteHistory(note: DailyPlanNoteForCache) {
+    const transition = dialogFlow.openNoteHistory({
+      noteId: note.noteId,
+      returnFocus: {
+        kind: "note-history-trigger",
+        noteId: note.noteId,
+      },
+    });
+    if (transition.status === "rejected") return;
+    const routeInstanceId = currentRouteInstanceId("note-history");
+    if (!routeInstanceId) return;
     setNoteHistoryDialog({
+      routeInstanceId,
       note,
       requestId: Date.now(),
       state: { status: "loading" },
@@ -2357,6 +2720,7 @@ function App() {
   function openTaskUpdateEditor(
     task: ActiveTaskForEditing,
     projectedTask?: VisibleTask,
+    returnFocus?: DialogFocusTarget,
   ) {
     setTaskLessonNamesExpanded(false);
     setTaskLessonNameListOpen(false);
@@ -2386,10 +2750,13 @@ function App() {
       removalPlanned,
       editingTask: task,
       editingDraft: null,
-    });
+    }, returnFocus);
   }
 
-  function openTaskDraftEditor(draft: TaskDraft) {
+  function openTaskDraftEditor(
+    draft: TaskDraft,
+    returnFocus?: DialogFocusTarget,
+  ) {
     if (draft.changeKind !== "add") return;
     setTaskLessonNamesExpanded(false);
     setTaskLessonNameListOpen(false);
@@ -2409,7 +2776,7 @@ function App() {
       removalPlanned: false,
       editingTask: null,
       editingDraft: draft,
-    });
+    }, returnFocus);
     setTaskDetail(null);
   }
 
@@ -2432,18 +2799,16 @@ function App() {
       (taskEditorForm.editingTask?.notes?.length ?? 0) > 0
     ) {
       setTaskRemovalCheckboxFocusRequested(false);
+      dialogFlow.openTaskRemovalConfirmation();
       setTaskRemovalConfirmation({
         task: taskEditorForm.editingTask!,
-        returnTaskDetail: taskDetail,
       });
-      setTaskDetail(null);
       return;
     }
     if (taskRemovalRequested) {
       saveTaskRemovalTransition(taskEditorForm.editingTask!, false);
       return;
     }
-    const wasTaskDetailOpen = taskDetail !== null;
     const lessonInput = taskEditorForm.relatedLessonInput.trim();
     const resolvedLesson = lessonInput
       ? createLessonNameComboboxClient({
@@ -2512,7 +2877,6 @@ function App() {
       return;
     }
     closeTaskEditorFlow();
-    if (wasTaskDetailOpen) setTaskDetail(null);
     setTimetableEditorMessage(null);
   }
 
@@ -2562,13 +2926,13 @@ function App() {
                   task,
                   item.activeNote,
                   note,
-                  captureNoteDialogReturnTarget("task-detail", note.sourceId),
+                  captureNoteDialogFocusTarget("task-detail", note.sourceId),
                 )
               : openTaskNoteEditor(
                   task,
                   undefined,
                   note,
-                  captureNoteDialogReturnTarget("task-detail", note.sourceId),
+                  captureNoteDialogFocusTarget("task-detail", note.sourceId),
                 )
             : undefined,
         };
@@ -2593,7 +2957,7 @@ function App() {
               task,
               note,
               undefined,
-              captureNoteDialogReturnTarget("task-detail", note.noteId),
+              captureNoteDialogFocusTarget("task-detail", note.noteId),
             )
           : undefined,
       };
@@ -2647,6 +3011,11 @@ function App() {
 
   function openTaskDetail(item: VisibleTaskListItem) {
     if (!timetableEditor.editing) {
+      const transition = dialogFlow.openTaskDetail({
+        taskId: item.task.taskId,
+        returnFocus: { kind: "task-item", taskId: item.task.taskId },
+      });
+      if (transition.status === "rejected") return;
       setTaskDetail(item);
       return;
     }
@@ -2664,6 +3033,11 @@ function App() {
       openTaskUpdateEditor(item.editingTask, item.task);
       return;
     }
+    const transition = dialogFlow.openTaskDetail({
+      taskId: item.task.taskId,
+      returnFocus: { kind: "task-item", taskId: item.task.taskId },
+    });
+    if (transition.status === "rejected") return;
     setTaskDetail(item);
   }
 
@@ -2706,7 +3080,7 @@ function App() {
             ? () => openNoteDraftEditor(
                 note,
                 item.activeNote ? { activeNote: item.activeNote } : undefined,
-                captureNoteDialogReturnTarget(
+                captureNoteDialogFocusTarget(
                   "daily-lesson-detail",
                   note.sourceId,
                 ),
@@ -2724,7 +3098,7 @@ function App() {
         onOpen: notesOpenDetail
           ? () => openNoteUpdateEditor(
               note,
-              captureNoteDialogReturnTarget(
+              captureNoteDialogFocusTarget(
                 "daily-lesson-detail",
                 note.noteId,
               ),
@@ -2743,11 +3117,10 @@ function App() {
   }
 
   function cancelTaskRemovalConfirmation() {
-    const confirmation = taskRemovalConfirmation;
+    dialogFlow.cancelOverlay();
     setTaskRemovalConfirmation(null);
-    if (confirmation?.returnTaskDetail) {
+    if (taskDetail) {
       setTaskRemovalCheckboxFocusRequested(true);
-      setTaskDetail(confirmation.returnTaskDetail);
     }
   }
 
@@ -2771,13 +3144,16 @@ function App() {
       return;
     }
     if (fromConfirmation) {
+      dialogFlow.cancelOverlay();
       setTaskRemovalConfirmation(null);
-      changeContentReturnRef.current = false;
     }
-    const returningToChangeContent = changeContentReturnRef.current;
     closeTaskEditorFlow();
+    const parent = dialogFlow.getSnapshot().routes.at(-1);
+    if (parent?.kind === "task-detail" && parent.taskId === task.taskId) {
+      applyDialogFlowResult(dialogFlow.completeCurrent());
+    }
     setTimetableEditorMessage(null);
-    if (!returningToChangeContent) {
+    if (dialogFlow.getSnapshot().routes.at(-1)?.kind !== "change-content") {
       setDailyPlanTaskFocusRequestId(task.taskId);
     }
   }
@@ -2839,6 +3215,17 @@ function App() {
               noteBodies: [],
               replacement: { type: "lesson_name", lessonName: "" },
             });
+    const transition = dialogFlow.openTimetableEditor({
+      schoolDate: form.changeDate,
+      periodNumber: form.periodNumber,
+      targetScopeType: form.targetScopeType,
+      returnFocus: {
+        kind: "timetable-layer-action",
+        targetScopeType: form.targetScopeType,
+        action: "edit",
+      },
+    });
+    if (transition.status === "rejected") return;
     editorInitialFormsRef.current.timetable = form;
     setTimetableEditorForm(form);
   }
@@ -2847,7 +3234,22 @@ function App() {
 
   function openLayerHistory(targetScopeType: TargetScopeType) {
     if (!timetableLayerDialog) return;
+    const transition = dialogFlow.openTimetableHistory({
+      targetScopeType,
+      schoolDate: timetableLayerDialog.schoolDate,
+      periodNumber: timetableLayerDialog.periodNumber,
+      returnFocus: {
+        kind: "timetable-layer-action",
+        targetScopeType,
+        action: "history",
+      },
+    });
+    if (transition.status === "rejected") return;
+    const routeInstanceId = currentRouteInstanceId("timetable-history");
+    if (!routeInstanceId) return;
     setTimetableHistoryDialog({
+      routeInstanceId,
+      detailRouteInstanceId: null,
       targetScopeType,
       changeDate: timetableLayerDialog.schoolDate,
       periodNumber: timetableLayerDialog.periodNumber,
@@ -2858,21 +3260,44 @@ function App() {
   }
 
   function openTaskHistory(task: DailyPlanTaskForCache) {
-    const returnTaskDetail = taskDetail?.task.taskId === task.taskId
-      ? taskDetail
-      : { type: "active" as const, task };
-    setTaskDetail(null);
+    const transition = dialogFlow.openTaskHistory({
+      taskId: task.taskId,
+      returnFocus: {
+        kind: "task-history-trigger",
+        taskId: task.taskId,
+      },
+    });
+    if (transition.status === "rejected") return;
+    const routeInstanceId = currentRouteInstanceId("task-history");
+    if (!routeInstanceId) return;
     setTaskHistoryDialog({
+      routeInstanceId,
       task,
-      returnTaskDetail,
       requestId: 0,
       state: { status: "loading" },
     });
   }
 
   async function openDirectChangeDetail(sharedInformationChangeId: string) {
+    if (
+      topDialogRoute?.kind !== "timetable-change-detail" ||
+      topDialogRoute.sharedInformationChangeId !== sharedInformationChangeId
+    ) {
+      const transition = dialogFlow.openTimetableChangeDetail({
+        sharedInformationChangeId,
+        returnFocus: {
+          kind: "timetable-history-entry",
+          sharedInformationChangeId,
+        },
+      });
+      if (transition.status === "rejected") return;
+    }
+    const detailRoute = dialogFlow.getSnapshot().routes.at(-1);
+    if (detailRoute?.kind !== "timetable-change-detail") return;
+    const routeInstanceId = detailRoute.instanceId;
     setTimetableHistoryDialog((current) => current ? {
       ...current,
+      detailRouteInstanceId: routeInstanceId,
       detail: { status: "loading", sharedInformationChangeId },
     } : current);
     try {
@@ -2882,15 +3307,19 @@ function App() {
       if (!response.ok) throw new Error("detail unavailable");
       const detail = await response.json() as DirectTimetableChangeDetail;
       setTimetableHistoryDialog((current) =>
-        current && current.detail?.sharedInformationChangeId ===
-          sharedInformationChangeId
+        dialogFlow.hasInstance(routeInstanceId) &&
+        dialogFlow.getSnapshot().routes.at(-1)?.instanceId === routeInstanceId &&
+        current?.detailRouteInstanceId === routeInstanceId &&
+        current.detail?.sharedInformationChangeId === sharedInformationChangeId
           ? { ...current, detail }
           : current,
       );
     } catch {
       setTimetableHistoryDialog((current) =>
-        current && current.detail?.sharedInformationChangeId ===
-          sharedInformationChangeId
+        dialogFlow.hasInstance(routeInstanceId) &&
+        dialogFlow.getSnapshot().routes.at(-1)?.instanceId === routeInstanceId &&
+        current?.detailRouteInstanceId === routeInstanceId &&
+        current.detail?.sharedInformationChangeId === sharedInformationChangeId
           ? {
               ...current,
               detail: { status: "error", sharedInformationChangeId },
@@ -2920,74 +3349,49 @@ function App() {
     }
   }
 
-  function closeTimetableDialogFlow() {
-    setTimetableEditorForm(null);
-    editorInitialFormsRef.current.timetable = null;
-    setTimetableHistoryDialog(null);
-    setTimetableLayerDialog(null);
-    pendingChangeContentTimetableRef.current = null;
-    returnToChangeContentIfNeeded();
-  }
-
   function closeTimetableFormAfterDraftSave() {
-    setTimetableEditorForm(null);
-    editorInitialFormsRef.current.timetable = null;
-    if (!changeContentReturnRef.current) return;
-    setTimetableLayerDialog(null);
-    pendingChangeContentTimetableRef.current = null;
-    returnToChangeContentIfNeeded();
-  }
-
-  function closeTimetableEditorBack() {
-    if (changeContentReturnRef.current) {
-      closeTimetableDialogFlow();
-      return;
+    applyDialogFlowResult(dialogFlow.completeCurrent());
+    const remainingRoutes = dialogFlow.getSnapshot().routes;
+    if (
+      remainingRoutes.at(-1)?.kind === "timetable-layer" &&
+      remainingRoutes.at(-2)?.kind === "change-content"
+    ) {
+      applyDialogFlowResult(dialogFlow.completeCurrent());
     }
-    setTimetableEditorForm(null);
-    editorInitialFormsRef.current.timetable = null;
   }
 
   function requestTimetableEditorClose(destination: "close" | "back") {
-    if (requestEditorDismissal("timetable", destination)) return;
-    if (destination === "close") closeTimetableDialogFlow();
-    else closeTimetableEditorBack();
-  }
-
-  function discardUnsavedEditorInput() {
-    const pending = pendingEditorDismissal;
-    if (!pending) return;
-    setPendingEditorDismissal(null);
-    if (pending.destination === "exit-editing") {
-      requestDraftWorkspaceExit();
-    } else if (pending.editor === "task") {
-      closeTaskEditorFlow();
-    } else if (pending.editor === "note") {
-      closeNoteEditorFlow();
-    } else if (pending.destination === "close") {
-      closeTimetableDialogFlow();
+    if (destination === "close") {
+      requestDialogCloseAll();
     } else {
-      closeTimetableEditorBack();
+      requestDialogBack();
     }
   }
 
+  function discardUnsavedEditorInput() {
+    applyDialogFlowResult(dialogFlow.confirmPending());
+  }
+
   function goBackInTimetableHistoryDialog() {
-    setTimetableHistoryDialog((current) =>
-      current?.detail ? { ...current, detail: null } : null,
-    );
+    requestDialogBack();
   }
 
   function goBackFromTaskHistory() {
-    if (!taskHistoryDialog) return;
-    setTaskDetail(taskHistoryDialog.returnTaskDetail);
-    setTaskHistoryDialog(null);
+    requestDialogBack();
   }
 
   function navigateLayerDialog(schoolDate: string, periodNumber: number) {
+    const transition = dialogFlow.navigateTimetableLayer({
+      schoolDate,
+      periodNumber,
+    });
+    if (transition.status === "rejected") return;
     setTimetableEditorForm(null);
     editorInitialFormsRef.current.timetable = null;
     setTimetableLayerDialog((current) =>
       current
         ? {
+            ...current,
             schoolDate,
             periodNumber,
             requestId:
@@ -3134,7 +3538,7 @@ function App() {
   }
 
   async function commitTimetableDrafts() {
-    setChangeContentOpen(false);
+    applyDialogFlowResult(dialogFlow.completeCurrent());
     setTimetableEditorRefreshNeeded(false);
     setTimetableEditorMessage("変更を反映しています…");
     const result = await timetableEditorClient.submitCurrentBatch({
@@ -3340,6 +3744,16 @@ function App() {
       (noteEditorForm?.editingDraft &&
         noteEditorForm.editingDraft.changeKind !== "add"),
     );
+    const noteDialogRoute = [...dialogFlowSnapshot.routes].reverse().find(
+      (route) =>
+        route.kind === "note-detail" || route.kind === "note-editor",
+    );
+    const noteDialogHasParent = noteDialogRoute
+      ? dialogFlowSnapshot.routes.findIndex(
+          (route) => route.instanceId === noteDialogRoute.instanceId,
+        ) > 0
+      : false;
+    const noteReturnFocus = noteDialogRoute?.returnFocus;
     const noteDetailValues = noteEditorForm && noteDetailOpen
       ? [
           {
@@ -3839,6 +4253,8 @@ function App() {
                           <button
                             className="period-inspect-button"
                             type="button"
+                            data-school-date={selectedSchoolDate}
+                            data-period={period.periodNumber}
                             aria-label={`${period.periodNumber}限 ${accessibleLessonLabel}${
                               lifecycleDrafts.length > 0
                                 ? ` ${lifecycleDrafts.map((draft) =>
@@ -4030,7 +4446,7 @@ function App() {
                     <h2 id="notes-title">ノート</h2>
                     {timetableEditor.editing ? (
                       <button
-                        className="task-add-button"
+                        className="task-add-button note-add-button"
                         type="button"
                         aria-label="ノートを追加"
                         disabled={timetableEditor.atLimit || timetableEditor.submitting}
@@ -4147,7 +4563,7 @@ function App() {
                       className="button-secondary change-content-button"
                       type="button"
                       disabled={timetableEditor.submitting}
-                      onClick={() => setChangeContentOpen(true)}
+                      onClick={openChangeContentDialog}
                     >
                       変更を反映（{timetableEditor.draftCount}）
                     </button>
@@ -4184,7 +4600,20 @@ function App() {
           ) : null}
 
           {changeContentOpen && changeContentControls.reviewVisible ? (
-            <div className="editor-dialog-backdrop" role="presentation">
+            <div
+              className="editor-dialog-backdrop"
+              role="presentation"
+              aria-hidden={
+                !topDialogRouteIs("change-content") ||
+                dialogFlowSnapshot.overlay !== null ||
+                undefined
+              }
+              inert={
+                !topDialogRouteIs("change-content") ||
+                dialogFlowSnapshot.overlay !== null ||
+                undefined
+              }
+            >
               <section
                 className="timetable-editor-dialog change-content-dialog"
                 role="dialog"
@@ -4193,9 +4622,7 @@ function App() {
                 onKeyDown={(event) => {
                   if (event.key !== "Escape" || event.defaultPrevented) return;
                   event.preventDefault();
-                  setChangeContentOpen(false);
-                  setRevealedDraftCancellationId(null);
-                  changeContentReturnRef.current = false;
+                  requestDialogBack();
                 }}
               >
                 <header className="editor-dialog-header">
@@ -4204,11 +4631,7 @@ function App() {
                     className="icon-button"
                     type="button"
                     aria-label="戻る"
-                    onClick={() => {
-                      setChangeContentOpen(false);
-                      setRevealedDraftCancellationId(null);
-                      changeContentReturnRef.current = false;
-                    }}
+                    onClick={requestDialogBack}
                   >
                     ‹
                   </button>
@@ -4254,25 +4677,29 @@ function App() {
             </div>
           ) : null}
 
-          {logoutConfirmationOpen ? (
+          {dialogFlowSnapshot.overlay?.kind === "logout-confirmation" ? (
             <div className="editor-dialog-backdrop" role="presentation">
               <DraftLogoutConfirmationDialog
                 draftCount={timetableEditor.draftCount}
-                onBack={() => setLogoutConfirmationOpen(false)}
+                onBack={() => {
+                  dialogFlow.cancelOverlay();
+                }}
                 onLogout={() => void logout()}
               />
             </div>
           ) : null}
 
-          {draftExitConfirmationOpen ? (
+          {dialogFlowSnapshot.overlay?.kind === "draft-exit-confirmation" ? (
             <DraftExitConfirmationDialog
               draftCount={timetableEditor.draftCount}
-              onContinue={() => setDraftExitConfirmationOpen(false)}
+              onContinue={() => {
+                dialogFlow.cancelOverlay();
+              }}
               onExit={finishLeavingTimetableEditing}
             />
           ) : null}
 
-          {referencePickerOpen ? (
+          {referencePickerOpen && dialogRouteExists("reference-picker") ? (
             <div className="editor-dialog-backdrop" role="presentation">
               <section
                 className="timetable-editor-dialog reference-scope-dialog"
@@ -4282,7 +4709,7 @@ function App() {
                 onKeyDown={(event) => {
                   if (event.key !== "Escape" || event.defaultPrevented) return;
                   event.preventDefault();
-                  setReferencePickerOpen(false);
+                  requestDialogBack();
                 }}
               >
                 <header className="editor-dialog-header">
@@ -4292,7 +4719,7 @@ function App() {
                     type="button"
                     aria-label="閉じる"
                     autoFocus
-                    onClick={() => setReferencePickerOpen(false)}
+                    onClick={requestDialogCloseAll}
                   >
                     ×
                   </button>
@@ -4351,12 +4778,16 @@ function App() {
             </div>
           ) : null}
 
-          {noteEditorForm && noteDetailOpen ? (
+          {noteEditorForm && noteDetailOpen &&
+            dialogRouteExists("note-detail") ? (
             <NoteDetailDialog
               body={noteEditorForm.body}
               details={noteDetailValues}
               editing={timetableEditor.editing}
-              hidden={Boolean(noteHistoryDialog)}
+              hidden={
+                !topDialogRouteIs("note-detail") ||
+                dialogFlowSnapshot.overlay !== null
+              }
               removalPlanned={noteEditorForm.removalPlanned}
               onBodyChange={(body) => setNoteEditorForm((current) =>
                 current ? { ...current, body } : current)}
@@ -4364,19 +4795,21 @@ function App() {
                 setNoteEditorForm((current) => current
                   ? { ...current, removalPlanned }
                   : current)}
-              onBack={timetableEditor.editing || noteDialogReturnTarget
+              onBack={timetableEditor.editing || noteDialogHasParent
                 ? requestNoteEditorClose
                 : undefined}
-              backLabel={noteDialogReturnTarget
-                ? NOTE_DIALOG_PARENT[noteDialogReturnTarget.parent].backLabel
-                : "戻る"}
+              backLabel={noteReturnFocus?.kind === "task-note"
+                ? NOTE_DIALOG_PARENT["task-detail"].backLabel
+                : noteReturnFocus?.kind === "daily-lesson-note"
+                  ? NOTE_DIALOG_PARENT["daily-lesson-detail"].backLabel
+                  : "戻る"}
               onClose={closeAllNoteDialogs}
               onSave={saveCurrentNoteDraft}
               onOpenHistory={noteEditorForm.editingNote
                 ? () => openNoteHistory(noteEditorForm.editingNote!)
                 : undefined}
             />
-          ) : noteEditorForm && !noteHistoryDialog ? (
+          ) : noteEditorForm && dialogRouteExists("note-editor") ? (
             <EditorDialogShell
               title={noteEditorForm.relatedTask
                 ? "ノートを書く"
@@ -4389,6 +4822,10 @@ function App() {
                   noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
                 }`}
               saveDisabled={noteEditorForm.editingDraft?.changeKind === "remove"}
+              hidden={
+                !topDialogRouteIs("note-editor") ||
+                dialogFlowSnapshot.overlay !== null
+              }
               onBack={requestNoteEditorClose}
             >
                 <form id="note-editor-form" onSubmit={saveNoteDraft}>
@@ -4586,13 +5023,17 @@ function App() {
             </EditorDialogShell>
           ) : null}
 
-          {taskEditorForm && !taskDetail && !taskHistoryDialog &&
-            !taskRemovalConfirmation ? (
+          {taskEditorForm && !taskDetail &&
+            dialogRouteExists("task-editor") ? (
             <EditorDialogShell
               title={taskEditorForm.editingTask ? "タスクを編集" : "タスクを追加"}
               titleId="task-editor-title"
               formId="task-editor-form"
               className="task-editor-dialog"
+              hidden={
+                !topDialogRouteIs("task-editor") ||
+                dialogFlowSnapshot.overlay !== null
+              }
               onBack={requestTaskEditorClose}
             >
                 <form id="task-editor-form" onSubmit={saveTaskDraft}>
@@ -4608,7 +5049,11 @@ function App() {
             </EditorDialogShell>
           ) : null}
 
-          {taskDetail && !taskHistoryDialog && !taskRemovalConfirmation ? (
+          {taskDetail &&
+            (
+              dialogRouteExists("task-detail") ||
+              dialogRouteExists("task-editor")
+            ) ? (
             <TaskDetailDialog
               task={taskDetail.task}
               taskScopeLabel={scopeLabel(
@@ -4642,10 +5087,16 @@ function App() {
                 timetableEditor.atLimit || timetableEditor.submitting
               }
               removalCheckboxAutoFocus={taskRemovalCheckboxFocusRequested}
-              hidden={Boolean(noteEditorForm || noteHistoryDialog)}
+              hidden={
+                (
+                  !topDialogRouteIs("task-detail") &&
+                  !topDialogRouteIs("task-editor")
+                ) ||
+                dialogFlowSnapshot.overlay !== null
+              }
               onClose={taskEditorForm?.editingTask
                 ? requestTaskEditorClose
-                : () => setTaskDetail(null)}
+                : requestDialogCloseAll}
               onSave={taskEditorForm?.editingTask ? saveTaskDraft : undefined}
               onNoteBodyChange={updateTaskNoteBody}
               onRemovalPlannedChange={(removalPlanned) => {
@@ -4687,13 +5138,15 @@ function App() {
                 taskDetail.type === "draft"
                 ? () => {
                   timetableEditorClient.removeTaskDraft(taskDetail.draft.sourceId);
-                  setTaskDetail(null);
+                  applyDialogFlowResult(dialogFlow.completeCurrent());
                 }
                 : undefined}
             />
           ) : null}
 
-          {taskRemovalConfirmation ? (
+          {taskRemovalConfirmation &&
+            dialogFlowSnapshot.overlay?.kind ===
+              "task-removal-confirmation" ? (
             <TaskRemovalConfirmationDialog
               taskTitle={taskRemovalConfirmation.task.title}
               notes={taskRemovalConfirmation.task.notes ?? []}
@@ -4702,17 +5155,18 @@ function App() {
             />
           ) : null}
 
-          {taskHistoryDialog ? (
+          {taskHistoryDialog && dialogRouteExists("task-history") ? (
             <TaskEditHistoryDialog
               taskTitle={taskHistoryDialog.task.title}
               targetScopeContext={targetScopeContext}
               referenceSchoolDate={selectedSchoolDate}
               state={taskHistoryDialog.state}
+              hidden={
+                !topDialogRouteIs("task-history") ||
+                dialogFlowSnapshot.overlay !== null
+              }
               onBack={goBackFromTaskHistory}
-              onClose={() => {
-                setTaskHistoryDialog(null);
-                if (taskEditorForm) closeTaskEditorFlow();
-              }}
+              onClose={requestDialogCloseAll}
               onRetry={() => setTaskHistoryDialog((current) =>
                 current ? {
                   ...current,
@@ -4722,14 +5176,16 @@ function App() {
             />
           ) : null}
 
-          {noteHistoryDialog ? (
+          {noteHistoryDialog && dialogRouteExists("note-history") ? (
             <NoteEditHistoryDialog
               targetScopeContext={targetScopeContext}
               state={noteHistoryDialog.state}
+              hidden={
+                !topDialogRouteIs("note-history") ||
+                dialogFlowSnapshot.overlay !== null
+              }
               onBack={goBackFromNoteHistory}
-              onClose={timetableEditor.editing
-                ? closeNoteHistoryFlow
-                : closeAllNoteDialogs}
+              onClose={requestDialogCloseAll}
               onRetry={() => setNoteHistoryDialog((current) =>
                 current ? {
                   ...current,
@@ -4739,8 +5195,22 @@ function App() {
             />
           ) : null}
 
-          {timetableHistoryDialog ? (
-            <div className="editor-dialog-backdrop" role="presentation">
+          {timetableHistoryDialog &&
+            dialogRouteExists("timetable-history") ? (
+            <div
+              className="editor-dialog-backdrop"
+              role="presentation"
+              aria-hidden={
+                !topDialogRouteIs("timetable-history") ||
+                dialogFlowSnapshot.overlay !== null ||
+                undefined
+              }
+              inert={
+                !topDialogRouteIs("timetable-history") ||
+                dialogFlowSnapshot.overlay !== null ||
+                undefined
+              }
+            >
               <section
                 className="timetable-editor-dialog timetable-history-dialog"
                 role="dialog"
@@ -4755,19 +5225,13 @@ function App() {
                   <button
                     className="icon-button"
                     type="button"
-                    aria-label={timetableHistoryDialog.detail
-                      ? "編集履歴に戻る"
-                      : "変更状況に戻る"}
+                    aria-label="変更状況に戻る"
                     onClick={goBackInTimetableHistoryDialog}
                   >
                     ‹
                   </button>
                   <div className="timetable-dialog-heading">
-                    <h2 id="timetable-history-title">
-                      {timetableHistoryDialog.detail
-                        ? "変更の詳細"
-                        : "編集履歴"}
-                    </h2>
+                    <h2 id="timetable-history-title">編集履歴</h2>
                     <p className="layer-dialog-selection">
                       {formatUiSchoolDate(timetableHistoryDialog.changeDate, {
                         referenceSchoolDate: selectedSchoolDate,
@@ -4783,39 +5247,13 @@ function App() {
                     className="icon-button"
                     type="button"
                     aria-label="閉じる"
-                    onClick={closeTimetableDialogFlow}
+                    onClick={requestDialogCloseAll}
                   >
                     ×
                   </button>
                 </header>
 
-                {timetableHistoryDialog.detail ? (
-                  timetableHistoryDialog.detail.status === "loading" ? (
-                    <p className="layer-dialog-status" aria-live="polite">
-                      変更内容を読み込んでいます…
-                    </p>
-                  ) : timetableHistoryDialog.detail.status === "error" ? (
-                    <div className="layer-dialog-status" role="alert">
-                      <p>変更内容を読み込めませんでした。</p>
-                      <button
-                        className="button-secondary"
-                        type="button"
-                        onClick={() => void openDirectChangeDetail(
-                          timetableHistoryDialog.detail!
-                            .sharedInformationChangeId,
-                        )}
-                      >
-                        再読み込み
-                      </button>
-                    </div>
-                  ) : (
-                    <DirectChangeDetailView
-                      detail={timetableHistoryDialog.detail}
-                      targetScopeContext={targetScopeContext}
-                      referenceSchoolDate={selectedSchoolDate}
-                    />
-                  )
-                ) : timetableHistoryDialog.history.status === "loading" ? (
+                {timetableHistoryDialog.history.status === "loading" ? (
                   <p className="layer-dialog-status" aria-live="polite">
                     編集履歴を読み込んでいます。
                   </p>
@@ -4846,6 +5284,7 @@ function App() {
                         className="history-row"
                         type="button"
                         key={entry.sharedInformationChangeId}
+                        data-change-id={entry.sharedInformationChangeId}
                         onClick={() => void openDirectChangeDetail(
                           entry.sharedInformationChangeId,
                         )}
@@ -4870,13 +5309,107 @@ function App() {
             </div>
           ) : null}
 
-          {timetableLayerDialog && !timetableEditorForm &&
-            !timetableHistoryDialog ? (
+          {timetableHistoryDialog?.detail &&
+            dialogRouteExists("timetable-change-detail") ? (
             <div
               className="editor-dialog-backdrop"
               role="presentation"
-              aria-hidden={Boolean(noteEditorForm || noteHistoryDialog)}
-              inert={Boolean(noteEditorForm || noteHistoryDialog)}
+              aria-hidden={
+                !topDialogRouteIs("timetable-change-detail") ||
+                dialogFlowSnapshot.overlay !== null ||
+                undefined
+              }
+              inert={
+                !topDialogRouteIs("timetable-change-detail") ||
+                dialogFlowSnapshot.overlay !== null ||
+                undefined
+              }
+            >
+              <section
+                className="timetable-editor-dialog timetable-history-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="timetable-change-detail-title"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  requestDialogBack();
+                }}
+              >
+                <header className="editor-dialog-header">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="編集履歴に戻る"
+                    onClick={requestDialogBack}
+                  >
+                    ‹
+                  </button>
+                  <div className="timetable-dialog-heading">
+                    <h2 id="timetable-change-detail-title">変更の詳細</h2>
+                    <p className="layer-dialog-selection">
+                      {formatUiSchoolDate(timetableHistoryDialog.changeDate, {
+                        referenceSchoolDate: selectedSchoolDate,
+                      })}
+                      ・{timetableHistoryDialog.periodNumber}限・
+                      {scopeLabel(
+                        timetableHistoryDialog.targetScopeType,
+                        targetScopeContext,
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="閉じる"
+                    onClick={requestDialogCloseAll}
+                  >
+                    ×
+                  </button>
+                </header>
+
+                {timetableHistoryDialog.detail.status === "loading" ? (
+                  <p className="layer-dialog-status" aria-live="polite">
+                    変更内容を読み込んでいます…
+                  </p>
+                ) : timetableHistoryDialog.detail.status === "error" ? (
+                  <div className="layer-dialog-status" role="alert">
+                    <p>変更内容を読み込めませんでした。</p>
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => void openDirectChangeDetail(
+                        timetableHistoryDialog.detail!
+                          .sharedInformationChangeId,
+                      )}
+                    >
+                      再読み込み
+                    </button>
+                  </div>
+                ) : (
+                  <DirectChangeDetailView
+                    detail={timetableHistoryDialog.detail}
+                    targetScopeContext={targetScopeContext}
+                    referenceSchoolDate={selectedSchoolDate}
+                  />
+                )}
+              </section>
+            </div>
+          ) : null}
+
+          {timetableLayerDialog && dialogRouteExists("timetable-layer") ? (
+            <div
+              className="editor-dialog-backdrop"
+              role="presentation"
+              aria-hidden={
+                !topDialogRouteIs("timetable-layer") ||
+                dialogFlowSnapshot.overlay !== null ||
+                undefined
+              }
+              inert={
+                !topDialogRouteIs("timetable-layer") ||
+                dialogFlowSnapshot.overlay !== null ||
+                undefined
+              }
             >
               <section
                 className="timetable-editor-dialog timetable-layer-dialog"
@@ -4884,10 +5417,22 @@ function App() {
                 aria-modal="true"
                 aria-labelledby="timetable-layer-title"
                 onKeyDown={(event) => {
-                  if (event.key === "Escape") closeTimetableDialogFlow();
+                  if (event.key === "Escape") requestDialogBack();
                 }}
               >
                 <header className="editor-dialog-header">
+                  {dialogFlowSnapshot.routes.findIndex(
+                    (route) => route.kind === "timetable-layer",
+                  ) > 0 ? (
+                    <button
+                      className="icon-button"
+                      type="button"
+                      aria-label="変更内容に戻る"
+                      onClick={requestDialogBack}
+                    >
+                      ‹
+                    </button>
+                  ) : null}
                   <div className="layer-dialog-heading">
                     <h2 id="timetable-layer-title">時間割の変更状況</h2>
                   </div>
@@ -4896,7 +5441,7 @@ function App() {
                     type="button"
                     aria-label="閉じる"
                     autoFocus
-                    onClick={closeTimetableDialogFlow}
+                    onClick={requestDialogCloseAll}
                   >
                     ×
                   </button>
@@ -4988,8 +5533,7 @@ function App() {
                       type="button"
                       onClick={() =>
                         setTimetableLayerDialog({
-                          schoolDate: timetableLayerDialog.schoolDate,
-                          periodNumber: timetableLayerDialog.periodNumber,
+                          ...timetableLayerDialog,
                           requestId: timetableLayerDialog.requestId + 1,
                           state: { status: "loading" },
                         })
@@ -5031,6 +5575,7 @@ function App() {
                         key={layer.targetScopeType}
                       >
                       <LayerRow
+                        targetScopeType={layer.targetScopeType}
                         label={scopeLabel(
                           layer.targetScopeType,
                           targetScopeContext,
@@ -5115,7 +5660,8 @@ function App() {
             </div>
           ) : null}
 
-          {timetableEditorForm && schoolYearRange ? (
+          {timetableEditorForm && schoolYearRange &&
+            dialogRouteExists("timetable-editor") ? (
             <EditorDialogShell
               title="時間割変更"
               titleId="timetable-editor-title"
@@ -5127,6 +5673,10 @@ function App() {
                   timetableEditorForm.replacement.type === "lesson_name" &&
                   !timetableEditorForm.replacement.registeredLessonNameId &&
                   !timetableEditorOptions)
+              }
+              hidden={
+                !topDialogRouteIs("timetable-editor") ||
+                dialogFlowSnapshot.overlay !== null
               }
               onBack={() => requestTimetableEditorClose("back")}
             >
@@ -5446,8 +5996,7 @@ function App() {
                             timetableEditorForm.changeDate,
                             timetableEditorForm.periodNumber,
                           );
-                          setTimetableEditorForm(null);
-                          editorInitialFormsRef.current.timetable = null;
+                          closeTimetableFormAfterDraftSave();
                         }}
                       >
                         下書きを取り消す
@@ -5458,9 +6007,11 @@ function App() {
             </EditorDialogShell>
           ) : null}
 
-          {pendingEditorDismissal ? (
+          {dialogFlowSnapshot.overlay?.kind === "discard-unsaved" ? (
             <DiscardConfirmationDialog
-              onContinue={() => setPendingEditorDismissal(null)}
+              onContinue={() => {
+                applyDialogFlowResult(dialogFlow.cancelOverlay());
+              }}
               onDiscard={discardUnsavedEditorInput}
             />
           ) : null}
@@ -5686,6 +6237,7 @@ function App() {
 }
 
 function LayerRow({
+  targetScopeType,
   label,
   value,
   detail,
@@ -5695,6 +6247,7 @@ function LayerRow({
   onClick,
   menuActions = [],
 }: {
+  targetScopeType?: TargetScopeType;
   label: string;
   value: string;
   detail?: string;
@@ -5725,6 +6278,7 @@ function LayerRow({
   return (
       <div
         className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
+        data-target-scope-type={targetScopeType}
       >
         {onClick ? (
           <button

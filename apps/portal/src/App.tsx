@@ -304,29 +304,10 @@ type PendingDraftCancellationFocus = {
   cancelledIndex: number;
 };
 
-function changeContentDraftOrder(items: readonly ChangeContentItem[]) {
-  const draftIds: string[] = [];
-  for (const item of items) {
-    if (item.kind === "daily-lesson") {
-      draftIds.push(...item.timetableChanges.map((change) => change.sourceId));
-      draftIds.push(
-        ...item.children.flatMap((note) =>
-          note.source === "draft" ? [note.sourceId] : []
-        ),
-      );
-    } else if (item.kind === "task") {
-      if (item.sourceId) draftIds.push(item.sourceId);
-      draftIds.push(
-        ...item.children.flatMap((note) =>
-          note.source === "draft" ? [note.sourceId] : []
-        ),
-      );
-    } else if (item.source === "draft") {
-      draftIds.push(item.sourceId);
-    }
-  }
-  return draftIds;
-}
+type DraftCancellationRowRegistration = {
+  handle: DraftCancellationRowHandle;
+  index: number;
+};
 
 function lessonNameOptionId(prefix: string, index: number) {
   return `${prefix}-${index}`;
@@ -586,7 +567,7 @@ function App() {
   const changeContentReturnRef = useRef(false);
   const changeContentBackRef = useRef<HTMLButtonElement>(null);
   const draftCancellationRowHandlesRef =
-    useRef(new Map<string, DraftCancellationRowHandle>());
+    useRef(new Map<string, DraftCancellationRowRegistration>());
   const pendingDraftCancellationFocusRef =
     useRef<PendingDraftCancellationFocus | null>(null);
   const pendingChangeContentTimetableRef =
@@ -1721,41 +1702,21 @@ function App() {
     );
   }
 
-  const changeContentItems = buildChangeContentList({
-    timetableDrafts: timetableEditor.drafts,
-    taskDrafts: timetableEditor.taskDrafts,
-    noteDrafts: timetableEditor.noteDrafts,
-    activeTasks: dailyPlanClient.getCachedDailyPlans().flatMap(
-      (plan) => plan.tasks,
-    ),
-    activeNotes: dailyPlanClient.getCachedDailyPlans().flatMap((plan) => [
-      ...plan.notes,
-      ...plan.periods.flatMap((period) => period.notes),
-      ...plan.tasks.flatMap((task) => task.notes),
-    ]),
-    dailyLessons: dailyPlanClient.getCachedDailyPlans().flatMap((plan) =>
-      plan.periods.map((period) => ({
-        schoolDate: plan.schoolDate,
-        periodNumber: period.periodNumber,
-        lessonName: period.lessonName,
-      }))),
-  });
-  const draftCancellationOrder = changeContentDraftOrder(changeContentItems);
+  let draftCancellationRenderIndex = 0;
 
   useLayoutEffect(() => {
     const pendingFocus = pendingDraftCancellationFocusRef.current;
     pendingDraftCancellationFocusRef.current = null;
     if (pendingFocus === null) return;
-    const focusDraftId =
-      draftCancellationOrder[pendingFocus.cancelledIndex] ??
-      draftCancellationOrder.at(-1);
-    if (!focusDraftId) {
+    const rows = [...draftCancellationRowHandlesRef.current.values()]
+      .sort((left, right) => left.index - right.index);
+    const focusRow =
+      rows[pendingFocus.cancelledIndex] ?? rows.at(-1);
+    if (!focusRow) {
       changeContentBackRef.current?.focus();
       return;
     }
-    draftCancellationRowHandlesRef.current
-      .get(focusDraftId)
-      ?.focusEditControl();
+    focusRow.handle.focusEditControl();
   });
 
   function cancelChangeContentDraft(
@@ -1765,10 +1726,8 @@ function App() {
       | Extract<ChangeContentNoteItem, { source: "draft" }>,
   ) {
     pendingDraftCancellationFocusRef.current = {
-      cancelledIndex: Math.max(
-        0,
-        draftCancellationOrder.indexOf(item.sourceId!),
-      ),
+      cancelledIndex:
+        draftCancellationRowHandlesRef.current.get(item.sourceId!)?.index ?? 0,
     };
     const result = item.kind === "timetable"
       ? timetableEditorClient.restoreServerState(
@@ -1794,12 +1753,16 @@ function App() {
     onCancel: () => void,
     content: ReactNode,
   ) {
+    const rowIndex = draftCancellationRenderIndex++;
     return (
       <DraftCancellationRow
         key={draftId}
         ref={(handle) => {
           if (handle) {
-            draftCancellationRowHandlesRef.current.set(draftId, handle);
+            draftCancellationRowHandlesRef.current.set(draftId, {
+              handle,
+              index: rowIndex,
+            });
           } else {
             draftCancellationRowHandlesRef.current.delete(draftId);
           }
@@ -3168,6 +3131,25 @@ function App() {
           dailyPlanClient.getCachedDailyPlans().flatMap((plan) => plan.tasks),
         )
       : [];
+    const changeContentItems = buildChangeContentList({
+      timetableDrafts: timetableEditor.drafts,
+      taskDrafts: timetableEditor.taskDrafts,
+      noteDrafts: timetableEditor.noteDrafts,
+      activeTasks: dailyPlanClient.getCachedDailyPlans().flatMap(
+        (plan) => plan.tasks,
+      ),
+      activeNotes: dailyPlanClient.getCachedDailyPlans().flatMap((plan) => [
+        ...plan.notes,
+        ...plan.periods.flatMap((period) => period.notes),
+        ...plan.tasks.flatMap((task) => task.notes),
+      ]),
+      dailyLessons: dailyPlanClient.getCachedDailyPlans().flatMap((plan) =>
+        plan.periods.map((period) => ({
+          schoolDate: plan.schoolDate,
+          periodNumber: period.periodNumber,
+          lessonName: period.lessonName,
+        }))),
+    });
     const changeContentControls = changeContentControlState({
       editing: timetableEditor.editing,
       draftCount: timetableEditor.draftCount,

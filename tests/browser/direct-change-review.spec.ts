@@ -218,9 +218,12 @@ test.describe('authenticated Direct Change review', () => {
     test.skip(testInfo.project.name !== 'webkit-iphone')
     await page.goto('/')
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
-    const title = `review-swipe-${Date.now()}`
+    const timestamp = Date.now()
+    const title = `review-a-swipe-${timestamp}`
+    const otherTitle = `review-z-other-${timestamp}`
     await saveTaskWithNotes(page, title, 0)
-    await page.getByRole('button', { name: '変更を反映（1）' }).click()
+    await saveTaskWithNotes(page, otherTitle, 0)
+    await page.getByRole('button', { name: '変更を反映（2）' }).click()
 
     const review = page.getByRole('dialog', { name: '変更を反映' })
     const row = review.locator('[data-draft-cancellation-id]').filter({
@@ -228,12 +231,27 @@ test.describe('authenticated Direct Change review', () => {
     })
     const cancel = row.getByRole('button', { name: '下書きを取り消す' })
     const edit = row.getByRole('button', { name: new RegExp(title) })
+    const otherRow = review.locator('[data-draft-cancellation-id]').filter({
+      hasText: otherTitle,
+    })
+    const otherCancel = otherRow.getByRole('button', {
+      name: '下書きを取り消す',
+    })
+    const otherEdit = otherRow.getByRole('button', {
+      name: new RegExp(otherTitle),
+    })
 
     await dispatchTouchPointer(row, [
       { x: 220, y: 80 },
       { x: 200, y: 83 },
     ])
     await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
+
+    await edit.tap()
+    const draftEditor = page.getByRole('dialog', { name: 'タスクを追加' })
+    await expect(draftEditor).toBeVisible()
+    await draftEditor.getByRole('button', { name: '戻る' }).click()
+    await expect(review).toBeVisible()
 
     const verticalMovePrevented = await dispatchTouchPointer(row, [
       { x: 220, y: 80 },
@@ -249,6 +267,15 @@ test.describe('authenticated Direct Change review', () => {
     await expect(row).toHaveAttribute('data-cancellation-open', 'true')
     await expect(cancel).toHaveAttribute('aria-label', '下書きを取り消す')
 
+    await otherEdit.tap()
+    await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
+    await expect(page.getByRole('dialog', { name: 'タスクを追加' }))
+      .toHaveCount(0)
+
+    await dispatchTouchPointer(row, [
+      { x: 220, y: 80 },
+      { x: 170, y: 82 },
+    ])
     await edit.tap()
     await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
     await expect(page.getByRole('dialog', { name: 'タスクを追加' }))
@@ -260,6 +287,15 @@ test.describe('authenticated Direct Change review', () => {
     ])
     await cancel.tap()
     await expect(review.getByText(title)).toHaveCount(0)
+    await expect(otherEdit).toBeFocused()
+    await expect(review.getByText('下書き 1件', { exact: true })).toBeVisible()
+
+    await dispatchTouchPointer(otherRow, [
+      { x: 220, y: 80 },
+      { x: 160, y: 81 },
+    ])
+    await otherCancel.tap()
+    await expect(review.getByText(otherTitle)).toHaveCount(0)
     await expect(review.getByText('変更内容はありません。')).toBeVisible()
     await expect(review.getByRole('button', { name: '確定' })).toBeDisabled()
     await expect(review.getByRole('button', { name: '戻る' })).toBeFocused()

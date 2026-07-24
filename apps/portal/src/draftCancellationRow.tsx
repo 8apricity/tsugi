@@ -1,4 +1,6 @@
 import {
+  forwardRef,
+  useImperativeHandle,
   useRef,
   useState,
   type CSSProperties,
@@ -19,25 +21,45 @@ type Gesture = {
   mode: 'pending' | 'horizontal' | 'vertical'
 }
 
-export function DraftCancellationRow({
-  draftId,
-  open,
-  onInteractionStart,
-  onOpenChange,
-  onCancel,
-  children,
-}: {
+export type DraftCancellationRowHandle = {
+  focusEditControl: () => void
+}
+
+type DraftCancellationRowProps = {
   draftId: string
   open: boolean
+  anotherRowOpen: boolean
   onInteractionStart: () => void
   onOpenChange: (open: boolean) => void
   onCancel: () => void
   children: ReactNode
-}) {
+}
+
+export const DraftCancellationRow = forwardRef<
+  DraftCancellationRowHandle,
+  DraftCancellationRowProps
+>(function DraftCancellationRow({
+  draftId,
+  open,
+  anotherRowOpen,
+  onInteractionStart,
+  onOpenChange,
+  onCancel,
+  children,
+}, forwardedRef) {
+  const contentRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
   const offsetRef = useRef(open ? -ACTION_WIDTH_PX : 0)
   const suppressActivationRef = useRef(false)
   const [dragOffset, setDragOffset] = useState<number | null>(null)
+
+  useImperativeHandle(forwardedRef, () => ({
+    focusEditControl() {
+      contentRef.current?.querySelector<HTMLElement>(
+        ':scope > button, [role="button"], button',
+      )?.focus()
+    },
+  }), [])
 
   function releasePointer(event: ReactPointerEvent<HTMLDivElement>) {
     try {
@@ -56,6 +78,9 @@ export function DraftCancellationRow({
     releasePointer(event)
     if (gesture.mode === 'horizontal') {
       suppressActivationRef.current = true
+      globalThis.setTimeout(() => {
+        suppressActivationRef.current = false
+      }, 0)
       onOpenChange(offsetRef.current <= -REVEAL_THRESHOLD_PX)
     }
     setDragOffset(null)
@@ -82,6 +107,7 @@ export function DraftCancellationRow({
         ) {
           return
         }
+        suppressActivationRef.current = anotherRowOpen
         onInteractionStart()
         if (event.pointerType !== 'touch') return
         const startOffset = open ? -ACTION_WIDTH_PX : 0
@@ -161,7 +187,9 @@ export function DraftCancellationRow({
         onOpenChange(false)
       }}
     >
-      <div className="draft-cancellation-content">{children}</div>
+      <div ref={contentRef} className="draft-cancellation-content">
+        {children}
+      </div>
       <button
         className="draft-cancellation-action"
         type="button"
@@ -177,4 +205,4 @@ export function DraftCancellationRow({
       </button>
     </div>
   )
-}
+})

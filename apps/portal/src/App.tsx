@@ -112,7 +112,10 @@ import {
   DraftLogoutConfirmationDialog,
   StaleDirectChangeRefreshAction,
 } from "./directChangeReviewView";
-import { DraftCancellationRow } from "./draftCancellationRow";
+import {
+  DraftCancellationRow,
+  type DraftCancellationRowHandle,
+} from "./draftCancellationRow";
 
 const DATE_PICKER_RADIUS = 180;
 const DATE_SWIPE_THRESHOLD_PX = 48;
@@ -296,6 +299,34 @@ type PendingChangeContentTimetable = Pick<
   ChangeContentTimetableItem,
   "changeDate" | "periodNumber" | "targetScopeType"
 >;
+
+type PendingDraftCancellationFocus = {
+  cancelledIndex: number;
+};
+
+function changeContentDraftOrder(items: readonly ChangeContentItem[]) {
+  const draftIds: string[] = [];
+  for (const item of items) {
+    if (item.kind === "daily-lesson") {
+      draftIds.push(...item.timetableChanges.map((change) => change.sourceId));
+      draftIds.push(
+        ...item.children.flatMap((note) =>
+          note.source === "draft" ? [note.sourceId] : []
+        ),
+      );
+    } else if (item.kind === "task") {
+      if (item.sourceId) draftIds.push(item.sourceId);
+      draftIds.push(
+        ...item.children.flatMap((note) =>
+          note.source === "draft" ? [note.sourceId] : []
+        ),
+      );
+    } else if (item.source === "draft") {
+      draftIds.push(item.sourceId);
+    }
+  }
+  return draftIds;
+}
 
 function lessonNameOptionId(prefix: string, index: number) {
   return `${prefix}-${index}`;
@@ -553,10 +584,11 @@ function App() {
   const [timetableEditorRefreshNeeded, setTimetableEditorRefreshNeeded] =
     useState(false);
   const changeContentReturnRef = useRef(false);
-  const changeContentDialogRef = useRef<HTMLElement>(null);
   const changeContentBackRef = useRef<HTMLButtonElement>(null);
+  const draftCancellationRowHandlesRef =
+    useRef(new Map<string, DraftCancellationRowHandle>());
   const pendingDraftCancellationFocusRef =
-    useRef<string | "back" | null>(null);
+    useRef<PendingDraftCancellationFocus | null>(null);
   const pendingChangeContentTimetableRef =
     useRef<PendingChangeContentTimetable | null>(null);
   const openLayerReplacementRef = useRef<
@@ -1689,52 +1721,42 @@ function App() {
     );
   }
 
-  useLayoutEffect(() => {
-    const focusTarget = pendingDraftCancellationFocusRef.current;
-    pendingDraftCancellationFocusRef.current = null;
-    if (focusTarget === null) return;
-    if (focusTarget === "back") {
-      changeContentBackRef.current?.focus();
-    } else {
-      const row = changeContentDialogRef.current?.querySelector<HTMLElement>(
-        `[data-draft-cancellation-id="${CSS.escape(
-          focusTarget,
-        )}"]`,
-      );
-      row?.querySelector<HTMLElement>(
-        ".draft-cancellation-content > button, " +
-          ".draft-cancellation-content [role='button'], " +
-          ".draft-cancellation-content button",
-      )?.focus();
-    }
-  }, [timetableEditor.draftCount]);
+  const changeContentItems = buildChangeContentList({
+    timetableDrafts: timetableEditor.drafts,
+    taskDrafts: timetableEditor.taskDrafts,
+    noteDrafts: timetableEditor.noteDrafts,
+    activeTasks: dailyPlanClient.getCachedDailyPlans().flatMap(
+      (plan) => plan.tasks,
+    ),
+    activeNotes: dailyPlanClient.getCachedDailyPlans().flatMap((plan) => [
+      ...plan.notes,
+      ...plan.periods.flatMap((period) => period.notes),
+      ...plan.tasks.flatMap((task) => task.notes),
+    ]),
+    dailyLessons: dailyPlanClient.getCachedDailyPlans().flatMap((plan) =>
+      plan.periods.map((period) => ({
+        schoolDate: plan.schoolDate,
+        periodNumber: period.periodNumber,
+        lessonName: period.lessonName,
+      }))),
+  });
+  const draftCancellationOrder = changeContentDraftOrder(changeContentItems);
 
-  function nextDraftCancellationFocus(
-    draftId: string,
-    cancelledDraftIds: ReadonlySet<string>,
-  ) {
-    const rows = Array.from(
-      changeContentDialogRef.current?.querySelectorAll<HTMLElement>(
-        "[data-draft-cancellation-id]",
-      ) ?? [],
-    );
-    const index = rows.findIndex(
-      (row) => row.dataset.draftCancellationId === draftId,
-    );
-    const next = rows.slice(index + 1).find(
-      (row) =>
-        row.dataset.draftCancellationId &&
-        !cancelledDraftIds.has(row.dataset.draftCancellationId),
-    );
-    const previous = rows.slice(0, index).reverse().find(
-      (row) =>
-        row.dataset.draftCancellationId &&
-        !cancelledDraftIds.has(row.dataset.draftCancellationId),
-    );
-    return next?.dataset.draftCancellationId ??
-      previous?.dataset.draftCancellationId ??
-      "back";
-  }
+  useLayoutEffect(() => {
+    const pendingFocus = pendingDraftCancellationFocusRef.current;
+    pendingDraftCancellationFocusRef.current = null;
+    if (pendingFocus === null) return;
+    const focusDraftId =
+      draftCancellationOrder[pendingFocus.cancelledIndex] ??
+      draftCancellationOrder.at(-1);
+    if (!focusDraftId) {
+      changeContentBackRef.current?.focus();
+      return;
+    }
+    draftCancellationRowHandlesRef.current
+      .get(focusDraftId)
+      ?.focusEditControl();
+  });
 
   function cancelChangeContentDraft(
     item:
@@ -1742,19 +1764,12 @@ function App() {
       | ChangeContentTaskItem
       | Extract<ChangeContentNoteItem, { source: "draft" }>,
   ) {
-    const cancelledDraftIds = new Set([item.sourceId!]);
-    if (item.kind === "task" && item.draft?.changeKind === "add") {
-      for (const child of item.children) {
-        if (child.source === "draft") {
-          cancelledDraftIds.add(child.sourceId);
-        }
-      }
-    }
-    const focusTarget = nextDraftCancellationFocus(
-      item.sourceId!,
-      cancelledDraftIds,
-    );
-    pendingDraftCancellationFocusRef.current = focusTarget;
+    pendingDraftCancellationFocusRef.current = {
+      cancelledIndex: Math.max(
+        0,
+        draftCancellationOrder.indexOf(item.sourceId!),
+      ),
+    };
     const result = item.kind === "timetable"
       ? timetableEditorClient.restoreServerState(
           item.targetScopeType,
@@ -1782,8 +1797,19 @@ function App() {
     return (
       <DraftCancellationRow
         key={draftId}
+        ref={(handle) => {
+          if (handle) {
+            draftCancellationRowHandlesRef.current.set(draftId, handle);
+          } else {
+            draftCancellationRowHandlesRef.current.delete(draftId);
+          }
+        }}
         draftId={draftId}
         open={revealedDraftCancellationId === draftId}
+        anotherRowOpen={
+          revealedDraftCancellationId !== null &&
+          revealedDraftCancellationId !== draftId
+        }
         onInteractionStart={() => {
           setRevealedDraftCancellationId((current) =>
             current === draftId ? current : null
@@ -3142,25 +3168,6 @@ function App() {
           dailyPlanClient.getCachedDailyPlans().flatMap((plan) => plan.tasks),
         )
       : [];
-    const changeContentItems = buildChangeContentList({
-      timetableDrafts: timetableEditor.drafts,
-      taskDrafts: timetableEditor.taskDrafts,
-      noteDrafts: timetableEditor.noteDrafts,
-      activeTasks: dailyPlanClient.getCachedDailyPlans().flatMap(
-        (plan) => plan.tasks,
-      ),
-      activeNotes: dailyPlanClient.getCachedDailyPlans().flatMap((plan) => [
-        ...plan.notes,
-        ...plan.periods.flatMap((period) => period.notes),
-        ...plan.tasks.flatMap((task) => task.notes),
-      ]),
-      dailyLessons: dailyPlanClient.getCachedDailyPlans().flatMap((plan) =>
-        plan.periods.map((period) => ({
-          schoolDate: plan.schoolDate,
-          periodNumber: period.periodNumber,
-          lessonName: period.lessonName,
-        }))),
-    });
     const changeContentControls = changeContentControlState({
       editing: timetableEditor.editing,
       draftCount: timetableEditor.draftCount,
@@ -4069,7 +4076,6 @@ function App() {
           {changeContentOpen && changeContentControls.reviewVisible ? (
             <div className="editor-dialog-backdrop" role="presentation">
               <section
-                ref={changeContentDialogRef}
                 className="timetable-editor-dialog change-content-dialog"
                 role="dialog"
                 aria-modal="true"

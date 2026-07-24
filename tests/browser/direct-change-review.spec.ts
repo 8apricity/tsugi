@@ -402,34 +402,15 @@ async function dispatchTouchPointer(
   locator: ReturnType<Page['locator']>,
   points: Array<{ x: number; y: number }>,
 ) {
-  return locator.evaluate((element, touchPoints) => {
-    const pointerId = 67
-    const dispatch = (
-      type: 'pointerdown' | 'pointermove' | 'pointerup',
-      point: { x: number; y: number },
-    ) => {
-      const PointerEventConstructor =
-        element.ownerDocument.defaultView!.PointerEvent
-      const event = new PointerEventConstructor(type, {
-        bubbles: true,
-        cancelable: true,
-        pointerId,
-        pointerType: 'touch',
-        clientX: point.x,
-        clientY: point.y,
-        isPrimary: true,
-      })
-      element.dispatchEvent(event)
-      return event.defaultPrevented
-    }
-    dispatch('pointerdown', touchPoints[0])
-    let movePrevented = false
-    for (const point of touchPoints.slice(1)) {
-      movePrevented = dispatch('pointermove', point) || movePrevented
-    }
-    dispatch('pointerup', touchPoints.at(-1)!)
-    return movePrevented
-  }, points)
+  await dispatchTouchPointerEvent(locator, 'pointerdown', points[0])
+  let movePrevented = false
+  for (const point of points.slice(1)) {
+    movePrevented =
+      await dispatchTouchPointerEvent(locator, 'pointermove', point) ||
+      movePrevented
+  }
+  await dispatchTouchPointerEvent(locator, 'pointerup', points.at(-1)!)
+  return movePrevented
 }
 
 async function dispatchTouchPointerEvent(

@@ -1165,7 +1165,7 @@ body.page-scroll-locked {
 
 .draft-cancellation-open > .draft-cancellation-action,
 .draft-cancellation-action:focus-visible {
-  width: 72px;
+  width: var(--draft-cancellation-action-max-width);
   opacity: 1;
   pointer-events: auto;
 }
@@ -1180,7 +1180,7 @@ body.page-scroll-locked {
 @media (hover: hover) and (pointer: fine) {
   .draft-cancellation-row:hover > .draft-cancellation-action,
   .draft-cancellation-row:focus-within > .draft-cancellation-action {
-    width: 72px;
+    width: var(--draft-cancellation-action-max-width);
     opacity: 1;
     pointer-events: auto;
   }

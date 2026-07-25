@@ -7,6 +7,7 @@ import {
   type LifecycleKind,
   type NotePlacementKind,
 } from './editorLifecycle'
+import { ConfirmationDialog } from './dialogFoundation'
 
 function LifecycleGlyph({
   kind,
@@ -76,101 +77,16 @@ export function DiscardConfirmationDialog({
   onDiscard(): void
 }) {
   return (
-    <div className="editor-discard-backdrop" role="presentation">
-      <section
-        className="editor-discard-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="editor-discard-title"
-        aria-describedby="editor-discard-description"
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape' || event.defaultPrevented) return
-          event.preventDefault()
-          onContinue()
-        }}
-      >
-        <h2 id="editor-discard-title">入力内容を破棄しますか？</h2>
-        <p id="editor-discard-description">
-          まだ保存していない入力内容は失われます。保存済みの下書きは変更されません。
-        </p>
-        <div className="editor-dialog-actions">
-          <button
-            className="button-secondary"
-            type="button"
-            autoFocus
-            onClick={onContinue}
-          >
-            編集を続ける
-          </button>
-          <button
-            className="button-danger"
-            type="button"
-            onClick={onDiscard}
-          >
-            入力内容を破棄
-          </button>
-        </div>
-      </section>
-    </div>
-  )
-}
-
-export function DestructiveConfirmationDialog({
-  title,
-  titleId,
-  descriptionId,
-  role = 'dialog',
-  className = '',
-  cancelLabel,
-  confirmLabel,
-  onCancel,
-  onConfirm,
-  children,
-}: {
-  title: string
-  titleId: string
-  descriptionId?: string
-  role?: 'dialog' | 'alertdialog'
-  className?: string
-  cancelLabel: string
-  confirmLabel: string
-  onCancel(): void
-  onConfirm(): void
-  children: ReactNode
-}) {
-  return (
-    <div className="editor-dialog-backdrop" role="presentation">
-      <section
-        className={`timetable-editor-dialog destructive-confirmation-dialog${className ? ` ${className}` : ''}`}
-        role={role}
-        aria-modal="true"
-        aria-labelledby={titleId}
-        {...(descriptionId ? { 'aria-describedby': descriptionId } : {})}
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape' || event.defaultPrevented) return
-          event.preventDefault()
-          onCancel()
-        }}
-      >
-        <header className="editor-dialog-header">
-          <h2 id={titleId}>{title}</h2>
-        </header>
-        <div className="destructive-confirmation-content">{children}</div>
-        <div className="editor-dialog-actions destructive-confirmation-actions">
-          <button
-            autoFocus
-            className="button-secondary"
-            type="button"
-            onClick={onCancel}
-          >
-            {cancelLabel}
-          </button>
-          <button className="button-danger" type="button" onClick={onConfirm}>
-            {confirmLabel}
-          </button>
-        </div>
-      </section>
-    </div>
+    <ConfirmationDialog
+      active
+      title="入力内容を破棄しますか？"
+      description="まだ保存していない入力内容は失われます。保存済みの下書きは変更されません。"
+      tone="danger"
+      cancelLabel="編集を続ける"
+      confirmLabel="入力内容を破棄"
+      onCancel={onContinue}
+      onConfirm={onDiscard}
+    />
   )
 }
 

@@ -90,7 +90,7 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   ).toBeLessThanOrEqual(23)
 
   await page.addStyleTag({
-    content: '.task-detail-dialog > .editor-dialog-body { max-height: 120px; }',
+    content: '.dialog-foundation[open] > .editor-dialog-body { max-height: 120px; }',
   })
   const detailScrollTop = await detail.locator('.editor-dialog-body')
     .evaluate((element) => {
@@ -175,7 +175,7 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
     .getByRole('checkbox', { name: '削除予定にする' })
     .check()
   await zeroRemovalEditor.getByRole('button', { name: '下書きを保存' }).click()
-  await expect(page.getByRole('dialog', {
+  await expect(page.getByRole('alertdialog', {
     name: 'タスクを削除予定にしますか？',
   })).toHaveCount(0)
   const zeroRemovalDraft = page.getByRole('article', {
@@ -220,7 +220,7 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
     .toBeDisabled()
   await removalEditor.getByRole('button', { name: '下書きを保存' }).click()
 
-  const removalConfirmation = page.getByRole('dialog', {
+  const removalConfirmation = page.getByRole('alertdialog', {
     name: 'タスクを削除予定にしますか？',
   })
   await expect(removalConfirmation).toContainText(updatedTitle)
@@ -337,7 +337,7 @@ test('Task add/edit saves zero, one, and multiple related Notes from Task detail
   await changeContentTaskEditor
     .getByRole('button', { name: '下書きを保存' })
     .click()
-  const changeContentRemovalConfirmation = page.getByRole('dialog', {
+  const changeContentRemovalConfirmation = page.getByRole('alertdialog', {
     name: 'タスクを削除予定にしますか？',
   })
   await expect(changeContentRemovalConfirmation).toContainText(updatedTitle)

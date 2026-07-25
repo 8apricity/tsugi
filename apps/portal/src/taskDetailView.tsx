@@ -3,7 +3,7 @@ import type { VisibleTask } from './taskListView'
 import { formatDueDate } from './uiCopy'
 import { lifecycleLabel, type LifecycleKind } from './editorLifecycle'
 import { LifecycleIcon } from './editorLifecycleView'
-import { EditorDialogShell, ReadOnlyDialogShell } from './dialogFoundation'
+import { EditorDialog, ReadOnlyDialog } from './dialogFoundation'
 
 export function TaskDetailDialog({
   task,
@@ -16,7 +16,7 @@ export function TaskDetailDialog({
   notes,
   addNoteDisabled = false,
   removalCheckboxAutoFocus = false,
-  hidden = false,
+  active,
   onClose,
   onSave,
   onNoteBodyChange,
@@ -41,7 +41,7 @@ export function TaskDetailDialog({
   notes: ReactNode
   addNoteDisabled?: boolean
   removalCheckboxAutoFocus?: boolean
-  hidden?: boolean
+  active: boolean
   onClose: () => void
   onSave?: (event: FormEvent<HTMLFormElement>) => void
   onNoteBodyChange?: (index: number, body: string) => void
@@ -62,12 +62,11 @@ export function TaskDetailDialog({
 
   if (mode === 'edit' && editForm && onSave) {
     return (
-      <EditorDialogShell
+      <EditorDialog
+        active={active}
         title="タスクを編集"
-        titleId="task-detail-title"
+        size="compact"
         formId="task-detail-form"
-        className="task-editor-dialog task-detail-dialog"
-        hidden={hidden}
         onBack={onClose}
       >
         <form id="task-detail-form" onSubmit={onSave}>
@@ -104,16 +103,15 @@ export function TaskDetailDialog({
             <span>削除予定にする</span>
           </label>
         </form>
-      </EditorDialogShell>
+      </EditorDialog>
     )
   }
 
   return (
-    <ReadOnlyDialogShell
+    <ReadOnlyDialog
+      active={active}
       title="タスクの詳細"
-      titleId="task-detail-title"
-      className="task-detail-dialog"
-      hidden={hidden}
+      size="compact"
       onClose={onClose}
     >
       <dl className="detail-list">
@@ -172,7 +170,7 @@ export function TaskDetailDialog({
           </button>
         ) : null}
       </div>
-    </ReadOnlyDialogShell>
+    </ReadOnlyDialog>
   )
 }
 

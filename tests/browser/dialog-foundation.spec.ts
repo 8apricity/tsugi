@@ -16,6 +16,51 @@ function readPageScrollY(page: Page) {
 }
 
 test.describe('authenticated Daily Plan dialog foundation', () => {
+  test('uses native modal focus containment without exposing the Daily Plan', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    const menu = page.getByRole('button', { name: 'メニュー' })
+    await menu.click()
+    const trigger = page.getByRole('button', { name: 'ほかの範囲を参照' })
+    await trigger.click()
+
+    const dialog = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
+    await expect(dialog).toHaveJSProperty('open', true)
+    await expect(dialog.getByRole('button', { name: '閉じる' })).toBeFocused()
+
+    const submit = dialog.getByRole('button', { name: '参照する' })
+    await submit.focus()
+    await page.keyboard.press('Tab')
+    await expect.poll(() =>
+      dialog.evaluate((element) => {
+        const browser = globalThis as unknown as {
+          document: {
+            activeElement: Parameters<typeof element.contains>[0]
+          }
+        }
+        return element.contains(browser.document.activeElement)
+      })
+    ).toBe(true)
+
+    await menu.evaluate((element) => element.focus())
+    await expect(menu).not.toBeFocused()
+    await expect.poll(() =>
+      dialog.evaluate((element) => {
+        const browser = globalThis as unknown as {
+          document: {
+            activeElement: Parameters<typeof element.contains>[0]
+          }
+        }
+        return element.contains(browser.document.activeElement)
+      })
+    ).toBe(true)
+
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(menu).toBeFocused()
+  })
+
   test('guards Task editor exits and restores Daily Plan scroll', async ({
     page,
     isMobile,

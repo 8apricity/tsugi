@@ -4,6 +4,7 @@ import type {
   NoteHistorySnapshot,
 } from '../shared/noteEditHistory'
 import { targetScopeLabel, type TargetScopeDisplayContext } from './uiCopy'
+import { ReadOnlyDialog } from './dialogFoundation'
 
 export type NoteEditHistoryState =
   | { status: 'loading' }
@@ -13,55 +14,28 @@ export type NoteEditHistoryState =
 export function NoteEditHistoryDialog({
   state,
   targetScopeContext,
-  hidden = false,
+  active,
   onBack,
   onClose,
   onRetry,
 }: {
   state: NoteEditHistoryState
   targetScopeContext?: TargetScopeDisplayContext
-  hidden?: boolean
+  active: boolean
   onBack: () => void
   onClose: () => void
   onRetry: () => void
 }) {
   return (
-    <div
-      className="editor-dialog-backdrop"
-      role="presentation"
-      aria-hidden={hidden || undefined}
-      inert={hidden || undefined}
+    <ReadOnlyDialog
+      active={active}
+      title="ノートの編集履歴"
+      size="standard"
+      backLabel="ノートの詳細に戻る"
+      onBack={onBack}
+      onClose={onClose}
     >
-      <section
-        className="timetable-editor-dialog task-history-dialog note-history-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="note-history-title"
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') onBack()
-        }}
-      >
-        <header className="editor-dialog-header">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="ノートの詳細に戻る"
-            onClick={onBack}
-          >
-            ‹
-          </button>
-          <h2 id="note-history-title">ノートの編集履歴</h2>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="閉じる"
-            autoFocus
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </header>
-        {state.status === 'loading' ? (
+      {state.status === 'loading' ? (
           <p className="layer-dialog-status" aria-live="polite">
             編集履歴を読み込んでいます…
           </p>
@@ -119,9 +93,8 @@ export function NoteEditHistoryDialog({
               ))}
             </ol>
           </>
-        )}
-      </section>
-    </div>
+      )}
+    </ReadOnlyDialog>
   )
 }
 

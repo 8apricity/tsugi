@@ -209,7 +209,7 @@ test.describe('authenticated Daily Plan Note detail', () => {
       noteDetail.getByRole('button', { name: 'タスクの詳細に戻る' }),
     ).toBeVisible()
     await expect(
-      noteDetail.getByRole('button', { name: '閉じる' }),
+      noteDetail.getByRole('button', { name: 'タスクの詳細に戻る' }),
     ).toBeFocused()
     await noteDetail
       .getByRole('button', { name: 'タスクの詳細に戻る' })
@@ -240,7 +240,7 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await expect(nestedHistory).toBeVisible()
     await expect(page.getByRole('dialog')).toHaveCount(1)
     await expect(
-      nestedHistory.getByRole('button', { name: '閉じる' }),
+      nestedHistory.getByRole('button', { name: 'ノートの詳細に戻る' }),
     ).toBeFocused()
     await nestedHistory.getByRole('button', { name: '閉じる' }).click()
     await expect(nestedHistory).toHaveCount(0)

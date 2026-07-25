@@ -12,6 +12,7 @@ describe('Note detail view', () => {
   it('shows the title at the left and close button at the right when read-only', () => {
     const markup = renderToStaticMarkup(
       <NoteDetailDialog
+        active
         body={'連絡事項\n全文'}
         details={details}
         editing={false}
@@ -31,7 +32,7 @@ describe('Note detail view', () => {
     expect(markup).toContain('関連先')
     expect(markup).toContain('2026年7月10日')
     const header = dialogHeader(markup)
-    expect(header).toContain('<h2 id="note-detail-title">ノートの詳細</h2>')
+    expect(header).toContain('>ノートの詳細</h2>')
     expect(header).toContain('aria-label="閉じる"')
     expect(header).not.toContain('aria-label="戻る"')
     expect(header.indexOf('<h2')).toBeLessThan(
@@ -46,6 +47,7 @@ describe('Note detail view', () => {
   it('separates returning to a parent detail from closing the dialog stack', () => {
     const markup = renderToStaticMarkup(
       <NoteDetailDialog
+        active
         body="親から開いたノート"
         details={details}
         editing={false}
@@ -61,9 +63,8 @@ describe('Note detail view', () => {
 
     const header = dialogHeader(markup)
     expect(header).toContain('aria-label="タスクの詳細に戻る"')
-    expect(header).toContain('<h2 id="note-detail-title">ノートの詳細</h2>')
+    expect(header).toContain('>ノートの詳細</h2>')
     expect(header).toContain('aria-label="閉じる"')
-    expect(header).toContain('autofocus')
     expect(header.indexOf('aria-label="タスクの詳細に戻る"')).toBeLessThan(
       header.indexOf('<h2'),
     )
@@ -75,6 +76,7 @@ describe('Note detail view', () => {
   it('directly edits Body and disables only Body while removal is checked', () => {
     const markup = renderToStaticMarkup(
       <NoteDetailDialog
+        active
         body="削除前の本文"
         details={details}
         editing
@@ -90,7 +92,7 @@ describe('Note detail view', () => {
 
     const header = dialogHeader(markup)
     expect(header).toContain('aria-label="戻る"')
-    expect(header).toContain('<h2 id="note-detail-title">ノートの詳細</h2>')
+    expect(header).toContain('>ノートの詳細</h2>')
     expect(header).toContain('aria-label="下書きを保存"')
     expect(header).not.toContain('aria-label="閉じる"')
     expect(header.indexOf('aria-label="戻る"')).toBeLessThan(

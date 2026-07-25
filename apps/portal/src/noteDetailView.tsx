@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { EditorDialogShell, ReadOnlyDialogShell } from './dialogFoundation'
+import { EditorDialog, ReadOnlyDialog } from './dialogFoundation'
 
 export type NoteDetailValue = {
   label: string
@@ -15,7 +15,7 @@ type NoteDetailDialogProps = {
   onRemovalPlannedChange(removalPlanned: boolean): void
   onBack?: () => void
   backLabel?: string
-  hidden?: boolean
+  active: boolean
   onClose(): void
   onSave(): void
   onOpenHistory?: () => void
@@ -24,12 +24,11 @@ type NoteDetailDialogProps = {
 export function NoteDetailDialog(props: NoteDetailDialogProps) {
   if (props.editing) {
     return (
-      <EditorDialogShell
+      <EditorDialog
+        active={props.active}
         title="ノートの詳細"
-        titleId="note-detail-title"
+        size="compact"
         formId="note-detail-form"
-        className="note-editor-dialog note-detail-dialog"
-        hidden={props.hidden}
         onBack={props.onBack ?? props.onClose}
       >
         <form
@@ -42,7 +41,6 @@ export function NoteDetailDialog(props: NoteDetailDialogProps) {
           <label>
             <span>本文</span>
             <textarea
-              autoFocus
               required
               maxLength={1000}
               rows={8}
@@ -68,17 +66,16 @@ export function NoteDetailDialog(props: NoteDetailDialogProps) {
             <span>削除予定にする</span>
           </label>
         </form>
-      </EditorDialogShell>
+      </EditorDialog>
     )
   }
 
   return (
-    <ReadOnlyDialogShell
+    <ReadOnlyDialog
+      active={props.active}
       title="ノートの詳細"
-      titleId="note-detail-title"
-      className="note-detail-dialog"
+      size="compact"
       backLabel={props.backLabel}
-      hidden={props.hidden}
       onBack={props.onBack}
       onClose={props.onClose}
     >
@@ -90,7 +87,7 @@ export function NoteDetailDialog(props: NoteDetailDialogProps) {
         details={props.details}
         onOpenHistory={props.onOpenHistory}
       />
-    </ReadOnlyDialogShell>
+    </ReadOnlyDialog>
   )
 }
 

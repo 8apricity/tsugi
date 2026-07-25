@@ -7,6 +7,7 @@ describe('Task detail dialog', () => {
   it('renders projected update values, attached Notes, and a re-edit action', () => {
     const markup = renderToStaticMarkup(
       <TaskDetailDialog
+        active
         task={{
           taskId: 'task-1',
           title: '変更後のタスク',
@@ -26,7 +27,6 @@ describe('Task detail dialog', () => {
     )
 
     expect(markup).toContain('role="dialog"')
-    expect(markup).toContain('autofocus')
     expect(markup).toContain('変更後のタスク')
     expect(markup).toContain('7月11日まで')
     expect(markup).toContain('地理')
@@ -40,6 +40,7 @@ describe('Task detail dialog', () => {
   it('uses the Task detail surface for direct editing and repeatable new Notes', () => {
     const markup = renderToStaticMarkup(
       <TaskDetailDialog
+        active
         task={{
           taskId: 'task-2',
           title: '編集するタスク',

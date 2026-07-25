@@ -197,18 +197,18 @@ test.describe('authenticated Direct Change review', () => {
     await layer.getByRole('button', { name: '3組のメニュー' }).click()
     await layer.getByRole('menuitem', { name: '編集履歴' }).click()
 
-    const history = page.getByRole('dialog', { name: '編集履歴' })
-    const historyBackdrop = page
-      .locator('[aria-labelledby="timetable-history-title"]')
-      .locator('..')
+    const history = page.getByRole('dialog', {
+      name: '編集履歴',
+      includeHidden: true,
+    })
     const entry = history.locator('.history-row').first()
     await expect(entry).toBeVisible()
     await entry.click()
 
     const detail = page.getByRole('dialog', { name: '変更の詳細' })
     await expect(detail).toBeVisible()
-    await expect(historyBackdrop).toHaveAttribute('aria-hidden', 'true')
-    await expect(historyBackdrop).toHaveAttribute('inert', '')
+    await expect(history).toHaveAttribute('aria-hidden', 'true')
+    await expect(history).toHaveAttribute('inert', '')
 
     await detail.getByRole('button', { name: '編集履歴に戻る' }).click()
     await expect(history).toBeVisible()
@@ -413,7 +413,7 @@ test.describe('authenticated Direct Change review', () => {
 
     await page.goto('/')
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
-    await saveTimetableChange(page)
+    await saveTimetableChange(page, '月4')
     await saveTaskWithNotes(page, `review-mixed-${Date.now()}`, 1)
 
     await page.getByRole('button', { name: '変更を反映（3）' }).click()
@@ -453,7 +453,7 @@ async function saveTaskWithNotes(
   await editor.getByRole('button', { name: '下書きを保存' }).click()
 }
 
-async function saveTimetableChange(page: Page) {
+async function saveTimetableChange(page: Page, subject = '月3') {
   await page.getByRole('button', { name: /^1限/ }).click()
   const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
   await layerDialog.getByRole('button', {
@@ -464,7 +464,7 @@ async function saveTimetableChange(page: Page) {
     name: '時間割も変更する',
   })
   if (!(await includeChange.isChecked())) await includeChange.check()
-  await editor.getByRole('button', { name: '月3', exact: true }).click()
+  await editor.getByRole('button', { name: subject, exact: true }).click()
   await editor.getByRole('button', { name: '下書きを保存' }).click()
   await layerDialog.getByRole('button', { name: '閉じる' }).click()
 }

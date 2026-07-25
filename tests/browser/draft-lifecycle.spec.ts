@@ -104,6 +104,16 @@ test.describe('draft lifecycle', () => {
 
     await page.getByRole('button', { name: 'メニュー' }).click()
     await page.getByRole('button', { name: 'ログアウト' }).click()
+    const logoutDialog = page.getByRole('alertdialog', {
+      name: '下書きを削除してログアウトしますか？',
+    })
+    await expect(logoutDialog.getByRole('button', { name: '戻る' }))
+      .toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(logoutDialog).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'メニュー' }).click()
+    await page.getByRole('button', { name: 'ログアウト' }).click()
     await page
       .getByRole('alertdialog', {
         name: '下書きを削除してログアウトしますか？',
@@ -146,7 +156,7 @@ test.describe('draft lifecycle', () => {
     picker = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
     await picker.getByRole('button', { name: '参照する' }).click()
 
-    await expect(page.getByRole('status').filter({ hasText: '参照中' }))
+    await expect(page.getByText('参照中', { exact: true }))
       .toBeVisible()
     await expect(page.getByRole('button', { name: '編集を終了' })).toHaveCount(0)
     await expect(

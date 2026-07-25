@@ -641,7 +641,7 @@ button.period-inspect-button:active {
   margin-left: 0;
 }
 
-.task-detail-dialog > .editor-dialog-body > .task-note-detail-list {
+.editor-dialog-body > .task-note-detail-list {
   margin-right: 22px;
   margin-left: 22px;
 }
@@ -936,23 +936,6 @@ button.period-inspect-button:active {
   color: var(--color-accent);
 }
 
-.editor-dialog-backdrop {
-  position: fixed;
-  z-index: 30;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(31, 41, 51, 0.42);
-  /* Keep dialog scrolling available while blocking pinch zoom in the dialog. */
-  touch-action: pan-y;
-}
-
-.editor-dialog-backdrop[aria-hidden="true"] {
-  visibility: hidden;
-  pointer-events: none;
-}
-
 html.page-scroll-locked,
 body.page-scroll-locked {
   overflow: hidden;
@@ -960,32 +943,86 @@ body.page-scroll-locked {
 }
 
 .timetable-editor-dialog {
-  width: min(920px, 100%);
+  box-sizing: border-box;
+  margin: auto;
+  padding: 0;
+  max-width: none;
   max-height: calc(100dvh - 48px);
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-panel);
+  color: var(--color-text);
   box-shadow: 0 12px 36px rgba(31, 41, 51, 0.18);
 }
 
-.editor-dialog-shell {
+.dialog-foundation[open] {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+}
+
+.dialog-foundation::backdrop {
+  background: rgba(31, 41, 51, 0.42);
+}
+
+.dialog-foundation[aria-hidden="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.dialog-foundation[aria-hidden="true"]::backdrop {
+  background: transparent;
+}
+
+.dialog-size-compact {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.dialog-size-standard {
+  width: min(760px, calc(100vw - 48px));
+}
+
+.dialog-size-wide {
+  width: min(920px, calc(100vw - 48px));
 }
 
 .editor-dialog-shell-header {
   flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(44px, 1fr) minmax(0, 5fr) minmax(44px, 1fr);
+  align-items: center;
   min-height: 64px;
   padding: 10px 18px;
   border-bottom: 1px solid var(--color-border);
   box-sizing: border-box;
 }
 
-.editor-dialog-shell-header h2 {
-  flex: 1;
+.editor-dialog-shell-header > [data-dialog-back] {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.editor-dialog-shell-header > .dialog-heading {
+  grid-column: 2;
+  min-width: 0;
   text-align: center;
+}
+
+.editor-dialog-shell-header > [data-dialog-close],
+.editor-dialog-shell-header > .editor-dialog-save {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.dialog-heading h2 {
+  margin: 0;
+}
+
+.dialog-subtitle {
+  margin-top: 4px;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .editor-dialog-save {
@@ -995,9 +1032,20 @@ body.page-scroll-locked {
 }
 
 .editor-dialog-body {
+  flex: 1 1 auto;
   min-height: 0;
+  max-height: calc(100dvh - 112px);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.dialog-size-standard > .editor-dialog-body {
+  padding: 22px;
+}
+
+.dialog-foundation:has(.change-content-form) > .editor-dialog-body {
+  padding: 0;
+  overflow: hidden;
 }
 
 .timetable-editor-dialog form {
@@ -1026,69 +1074,23 @@ body.page-scroll-locked {
   gap: 12px;
 }
 
-.task-editor-dialog,
-.note-editor-dialog,
-.note-detail-dialog,
-.task-detail-dialog,
-.change-content-dialog {
-  width: min(560px, 100%);
-}
-
-.change-content-dialog {
-  width: min(720px, 100%);
+.change-content-form {
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 0 !important;
   overflow: hidden;
 }
 
-.change-content-dialog .editor-dialog-header {
-  display: grid;
-  flex: 0 0 auto;
-  grid-template-columns: 72px minmax(0, 1fr) 72px;
-  min-height: 64px;
-  padding: 10px 18px;
-  border-bottom: 1px solid var(--color-border);
-  box-sizing: border-box;
-}
-
-.change-content-dialog .editor-dialog-header > :first-child {
-  justify-self: start;
-}
-
-.change-content-dialog .editor-dialog-header > :last-child {
-  justify-self: end;
-}
-
-.change-content-heading {
-  min-width: 0;
-  text-align: center;
-}
-
-.change-content-confirm {
-  min-height: 40px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-accent);
-  white-space: nowrap;
-}
-
-.change-content-confirm:focus-visible,
-.change-content-confirm:active:not(:disabled) {
-  background: var(--color-accent-soft);
-}
-
 .change-content-body {
+  flex: 1 1 auto;
   min-height: 0;
+  max-height: calc(100dvh - 112px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
-.change-content-subtitle {
-  margin: 4px 0 0;
-  color: var(--color-muted);
-  font-size: 12px;
-}
 
 .change-content-list {
   display: grid;
@@ -1264,32 +1266,10 @@ body.page-scroll-locked {
   line-height: 1.5;
 }
 
-.draft-logout-dialog {
-  width: min(480px, 100%);
-  padding: 22px;
-  box-sizing: border-box;
-}
-
-.draft-logout-dialog .editor-dialog-header {
-  align-items: start;
-}
-
-.draft-logout-dialog > p {
-  margin: 0 0 22px;
-  color: var(--color-muted);
-  line-height: 1.6;
-}
-
-.task-editor-dialog .editor-dialog-header,
-.note-editor-dialog .editor-dialog-header,
-.note-detail-dialog .editor-dialog-header,
-.task-detail-dialog .editor-dialog-header {
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.task-editor-dialog form label,
-.note-editor-dialog form label {
+#task-editor-form label,
+#task-detail-form label,
+#note-editor-form label,
+#note-detail-form label {
   display: grid;
   gap: 7px;
   color: var(--color-primary);
@@ -1308,46 +1288,51 @@ body.page-scroll-locked {
   font-weight: 700;
 }
 
-.task-editor-dialog form input,
-.task-editor-dialog form select,
-.note-editor-dialog form input,
-.note-editor-dialog form select,
-.note-editor-dialog form textarea {
+#task-editor-form input,
+#task-editor-form select,
+#task-detail-form input,
+#task-detail-form select,
+#note-editor-form input,
+#note-editor-form select,
+#note-editor-form textarea,
+#note-detail-form input,
+#note-detail-form select,
+#note-detail-form textarea {
   width: 100%;
 }
 
-.note-detail-dialog .note-detail-body {
+.note-detail-body {
   display: grid;
   gap: 8px;
   padding: 22px 22px 0;
 }
 
-.note-detail-dialog .note-detail-body h3 {
+.note-detail-body h3 {
   margin: 0;
   color: var(--color-muted);
   font-size: 13px;
 }
 
-.note-detail-dialog .note-detail-body p {
+.note-detail-body p {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.note-detail-dialog form .note-detail-values {
+#note-detail-form .note-detail-values {
   padding: 0;
 }
 
-.note-detail-dialog form .note-removal-checkbox,
-.task-detail-dialog form .task-removal-checkbox {
+#note-detail-form .note-removal-checkbox,
+#task-detail-form .task-removal-checkbox {
   display: flex;
   align-items: center;
   gap: 9px;
   min-height: 42px;
 }
 
-.note-detail-dialog form .note-removal-checkbox input,
-.task-detail-dialog form .task-removal-checkbox input {
+#note-detail-form .note-removal-checkbox input,
+#task-detail-form .task-removal-checkbox input {
   width: 18px;
   height: 18px;
   margin: 0;
@@ -1357,7 +1342,7 @@ body.page-scroll-locked {
   justify-content: flex-start;
 }
 
-.note-detail-dialog > .editor-dialog-body > .note-detail-actions {
+.editor-dialog-body > .note-detail-actions {
   padding: 0 22px 22px;
 }
 
@@ -1386,13 +1371,15 @@ body.page-scroll-locked {
   font-size: 0.875rem;
 }
 
-.note-editor-dialog form textarea {
+#note-editor-form textarea,
+#note-detail-form textarea {
   min-height: 150px;
   resize: vertical;
   white-space: pre-wrap;
 }
 
-.note-editor-dialog:not(.task-note-editor-dialog) form textarea {
+#note-editor-form textarea,
+#note-detail-form textarea {
   padding: 10px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -1455,30 +1442,17 @@ body.page-scroll-locked {
   cursor: not-allowed;
 }
 
-.task-detail-dialog > .editor-dialog-actions {
-  padding: 0 22px 22px;
-}
-
-.destructive-confirmation-dialog {
-  width: min(520px, 100%);
-}
-
-.destructive-confirmation-dialog .editor-dialog-header,
-.destructive-confirmation-content,
-.destructive-confirmation-actions {
+.dialog-confirmation-description,
+.dialog-confirmation-actions {
   padding: 18px 22px;
 }
 
-.destructive-confirmation-dialog .editor-dialog-header {
-  border-bottom: 1px solid var(--color-border);
-}
-
-.destructive-confirmation-content {
+.dialog-confirmation-description {
   display: grid;
   gap: 10px;
 }
 
-.destructive-confirmation-content p {
+.dialog-confirmation-description p {
   margin: 0;
 }
 
@@ -1495,7 +1469,7 @@ body.page-scroll-locked {
   color: var(--color-muted);
 }
 
-.destructive-confirmation-actions {
+.dialog-confirmation-actions {
   justify-content: flex-end;
   border-top: 1px solid var(--color-border);
 }
@@ -1547,22 +1521,6 @@ body.page-scroll-locked {
 
 .detail-list dd {
   margin: 0;
-}
-
-.timetable-layer-dialog {
-  width: min(680px, 100%);
-  padding: 22px;
-}
-
-.layer-dialog-heading {
-  margin-left: 6px;
-}
-
-.layer-dialog-selection {
-  margin: 4px 0 0;
-  color: var(--color-muted);
-  font-size: 13px;
-  font-weight: 700;
 }
 
 .layer-dialog-navigation {
@@ -1758,28 +1716,19 @@ body.page-scroll-locked {
   cursor: default;
 }
 
-.reference-scope-dialog {
-  width: min(560px, 100%);
-}
-
-.reference-scope-dialog .editor-dialog-header {
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.reference-scope-dialog form,
-.reference-scope-dialog label {
+.reference-scope-form,
+.reference-scope-form label {
   display: grid;
   gap: 10px;
 }
 
-.reference-scope-dialog label {
+.reference-scope-form label {
   color: var(--color-primary);
   font-size: 13px;
   font-weight: 700;
 }
 
-.reference-scope-dialog select {
+.reference-scope-form select {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--color-border);
@@ -1989,38 +1938,6 @@ button.timetable-layer-row {
   gap: 12px;
 }
 
-.editor-discard-backdrop {
-  position: fixed;
-  z-index: 80;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(31, 41, 51, 0.42);
-}
-
-.editor-discard-dialog {
-  width: min(100%, 420px);
-  box-sizing: border-box;
-  padding: 22px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-panel);
-  box-shadow: 0 12px 30px rgba(35, 50, 77, 0.18);
-}
-
-.editor-discard-dialog h2 {
-  margin: 0 0 10px;
-  color: var(--color-primary);
-  font-size: 20px;
-}
-
-.editor-discard-dialog p {
-  margin: 0 0 22px;
-  color: var(--color-muted);
-  line-height: 1.6;
-}
-
 .layer-flow-arrow {
   display: grid;
   height: 22px;
@@ -2048,14 +1965,6 @@ button.timetable-layer-row {
   display: flex;
   justify-content: flex-end;
   margin-top: 18px;
-}
-
-.timetable-history-dialog {
-  width: min(760px, calc(100vw - 32px));
-}
-
-.timetable-dialog-heading {
-  flex: 1;
 }
 
 .history-list {
@@ -2121,11 +2030,6 @@ button.timetable-layer-row {
   border-radius: var(--radius-sm);
   color: var(--color-muted);
   text-align: center;
-}
-
-.task-history-dialog {
-  width: min(860px, calc(100vw - 32px));
-  padding: 22px;
 }
 
 .task-history-scope {
@@ -2329,10 +2233,14 @@ button.timetable-layer-row {
 .editor-fields select,
 .editor-fields output,
 .direct-lesson-input,
-.task-editor-dialog form input,
-.task-editor-dialog form select,
-.note-editor-dialog form input,
-.note-editor-dialog form select {
+#task-editor-form input,
+#task-editor-form select,
+#task-detail-form input,
+#task-detail-form select,
+#note-editor-form input,
+#note-editor-form select,
+#note-detail-form input,
+#note-detail-form select {
   height: 42px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -2674,14 +2582,11 @@ button.timetable-layer-row {
 }
 
 @media (max-width: 560px) {
-  .editor-dialog-backdrop {
-    padding: 0;
-  }
-
   .timetable-editor-dialog {
     width: 100%;
     height: 100dvh;
     max-height: none;
+    margin: 0;
     border: 0;
     border-radius: 0;
   }
@@ -2702,17 +2607,6 @@ button.timetable-layer-row {
 
   .editor-dialog-body {
     padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  .change-content-dialog {
-    padding-bottom: 0;
-  }
-
-  .change-content-dialog .editor-dialog-header {
-    min-height: calc(60px + env(safe-area-inset-top));
-    padding-top: max(10px, env(safe-area-inset-top));
-    padding-right: max(12px, env(safe-area-inset-right));
-    padding-left: max(12px, env(safe-area-inset-left));
   }
 
   .change-content-body {
@@ -2746,14 +2640,6 @@ button.timetable-layer-row {
 
   .note-fixed-context .immutable-field:last-child {
     grid-column: auto;
-  }
-
-  .timetable-layer-dialog {
-    padding: 18px;
-  }
-
-  .timetable-history-dialog {
-    padding: 18px;
   }
 
   .layer-dialog-navigation {
@@ -2809,9 +2695,6 @@ button.timetable-layer-row {
     grid-template-columns: 1fr;
   }
 
-  .task-history-dialog {
-    padding: 18px;
-  }
 
   .task-history-entry > header {
     grid-template-columns: 52px minmax(0, 1fr);

@@ -1,6 +1,6 @@
 import { NoteCard } from './noteCard'
 import { taskRemovalCascadeDetails } from './taskNoteCopy'
-import { DestructiveConfirmationDialog } from './editorLifecycleView'
+import { ConfirmationDialog } from './dialogFoundation'
 
 export type TaskNoteListItem = {
   noteId: string
@@ -61,24 +61,30 @@ export function TaskRemovalConfirmationDialog({
   const details = taskRemovalCascadeDetails(notes)
 
   return (
-    <DestructiveConfirmationDialog
+    <ConfirmationDialog
+      active
       title="タスクを削除予定にしますか？"
-      titleId="task-removal-confirmation-title"
-      className="task-removal-confirmation-dialog"
+      description={(
+        <>
+          <p className="task-removal-confirmation-title">{taskTitle}</p>
+          <p>{details.consequence}</p>
+          {details.previews.length > 0 ? (
+            <ul
+              className="task-removal-confirmation-notes"
+              aria-label="削除予定のノート"
+            >
+              {details.previews.map((preview, index) => (
+                <li key={`${index}:${preview}`}>{preview}</li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      )}
+      tone="danger"
       cancelLabel="キャンセル"
       confirmLabel="削除予定にする"
       onCancel={onCancel}
       onConfirm={onConfirm}
-    >
-      <p className="task-removal-confirmation-title">{taskTitle}</p>
-      <p>{details.consequence}</p>
-      {details.previews.length > 0 ? (
-        <ul className="task-removal-confirmation-notes" aria-label="削除予定のノート">
-          {details.previews.map((preview, index) => (
-            <li key={`${index}:${preview}`}>{preview}</li>
-          ))}
-        </ul>
-      ) : null}
-    </DestructiveConfirmationDialog>
+    />
   )
 }

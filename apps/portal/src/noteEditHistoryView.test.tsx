@@ -7,6 +7,7 @@ describe('Note Edit History view', () => {
   it('shows back at the left and close at the right of the header', () => {
     const markup = renderToStaticMarkup(
       <NoteEditHistoryDialog
+        active
         state={{
           status: 'ready',
           noteId: 'note-1',
@@ -29,9 +30,8 @@ describe('Note Edit History view', () => {
     )
     const header = dialogHeader(markup)
     expect(header).toContain('aria-label="ノートの詳細に戻る"')
-    expect(header).toContain('<h2 id="note-history-title">ノートの編集履歴</h2>')
+    expect(header).toContain('>ノートの編集履歴</h2>')
     expect(header).toContain('aria-label="閉じる"')
-    expect(header).toContain('autofocus')
     expect(header.indexOf('aria-label="ノートの詳細に戻る"')).toBeLessThan(
       header.indexOf('<h2'),
     )

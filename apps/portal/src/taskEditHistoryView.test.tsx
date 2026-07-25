@@ -76,6 +76,7 @@ describe('Task Edit History dialog', () => {
 
     const markup = renderToStaticMarkup(
       <TaskEditHistoryDialog
+        active
         taskTitle="地理ワークを提出"
         targetScopeContext={{ grade: 2, classNumber: 3, trackName: '文科' }}
         referenceSchoolDate="2026-07-10"
@@ -88,11 +89,10 @@ describe('Task Edit History dialog', () => {
 
     expect(markup).toContain('role="dialog"')
     expect(markup).toContain('aria-modal="true"')
-    expect(markup).toContain('aria-labelledby="task-history-title"')
+    expect(markup).toMatch(/aria-labelledby="[^"]+"/)
     expect(markup).toContain('aria-label="タスクの詳細に戻る"')
     expect(markup).toContain('‹')
     expect(markup).toContain('aria-label="閉じる"')
-    expect(markup.toLowerCase()).toContain('autofocus')
     expect(markup).toContain('aria-label="タスクの編集履歴"')
     expect(markup).toContain('タスクの編集履歴')
     expect(markup).toContain('変更適用範囲: 文科')

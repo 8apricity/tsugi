@@ -8,6 +8,7 @@ import {
   targetScopeLabel,
   type TargetScopeDisplayContext,
 } from './uiCopy'
+import { ReadOnlyDialog } from './dialogFoundation'
 
 export type TaskEditHistoryState =
   | { status: 'loading' }
@@ -19,7 +20,7 @@ export function TaskEditHistoryDialog({
   targetScopeContext,
   referenceSchoolDate,
   state,
-  hidden = false,
+  active,
   onBack,
   onClose,
   onRetry,
@@ -28,51 +29,22 @@ export function TaskEditHistoryDialog({
   targetScopeContext?: TargetScopeDisplayContext
   referenceSchoolDate?: string
   state: TaskEditHistoryState
-  hidden?: boolean
+  active: boolean
   onBack: () => void
   onClose: () => void
   onRetry: () => void
 }) {
   return (
-    <div
-      className="editor-dialog-backdrop"
-      role="presentation"
-      aria-hidden={hidden || undefined}
-      inert={hidden || undefined}
+    <ReadOnlyDialog
+      active={active}
+      title="タスクの編集履歴"
+      subtitle={taskTitle}
+      size="standard"
+      backLabel="タスクの詳細に戻る"
+      onBack={onBack}
+      onClose={onClose}
     >
-      <section
-        className="timetable-editor-dialog task-history-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="task-history-title"
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') onBack()
-        }}
-      >
-        <header className="editor-dialog-header">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="タスクの詳細に戻る"
-            onClick={onBack}
-          >
-            ‹
-          </button>
-          <div className="timetable-dialog-heading">
-            <h2 id="task-history-title">タスクの編集履歴</h2>
-            <p className="layer-dialog-selection">{taskTitle}</p>
-          </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="閉じる"
-            autoFocus
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </header>
-        {state.status === 'loading' ? (
+      {state.status === 'loading' ? (
           <p className="layer-dialog-status" aria-live="polite">
             編集履歴を読み込んでいます…
           </p>
@@ -135,9 +107,8 @@ export function TaskEditHistoryDialog({
               ))}
             </ol>
           </>
-        )}
-      </section>
-    </div>
+      )}
+    </ReadOnlyDialog>
   )
 }
 

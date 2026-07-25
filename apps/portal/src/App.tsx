@@ -13,7 +13,10 @@ import "./App.css";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
-import { EditorDialogShell } from "./dialogFoundation";
+import {
+  EditorDialog,
+  ReadOnlyDialog,
+} from "./dialogFoundation";
 import { useDialogBrowserBack } from "./dialogNavigation";
 import {
   createDialogFlowClient,
@@ -293,18 +296,12 @@ type NoteDialogParent = "task-detail" | "daily-lesson-detail";
 
 const NOTE_DIALOG_PARENT = {
   "task-detail": {
-    dialogSelector: ".task-detail-dialog",
-    scrollContainerSelector: ".editor-dialog-body",
     backLabel: "タスクの詳細に戻る",
   },
   "daily-lesson-detail": {
-    dialogSelector: ".timetable-layer-dialog",
-    scrollContainerSelector: null,
     backLabel: "時間割の変更状況に戻る",
   },
 } as const satisfies Record<NoteDialogParent, {
-  dialogSelector: string;
-  scrollContainerSelector: string | null;
   backLabel: string;
 }>;
 
@@ -605,7 +602,6 @@ function App() {
     useState<string | null>(null);
   const [timetableEditorRefreshNeeded, setTimetableEditorRefreshNeeded] =
     useState(false);
-  const changeContentBackRef = useRef<HTMLButtonElement>(null);
   const draftCancellationRowHandlesRef =
     useRef(new Map<string, DraftCancellationRowRegistration>());
   const pendingDraftCancellationFocusRef =
@@ -1726,10 +1722,7 @@ function App() {
     if (!target) return;
     window.requestAnimationFrame(() => {
       if (target.kind === "task-note" || target.kind === "daily-lesson-note") {
-        const parent = target.kind === "task-note"
-          ? "task-detail"
-          : "daily-lesson-detail";
-        const { dialog, scrollContainer } = noteDialogParentElements(parent);
+        const { dialog, scrollContainer } = activeDialogElements();
         const note = Array.from(
           dialog?.querySelectorAll<HTMLElement>("[data-note-id]") ?? [],
         ).find((candidate) => candidate.dataset.noteId === target.noteId);
@@ -1741,13 +1734,13 @@ function App() {
       }
       if (target.kind === "task-history-trigger") {
         document.querySelector<HTMLButtonElement>(
-          ".task-detail-dialog .task-detail-actions button",
+          "dialog[open]:not([aria-hidden='true']) .task-detail-actions button",
         )?.focus();
         return;
       }
       if (target.kind === "note-history-trigger") {
         document.querySelector<HTMLButtonElement>(
-          ".note-detail-dialog .note-detail-actions button",
+          "dialog[open]:not([aria-hidden='true']) .note-detail-actions button",
         )?.focus();
         return;
       }
@@ -2105,7 +2098,10 @@ function App() {
     const focusRow =
       rows[pendingFocus.cancelledIndex] ?? rows.at(-1);
     if (!focusRow) {
-      changeContentBackRef.current?.focus();
+      restoreDialogFocus({
+        kind: "active-dialog-control",
+        control: "back",
+      });
       return;
     }
     focusRow.handle.focusEditControl();
@@ -2447,7 +2443,7 @@ function App() {
     parent: NoteDialogParent,
     noteId: string,
   ): DialogFocusTarget {
-    const { scrollContainer } = noteDialogParentElements(parent);
+    const { scrollContainer } = activeDialogElements();
     pendingNoteDialogScrollTopRef.current = scrollContainer?.scrollTop ?? 0;
     if (parent === "task-detail") {
       return {
@@ -2474,12 +2470,14 @@ function App() {
     if (transition.status === "rejected") return;
   }
 
-  function noteDialogParentElements(parent: NoteDialogParent) {
-    const config = NOTE_DIALOG_PARENT[parent];
-    const dialog = document.querySelector<HTMLElement>(config.dialogSelector);
-    const scrollContainer = config.scrollContainerSelector
-      ? dialog?.querySelector<HTMLElement>(config.scrollContainerSelector)
-      : dialog;
+  function activeDialogElements() {
+    const dialog = Array.from(
+      document.querySelectorAll<HTMLDialogElement>(
+        "dialog[open]:not([aria-hidden='true'])",
+      ),
+    ).at(-1);
+    const scrollContainer =
+      dialog?.querySelector<HTMLElement>(".editor-dialog-body") ?? dialog;
     return { dialog, scrollContainer };
   }
 
@@ -4600,60 +4598,32 @@ function App() {
           ) : null}
 
           {changeContentOpen && changeContentControls.reviewVisible ? (
-            <div
-              className="editor-dialog-backdrop"
-              role="presentation"
-              aria-hidden={
-                !topDialogRouteIs("change-content") ||
-                dialogFlowSnapshot.overlay !== null ||
-                undefined
+            <EditorDialog
+              active={
+                topDialogRouteIs("change-content") &&
+                dialogFlowSnapshot.overlay === null
               }
-              inert={
-                !topDialogRouteIs("change-content") ||
-                dialogFlowSnapshot.overlay !== null ||
-                undefined
+              title="変更を反映"
+              subtitle={`下書き ${timetableEditor.draftCount}件`}
+              size="standard"
+              formId="change-content-form"
+              submitLabel="確定"
+              submitAriaLabel="変更を確定"
+              submitDisabled={
+                timetableEditor.submitting ||
+                timetableEditor.draftCount === 0 ||
+                timetableEditor.conflictCount > 0
               }
+              onBack={requestDialogBack}
             >
-              <section
-                className="timetable-editor-dialog change-content-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="change-content-title"
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape" || event.defaultPrevented) return;
+              <form
+                id="change-content-form"
+                className="change-content-form"
+                onSubmit={(event) => {
                   event.preventDefault();
-                  requestDialogBack();
+                  void commitTimetableDrafts();
                 }}
               >
-                <header className="editor-dialog-header">
-                  <button
-                    ref={changeContentBackRef}
-                    className="icon-button"
-                    type="button"
-                    aria-label="戻る"
-                    onClick={requestDialogBack}
-                  >
-                    ‹
-                  </button>
-                  <div className="change-content-heading">
-                    <h2 id="change-content-title">変更を反映</h2>
-                    <p className="change-content-subtitle">
-                      下書き {timetableEditor.draftCount}件
-                    </p>
-                  </div>
-                  <button
-                    className="button-primary change-content-confirm"
-                    type="button"
-                    disabled={
-                      timetableEditor.submitting ||
-                      timetableEditor.draftCount === 0 ||
-                      timetableEditor.conflictCount > 0
-                    }
-                    onClick={() => void commitTimetableDrafts()}
-                  >
-                    確定
-                  </button>
-                </header>
                 <div
                   className="change-content-body"
                   onScroll={() => setRevealedDraftCancellationId(null)}
@@ -4673,20 +4643,18 @@ function App() {
                     </p>
                   ) : null}
                 </div>
-              </section>
-            </div>
+              </form>
+            </EditorDialog>
           ) : null}
 
           {dialogFlowSnapshot.overlay?.kind === "logout-confirmation" ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <DraftLogoutConfirmationDialog
-                draftCount={timetableEditor.draftCount}
-                onBack={() => {
-                  dialogFlow.cancelOverlay();
-                }}
-                onLogout={() => void logout()}
-              />
-            </div>
+            <DraftLogoutConfirmationDialog
+              draftCount={timetableEditor.draftCount}
+              onBack={() => {
+                dialogFlow.cancelOverlay();
+              }}
+              onLogout={() => void logout()}
+            />
           ) : null}
 
           {dialogFlowSnapshot.overlay?.kind === "draft-exit-confirmation" ? (
@@ -4700,30 +4668,15 @@ function App() {
           ) : null}
 
           {referencePickerOpen && dialogRouteExists("reference-picker") ? (
-            <div className="editor-dialog-backdrop" role="presentation">
-              <section
-                className="timetable-editor-dialog reference-scope-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="reference-scope-title"
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape" || event.defaultPrevented) return;
-                  event.preventDefault();
-                  requestDialogBack();
-                }}
-              >
-                <header className="editor-dialog-header">
-                  <h2 id="reference-scope-title">ほかの範囲を参照</h2>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    autoFocus
-                    onClick={requestDialogCloseAll}
-                  >
-                    ×
-                  </button>
-                </header>
+            <ReadOnlyDialog
+              active={
+                topDialogRouteIs("reference-picker") &&
+                dialogFlowSnapshot.overlay === null
+              }
+              title="ほかの範囲を参照"
+              size="compact"
+              onClose={requestDialogCloseAll}
+            >
                 {referenceScopeOptions?.status === "loading" ||
                 referenceScopeOptions === null ? (
                   <p className="reference-scope-dialog-status" role="status">
@@ -4741,7 +4694,10 @@ function App() {
                     </button>
                   </div>
                 ) : (
-                  <form onSubmit={selectReferenceScope}>
+                  <form
+                    className="reference-scope-form"
+                    onSubmit={selectReferenceScope}
+                  >
                     <label>
                       <span>参照する変更適用範囲</span>
                       <select
@@ -4774,8 +4730,7 @@ function App() {
                     </div>
                   </form>
                 )}
-              </section>
-            </div>
+            </ReadOnlyDialog>
           ) : null}
 
           {noteEditorForm && noteDetailOpen &&
@@ -4784,9 +4739,9 @@ function App() {
               body={noteEditorForm.body}
               details={noteDetailValues}
               editing={timetableEditor.editing}
-              hidden={
-                !topDialogRouteIs("note-detail") ||
-                dialogFlowSnapshot.overlay !== null
+              active={
+                topDialogRouteIs("note-detail") &&
+                dialogFlowSnapshot.overlay === null
               }
               removalPlanned={noteEditorForm.removalPlanned}
               onBodyChange={(body) => setNoteEditorForm((current) =>
@@ -4810,29 +4765,25 @@ function App() {
                 : undefined}
             />
           ) : noteEditorForm && dialogRouteExists("note-editor") ? (
-            <EditorDialogShell
+            <EditorDialog
+              active={
+                topDialogRouteIs("note-editor") &&
+                dialogFlowSnapshot.overlay === null
+              }
               title={noteEditorForm.relatedTask
                 ? "ノートを書く"
                 : noteEditorForm.editingNote || noteEditorForm.editingDraft
                   ? "ノートを編集"
                   : "ノートを追加"}
-              titleId="note-editor-title"
+              size="compact"
               formId="note-editor-form"
-              className={`note-editor-dialog${
-                  noteEditorForm.relatedTask ? " task-note-editor-dialog" : ""
-                }`}
-              saveDisabled={noteEditorForm.editingDraft?.changeKind === "remove"}
-              hidden={
-                !topDialogRouteIs("note-editor") ||
-                dialogFlowSnapshot.overlay !== null
-              }
+              submitDisabled={noteEditorForm.editingDraft?.changeKind === "remove"}
               onBack={requestNoteEditorClose}
             >
                 <form id="note-editor-form" onSubmit={saveNoteDraft}>
                   <label>
                     <span>本文</span>
                     <textarea
-                      autoFocus
                       required
                       maxLength={1000}
                       rows={8}
@@ -5020,20 +4971,19 @@ function App() {
                     </div>
                   ) : null}
                 </form>
-            </EditorDialogShell>
+            </EditorDialog>
           ) : null}
 
           {taskEditorForm && !taskDetail &&
             dialogRouteExists("task-editor") ? (
-            <EditorDialogShell
-              title={taskEditorForm.editingTask ? "タスクを編集" : "タスクを追加"}
-              titleId="task-editor-title"
-              formId="task-editor-form"
-              className="task-editor-dialog"
-              hidden={
-                !topDialogRouteIs("task-editor") ||
-                dialogFlowSnapshot.overlay !== null
+            <EditorDialog
+              active={
+                topDialogRouteIs("task-editor") &&
+                dialogFlowSnapshot.overlay === null
               }
+              title={taskEditorForm.editingTask ? "タスクを編集" : "タスクを追加"}
+              size="compact"
+              formId="task-editor-form"
               onBack={requestTaskEditorClose}
             >
                 <form id="task-editor-form" onSubmit={saveTaskDraft}>
@@ -5046,7 +4996,7 @@ function App() {
                     onAddNote={addTaskNoteBody}
                   />
                 </form>
-            </EditorDialogShell>
+            </EditorDialog>
           ) : null}
 
           {taskDetail &&
@@ -5087,12 +5037,12 @@ function App() {
                 timetableEditor.atLimit || timetableEditor.submitting
               }
               removalCheckboxAutoFocus={taskRemovalCheckboxFocusRequested}
-              hidden={
+              active={
                 (
-                  !topDialogRouteIs("task-detail") &&
-                  !topDialogRouteIs("task-editor")
-                ) ||
-                dialogFlowSnapshot.overlay !== null
+                  topDialogRouteIs("task-detail") ||
+                  topDialogRouteIs("task-editor")
+                ) &&
+                dialogFlowSnapshot.overlay === null
               }
               onClose={taskEditorForm?.editingTask
                 ? requestTaskEditorClose
@@ -5161,9 +5111,9 @@ function App() {
               targetScopeContext={targetScopeContext}
               referenceSchoolDate={selectedSchoolDate}
               state={taskHistoryDialog.state}
-              hidden={
-                !topDialogRouteIs("task-history") ||
-                dialogFlowSnapshot.overlay !== null
+              active={
+                topDialogRouteIs("task-history") &&
+                dialogFlowSnapshot.overlay === null
               }
               onBack={goBackFromTaskHistory}
               onClose={requestDialogCloseAll}
@@ -5180,9 +5130,9 @@ function App() {
             <NoteEditHistoryDialog
               targetScopeContext={targetScopeContext}
               state={noteHistoryDialog.state}
-              hidden={
-                !topDialogRouteIs("note-history") ||
-                dialogFlowSnapshot.overlay !== null
+              active={
+                topDialogRouteIs("note-history") &&
+                dialogFlowSnapshot.overlay === null
               }
               onBack={goBackFromNoteHistory}
               onClose={requestDialogCloseAll}
@@ -5197,61 +5147,24 @@ function App() {
 
           {timetableHistoryDialog &&
             dialogRouteExists("timetable-history") ? (
-            <div
-              className="editor-dialog-backdrop"
-              role="presentation"
-              aria-hidden={
-                !topDialogRouteIs("timetable-history") ||
-                dialogFlowSnapshot.overlay !== null ||
-                undefined
+            <ReadOnlyDialog
+              active={
+                topDialogRouteIs("timetable-history") &&
+                dialogFlowSnapshot.overlay === null
               }
-              inert={
-                !topDialogRouteIs("timetable-history") ||
-                dialogFlowSnapshot.overlay !== null ||
-                undefined
-              }
+              title="編集履歴"
+              subtitle={`${formatUiSchoolDate(
+                timetableHistoryDialog.changeDate,
+                { referenceSchoolDate: selectedSchoolDate },
+              )}・${timetableHistoryDialog.periodNumber}限・${scopeLabel(
+                timetableHistoryDialog.targetScopeType,
+                targetScopeContext,
+              )}`}
+              size="standard"
+              backLabel="変更状況に戻る"
+              onBack={goBackInTimetableHistoryDialog}
+              onClose={requestDialogCloseAll}
             >
-              <section
-                className="timetable-editor-dialog timetable-history-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="timetable-history-title"
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  goBackInTimetableHistoryDialog();
-                }}
-              >
-                <header className="editor-dialog-header">
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="変更状況に戻る"
-                    onClick={goBackInTimetableHistoryDialog}
-                  >
-                    ‹
-                  </button>
-                  <div className="timetable-dialog-heading">
-                    <h2 id="timetable-history-title">編集履歴</h2>
-                    <p className="layer-dialog-selection">
-                      {formatUiSchoolDate(timetableHistoryDialog.changeDate, {
-                        referenceSchoolDate: selectedSchoolDate,
-                      })}
-                      ・{timetableHistoryDialog.periodNumber}限・
-                      {scopeLabel(
-                        timetableHistoryDialog.targetScopeType,
-                        targetScopeContext,
-                      )}
-                    </p>
-                  </div>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    onClick={requestDialogCloseAll}
-                  >
-                    ×
-                  </button>
-                </header>
 
                 {timetableHistoryDialog.history.status === "loading" ? (
                   <p className="layer-dialog-status" aria-live="polite">
@@ -5305,67 +5218,29 @@ function App() {
                     ))}
                   </div>
                 )}
-              </section>
-            </div>
+            </ReadOnlyDialog>
           ) : null}
 
           {timetableHistoryDialog?.detail &&
             dialogRouteExists("timetable-change-detail") ? (
-            <div
-              className="editor-dialog-backdrop"
-              role="presentation"
-              aria-hidden={
-                !topDialogRouteIs("timetable-change-detail") ||
-                dialogFlowSnapshot.overlay !== null ||
-                undefined
+            <ReadOnlyDialog
+              active={
+                topDialogRouteIs("timetable-change-detail") &&
+                dialogFlowSnapshot.overlay === null
               }
-              inert={
-                !topDialogRouteIs("timetable-change-detail") ||
-                dialogFlowSnapshot.overlay !== null ||
-                undefined
-              }
+              title="変更の詳細"
+              subtitle={`${formatUiSchoolDate(
+                timetableHistoryDialog.changeDate,
+                { referenceSchoolDate: selectedSchoolDate },
+              )}・${timetableHistoryDialog.periodNumber}限・${scopeLabel(
+                timetableHistoryDialog.targetScopeType,
+                targetScopeContext,
+              )}`}
+              size="standard"
+              backLabel="編集履歴に戻る"
+              onBack={requestDialogBack}
+              onClose={requestDialogCloseAll}
             >
-              <section
-                className="timetable-editor-dialog timetable-history-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="timetable-change-detail-title"
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  requestDialogBack();
-                }}
-              >
-                <header className="editor-dialog-header">
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="編集履歴に戻る"
-                    onClick={requestDialogBack}
-                  >
-                    ‹
-                  </button>
-                  <div className="timetable-dialog-heading">
-                    <h2 id="timetable-change-detail-title">変更の詳細</h2>
-                    <p className="layer-dialog-selection">
-                      {formatUiSchoolDate(timetableHistoryDialog.changeDate, {
-                        referenceSchoolDate: selectedSchoolDate,
-                      })}
-                      ・{timetableHistoryDialog.periodNumber}限・
-                      {scopeLabel(
-                        timetableHistoryDialog.targetScopeType,
-                        targetScopeContext,
-                      )}
-                    </p>
-                  </div>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    onClick={requestDialogCloseAll}
-                  >
-                    ×
-                  </button>
-                </header>
 
                 {timetableHistoryDialog.detail.status === "loading" ? (
                   <p className="layer-dialog-status" aria-live="polite">
@@ -5392,60 +5267,27 @@ function App() {
                     referenceSchoolDate={selectedSchoolDate}
                   />
                 )}
-              </section>
-            </div>
+            </ReadOnlyDialog>
           ) : null}
 
           {timetableLayerDialog && dialogRouteExists("timetable-layer") ? (
-            <div
-              className="editor-dialog-backdrop"
-              role="presentation"
-              aria-hidden={
-                !topDialogRouteIs("timetable-layer") ||
-                dialogFlowSnapshot.overlay !== null ||
-                undefined
+            <ReadOnlyDialog
+              active={
+                topDialogRouteIs("timetable-layer") &&
+                dialogFlowSnapshot.overlay === null
               }
-              inert={
-                !topDialogRouteIs("timetable-layer") ||
-                dialogFlowSnapshot.overlay !== null ||
-                undefined
+              title="時間割の変更状況"
+              size="standard"
+              backLabel="変更内容に戻る"
+              onBack={
+                dialogFlowSnapshot.routes.findIndex(
+                  (route) => route.kind === "timetable-layer",
+                ) > 0
+                  ? requestDialogBack
+                  : undefined
               }
+              onClose={requestDialogCloseAll}
             >
-              <section
-                className="timetable-editor-dialog timetable-layer-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="timetable-layer-title"
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") requestDialogBack();
-                }}
-              >
-                <header className="editor-dialog-header">
-                  {dialogFlowSnapshot.routes.findIndex(
-                    (route) => route.kind === "timetable-layer",
-                  ) > 0 ? (
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="変更内容に戻る"
-                      onClick={requestDialogBack}
-                    >
-                      ‹
-                    </button>
-                  ) : null}
-                  <div className="layer-dialog-heading">
-                    <h2 id="timetable-layer-title">時間割の変更状況</h2>
-                  </div>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    aria-label="閉じる"
-                    autoFocus
-                    onClick={requestDialogCloseAll}
-                  >
-                    ×
-                  </button>
-                </header>
 
                 <div className="layer-dialog-navigation" aria-label="日付と時限">
                   <button
@@ -5656,27 +5498,26 @@ function App() {
                     </div>
                   </div>
                 ) : null}
-              </section>
-            </div>
+            </ReadOnlyDialog>
           ) : null}
 
           {timetableEditorForm && schoolYearRange &&
             dialogRouteExists("timetable-editor") ? (
-            <EditorDialogShell
+            <EditorDialog
+              active={
+                topDialogRouteIs("timetable-editor") &&
+                dialogFlowSnapshot.overlay === null
+              }
               title="時間割変更"
-              titleId="timetable-editor-title"
+              size="wide"
               formId="timetable-editor-form"
-              saveDisabled={
+              submitDisabled={
                 timetableEditor.submitting ||
                 (timetableEditorForm.includeTimetableChange &&
                   !timetableEditorForm.removalPlanned &&
                   timetableEditorForm.replacement.type === "lesson_name" &&
                   !timetableEditorForm.replacement.registeredLessonNameId &&
                   !timetableEditorOptions)
-              }
-              hidden={
-                !topDialogRouteIs("timetable-editor") ||
-                dialogFlowSnapshot.overlay !== null
               }
               onBack={() => requestTimetableEditorClose("back")}
             >
@@ -6004,7 +5845,7 @@ function App() {
                     ) : null}
                   </footer>
                 </form>
-            </EditorDialogShell>
+            </EditorDialog>
           ) : null}
 
           {dialogFlowSnapshot.overlay?.kind === "discard-unsaved" ? (

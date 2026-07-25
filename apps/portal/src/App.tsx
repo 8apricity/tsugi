@@ -5161,6 +5161,7 @@ function App() {
                 targetScopeContext,
               )}`}
               size="standard"
+              bodyLayout="compact"
               backLabel="変更状況に戻る"
               onBack={goBackInTimetableHistoryDialog}
               onClose={requestDialogCloseAll}
@@ -5237,6 +5238,7 @@ function App() {
                 targetScopeContext,
               )}`}
               size="standard"
+              bodyLayout="compact"
               backLabel="編集履歴に戻る"
               onBack={requestDialogBack}
               onClose={requestDialogCloseAll}
@@ -5278,6 +5280,7 @@ function App() {
               }
               title="時間割の変更状況"
               size="standard"
+              bodyLayout="compact"
               backLabel="変更内容に戻る"
               onBack={
                 dialogFlowSnapshot.routes.findIndex(

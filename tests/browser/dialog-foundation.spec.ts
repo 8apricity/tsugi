@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { expectCompactReadOnlyDialogSpacing } from './dialog-spacing.js'
 
 async function scrollToPageBottom(page: Page) {
   await page.evaluate(() => {
@@ -247,6 +248,11 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
     await editorDetail.getByRole('button', { name: '編集履歴' }).click()
     const history = page.getByRole('dialog', { name: 'タスクの編集履歴' })
     await expect(history).toBeVisible()
+    await expectCompactReadOnlyDialogSpacing(
+      history,
+      history.locator('.task-history-scope'),
+      history.locator('.task-history-list'),
+    )
     await expect(page.locator('body')).toHaveClass(/page-scroll-locked/)
 
     await page.goBack()

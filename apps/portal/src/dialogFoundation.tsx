@@ -11,6 +11,7 @@ export type DialogSize = 'compact' | 'standard' | 'wide'
 type DialogFrameProps = {
   active: boolean
   size: DialogSize
+  bodyClassName?: string
   role?: 'dialog' | 'alertdialog'
   description?: ReactNode
   initialFocus: 'close-or-back' | 'first-field' | 'cancel'
@@ -68,6 +69,7 @@ function containTabFocus(
 function DialogFrame({
   active,
   size,
+  bodyClassName,
   role = 'dialog',
   description,
   initialFocus,
@@ -137,7 +139,11 @@ function DialogFrame({
         </div>
       )}
       {children === undefined ? null : (
-        <div className="editor-dialog-body">{children}</div>
+        <div className={`editor-dialog-body${
+          bodyClassName ? ` ${bodyClassName}` : ''
+        }`}>
+          {children}
+        </div>
       )}
       {footer}
     </dialog>
@@ -194,6 +200,7 @@ export function ReadOnlyDialog({
   title,
   subtitle,
   size,
+  bodyLayout = 'default',
   backLabel = '戻る',
   onBack,
   onClose,
@@ -203,6 +210,7 @@ export function ReadOnlyDialog({
   title: string
   subtitle?: ReactNode
   size: DialogSize
+  bodyLayout?: 'default' | 'compact'
   backLabel?: string
   onBack?: () => void
   onClose: () => void
@@ -212,6 +220,9 @@ export function ReadOnlyDialog({
     <DialogFrame
       active={active}
       size={size}
+      bodyClassName={
+        bodyLayout === 'compact' ? 'dialog-body-layout-compact' : undefined
+      }
       initialFocus="close-or-back"
       onDismiss={onBack ?? onClose}
       header={(titleId) => (

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { expectCompactReadOnlyDialogSpacing } from './dialog-spacing.js'
 
 test.describe('authenticated Direct Change review', () => {
   test('shows one fixed review header and disables an empty batch', async ({
@@ -194,6 +195,11 @@ test.describe('authenticated Direct Change review', () => {
     const periodButton = page.getByRole('button', { name: /^1限/ })
     await periodButton.click()
     const layer = page.getByRole('dialog', { name: '時間割の変更状況' })
+    await expectCompactReadOnlyDialogSpacing(
+      layer,
+      layer.locator('.layer-dialog-navigation'),
+      layer.locator('.timetable-layer-stack'),
+    )
     await layer.getByRole('button', { name: '3組のメニュー' }).click()
     await layer.getByRole('menuitem', { name: '編集履歴' }).click()
 
@@ -203,10 +209,18 @@ test.describe('authenticated Direct Change review', () => {
     })
     const entry = history.locator('.history-row').first()
     await expect(entry).toBeVisible()
+    await expectCompactReadOnlyDialogSpacing(
+      history,
+      history.locator('.history-list'),
+    )
     await entry.click()
 
     const detail = page.getByRole('dialog', { name: '変更の詳細' })
     await expect(detail).toBeVisible()
+    await expectCompactReadOnlyDialogSpacing(
+      detail,
+      detail.locator('.direct-change-detail'),
+    )
     await expect(history).toHaveAttribute('aria-hidden', 'true')
     await expect(history).toHaveAttribute('inert', '')
 

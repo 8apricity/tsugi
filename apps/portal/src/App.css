@@ -1043,6 +1043,19 @@ body.page-scroll-locked {
   padding: 22px;
 }
 
+.dialog-size-standard > .dialog-body-layout-compact {
+  padding: 12px 16px 16px;
+}
+
+.dialog-body-layout-compact > :first-child {
+  margin-top: 0;
+}
+
+.dialog-body-layout-compact > .timetable-layer-stack {
+  margin-right: 0;
+  margin-left: 0;
+}
+
 .dialog-foundation:has(.change-content-form) > .editor-dialog-body {
   padding: 0;
   overflow: hidden;

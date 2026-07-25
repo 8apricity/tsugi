@@ -31,6 +31,7 @@ export function NoteEditHistoryDialog({
       active={active}
       title="ノートの編集履歴"
       size="standard"
+      bodyLayout="compact"
       backLabel="ノートの詳細に戻る"
       onBack={onBack}
       onClose={onClose}

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { expectCompactReadOnlyDialogSpacing } from './dialog-spacing.js'
 
 test.describe('authenticated Daily Plan Note detail', () => {
   test('views and directly edits one reflected Note through the common detail flow', async ({
@@ -57,6 +58,11 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await readOnlyDetail.getByRole('button', { name: '編集履歴' }).click()
     const history = page.getByRole('dialog', { name: 'ノートの編集履歴' })
     await expect(history).toBeVisible()
+    await expectCompactReadOnlyDialogSpacing(
+      history,
+      history.locator('.task-history-scope'),
+      history.locator('.task-history-list'),
+    )
     await history
       .getByRole('button', { name: 'ノートの詳細に戻る' })
       .click()

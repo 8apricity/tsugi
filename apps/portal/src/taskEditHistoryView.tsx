@@ -40,6 +40,7 @@ export function TaskEditHistoryDialog({
       title="タスクの編集履歴"
       subtitle={taskTitle}
       size="standard"
+      bodyLayout="compact"
       backLabel="タスクの詳細に戻る"
       onBack={onBack}
       onClose={onClose}

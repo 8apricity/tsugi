@@ -163,6 +163,32 @@ function DialogHeading({
   )
 }
 
+function DialogHeader({
+  title,
+  titleId,
+  subtitle,
+  leadingAction,
+  trailingAction,
+}: {
+  title: string
+  titleId: string
+  subtitle?: ReactNode
+  leadingAction?: ReactNode
+  trailingAction?: ReactNode
+}) {
+  return (
+    <header className="editor-dialog-header editor-dialog-shell-header">
+      {leadingAction}
+      <DialogHeading
+        title={title}
+        titleId={titleId}
+        subtitle={subtitle}
+      />
+      {trailingAction}
+    </header>
+  )
+}
+
 export function ReadOnlyDialog({
   active,
   title,
@@ -189,8 +215,11 @@ export function ReadOnlyDialog({
       initialFocus="close-or-back"
       onDismiss={onBack ?? onClose}
       header={(titleId) => (
-        <header className="editor-dialog-header editor-dialog-shell-header">
-          {onBack ? (
+        <DialogHeader
+          title={title}
+          titleId={titleId}
+          subtitle={subtitle}
+          leadingAction={onBack ? (
             <button
               className="icon-button"
               type="button"
@@ -200,22 +229,19 @@ export function ReadOnlyDialog({
             >
               ‹
             </button>
-          ) : null}
-          <DialogHeading
-            title={title}
-            titleId={titleId}
-            subtitle={subtitle}
-          />
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="閉じる"
-            data-dialog-close
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </header>
+          ) : undefined}
+          trailingAction={(
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="閉じる"
+              data-dialog-close
+              onClick={onClose}
+            >
+              ×
+            </button>
+          )}
+        />
       )}
     >
       {children}
@@ -253,31 +279,33 @@ export function EditorDialog({
       initialFocus="first-field"
       onDismiss={onBack}
       header={(titleId) => (
-        <header className="editor-dialog-header editor-dialog-shell-header">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="戻る"
-            data-dialog-back
-            onClick={onBack}
-          >
-            ‹
-          </button>
-          <DialogHeading
-            title={title}
-            titleId={titleId}
-            subtitle={subtitle}
-          />
-          <button
-            className="button-primary editor-dialog-save"
-            type="submit"
-            form={formId}
-            disabled={submitDisabled}
-            aria-label={submitAriaLabel}
-          >
-            {submitLabel}
-          </button>
-        </header>
+        <DialogHeader
+          title={title}
+          titleId={titleId}
+          subtitle={subtitle}
+          leadingAction={(
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="戻る"
+              data-dialog-back
+              onClick={onBack}
+            >
+              ‹
+            </button>
+          )}
+          trailingAction={(
+            <button
+              className="button-primary editor-dialog-save"
+              type="submit"
+              form={formId}
+              disabled={submitDisabled}
+              aria-label={submitAriaLabel}
+            >
+              {submitLabel}
+            </button>
+          )}
+        />
       )}
     >
       {children}
@@ -315,9 +343,7 @@ export function ConfirmationDialog({
       initialFocus="cancel"
       onDismiss={onCancel}
       header={(titleId) => (
-        <header className="editor-dialog-header editor-dialog-shell-header">
-          <DialogHeading title={title} titleId={titleId} />
-        </header>
+        <DialogHeader title={title} titleId={titleId} />
       )}
       footer={(
         <footer className="editor-dialog-actions dialog-confirmation-actions">

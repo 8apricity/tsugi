@@ -461,7 +461,7 @@ function App() {
   const [referencePickerScopeKey, setReferencePickerScopeKey] = useState("");
   const [referenceScope, setReferenceScope] =
     useState<ReferenceScopeOption | null>(null);
-  const studentAccountSessionKey = useMemo(
+  const referenceScopeOptionsCacheOwnerKey = useMemo(
     () => studentAccount ? crypto.randomUUID() : null,
     [studentAccount],
   );
@@ -537,8 +537,8 @@ function App() {
     dialogFlowSnapshot.routes.some((route) => route.kind === kind);
   const referencePickerOpen = dialogRouteExists("reference-picker");
   const referenceScopeOptionsResource = useReferenceScopeOptionsResource({
-    studentAccountSessionKey:
-      status === "authenticated" ? studentAccountSessionKey : null,
+    cacheOwnerKey:
+      status === "authenticated" ? referenceScopeOptionsCacheOwnerKey : null,
     requested: referencePickerOpen,
   });
   const readyReferenceScopeOptions =

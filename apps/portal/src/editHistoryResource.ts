@@ -54,58 +54,57 @@ export type TimetableChangeDetailResourceResult =
 export function useTaskEditHistoryResource(
   selection: (RouteResourceSelection & { taskId: string }) | null,
 ): TaskEditHistoryResourceResult {
-  const routeInstanceId = selection?.routeInstanceId
-  const taskId = selection?.taskId
-  const identityKey = routeInstanceId && taskId
-    ? `${routeInstanceId}:task:${taskId}`
-    : null
-  const load = useCallback(async (signal: AbortSignal) => {
-    if (!taskId) throw new Error('Task Edit History selection is missing')
-    const response = await fetch(
-      `/api/tasks/${encodeURIComponent(taskId)}/history`,
-      { signal },
-    )
-    if (!response.ok) throw new Error('Task Edit History unavailable')
-    const value = await response.json() as unknown
-    if (
-      !isRecord(value) ||
-      value.status !== 'ready' ||
-      value.taskId !== taskId ||
-      !Array.isArray(value.entries)
-    ) {
-      throw new Error('Task Edit History response did not match selection')
-    }
-    return value as TaskEditHistoryResponse
-  }, [taskId])
-  return useAsyncResource({ identityKey, load })
+  return useEntityEditHistoryResource<TaskEditHistoryResponse>({
+    routeInstanceId: selection?.routeInstanceId,
+    entityKind: 'task',
+    entityId: selection?.taskId,
+    responseIdKey: 'taskId',
+  })
 }
 
 export function useNoteEditHistoryResource(
   selection: (RouteResourceSelection & { noteId: string }) | null,
 ): NoteEditHistoryResourceResult {
-  const routeInstanceId = selection?.routeInstanceId
-  const noteId = selection?.noteId
-  const identityKey = routeInstanceId && noteId
-    ? `${routeInstanceId}:note:${noteId}`
+  return useEntityEditHistoryResource<NoteEditHistoryResponse>({
+    routeInstanceId: selection?.routeInstanceId,
+    entityKind: 'note',
+    entityId: selection?.noteId,
+    responseIdKey: 'noteId',
+  })
+}
+
+function useEntityEditHistoryResource<T>({
+  routeInstanceId,
+  entityKind,
+  entityId,
+  responseIdKey,
+}: {
+  routeInstanceId: string | undefined
+  entityKind: 'task' | 'note'
+  entityId: string | undefined
+  responseIdKey: 'taskId' | 'noteId'
+}): AsyncResourceResult<T> {
+  const identityKey = routeInstanceId && entityId
+    ? `${routeInstanceId}:${entityKind}:${entityId}`
     : null
   const load = useCallback(async (signal: AbortSignal) => {
-    if (!noteId) throw new Error('Note Edit History selection is missing')
+    if (!entityId) throw new Error('Edit History selection is missing')
     const response = await fetch(
-      `/api/notes/${encodeURIComponent(noteId)}/history`,
+      `/api/${entityKind}s/${encodeURIComponent(entityId)}/history`,
       { signal },
     )
-    if (!response.ok) throw new Error('Note Edit History unavailable')
+    if (!response.ok) throw new Error('Edit History unavailable')
     const value = await response.json() as unknown
     if (
       !isRecord(value) ||
       value.status !== 'ready' ||
-      value.noteId !== noteId ||
+      value[responseIdKey] !== entityId ||
       !Array.isArray(value.entries)
     ) {
-      throw new Error('Note Edit History response did not match selection')
+      throw new Error('Edit History response did not match selection')
     }
-    return value as NoteEditHistoryResponse
-  }, [noteId])
+    return value as T
+  }, [entityId, entityKind, responseIdKey])
   return useAsyncResource({ identityKey, load })
 }
 

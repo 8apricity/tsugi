@@ -29,17 +29,18 @@ export function useAsyncResource<T>({
     identityKey: null,
     state: { status: 'idle' },
   })
+  if (stored.identityKey !== identityKey) {
+    setStored({
+      identityKey,
+      state: identityKey === null
+        ? { status: 'idle' }
+        : { status: 'loading' },
+    })
+  }
 
   useEffect(() => {
     if (identityKey === null) {
-      const attempt = ++attemptRef.current
-      queueMicrotask(() => {
-        if (attempt !== attemptRef.current) return
-        setStored({
-          identityKey: null,
-          state: { status: 'idle' },
-        })
-      })
+      ++attemptRef.current
       return
     }
 

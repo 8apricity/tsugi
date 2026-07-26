@@ -132,7 +132,7 @@ test.describe('draft lifecycle', () => {
     await expect(page.getByText(title, { exact: true })).toHaveCount(0)
   })
 
-  test('discards Reference Scope options from an ended Student Account session', async ({
+  test('discards Reference Scope options from an ended Student Session', async ({
     page,
   }, testInfo) => {
     let optionRequestCount = 0

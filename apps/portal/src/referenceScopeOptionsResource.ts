@@ -12,30 +12,34 @@ export type ReferenceScopeOptionsResourceResult =
   AsyncResourceResult<ReferenceScopeOptions>
 
 export function useReferenceScopeOptionsResource({
-  studentAccountSessionKey,
+  cacheOwnerKey,
   requested,
 }: {
-  studentAccountSessionKey: string | null
+  cacheOwnerKey: string | null
   requested: boolean
 }): ReferenceScopeOptionsResourceResult {
-  const [ownership, setOwnership] = useState({
-    sessionKey: studentAccountSessionKey,
-    loadRequested: requested && studentAccountSessionKey !== null,
+  const [cacheState, setCacheState] = useState<{
+    ownerKey: string | null
+    generation: number
+    value: ReferenceScopeOptions | null
+  }>({
+    ownerKey: cacheOwnerKey,
+    generation: 0,
+    value: null,
   })
-  if (ownership.sessionKey !== studentAccountSessionKey) {
-    setOwnership({
-      sessionKey: studentAccountSessionKey,
-      loadRequested: requested && studentAccountSessionKey !== null,
-    })
-  } else if (requested && !ownership.loadRequested) {
-    setOwnership({
-      sessionKey: studentAccountSessionKey,
-      loadRequested: true,
+  const cacheMatchesOwner = cacheState.ownerKey === cacheOwnerKey
+  if (!cacheMatchesOwner) {
+    setCacheState({
+      ownerKey: cacheOwnerKey,
+      generation: 0,
+      value: null,
     })
   }
+  const cachedValue = cacheMatchesOwner ? cacheState.value : null
+  const generation = cacheMatchesOwner ? cacheState.generation : 0
   const identityKey =
-    ownership.loadRequested && ownership.sessionKey !== null
-      ? ownership.sessionKey
+    requested && cacheOwnerKey !== null && cachedValue === null
+      ? `${cacheOwnerKey}:${generation}`
       : null
   const load = useCallback(async (signal: AbortSignal) => {
     const response = await fetch('/api/daily-plans/reference/options', {
@@ -50,7 +54,40 @@ export function useReferenceScopeOptionsResource({
     }
     return value
   }, [])
-  return useAsyncResource({ identityKey, load })
+  const resource = useAsyncResource({ identityKey, load })
+  if (
+    requested &&
+    cacheOwnerKey !== null &&
+    resource.state.status === 'ready' &&
+    cachedValue !== resource.state.value
+  ) {
+    setCacheState({
+      ownerKey: cacheOwnerKey,
+      generation,
+      value: resource.state.value,
+    })
+  }
+
+  const retry = useCallback(() => {
+    if (!requested || cacheOwnerKey === null) return
+    setCacheState((current) => ({
+      ownerKey: cacheOwnerKey,
+      generation:
+        current.ownerKey === cacheOwnerKey ? current.generation + 1 : 0,
+      value: null,
+    }))
+  }, [cacheOwnerKey, requested])
+
+  if (cacheOwnerKey === null) {
+    return { state: { status: 'idle' }, retry }
+  }
+  if (cachedValue !== null) {
+    return { state: { status: 'ready', value: cachedValue }, retry }
+  }
+  if (!requested) {
+    return { state: { status: 'idle' }, retry }
+  }
+  return { state: resource.state, retry }
 }
 
 function isReferenceScopeOptions(

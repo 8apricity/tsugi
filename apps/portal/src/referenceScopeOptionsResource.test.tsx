@@ -18,7 +18,7 @@ function ResourceProbe({
   children(result: ReferenceScopeOptionsResourceResult): ReactNode
 }) {
   return children(useReferenceScopeOptionsResource({
-    studentAccountSessionKey: sessionKey,
+    cacheOwnerKey: sessionKey,
     requested,
   }))
 }
@@ -28,7 +28,7 @@ describe('Reference Scope options resource', () => {
     vi.unstubAllGlobals()
   })
 
-  it('discards a pending response when its Student Account session ends', async () => {
+  it('discards a pending response when its cache owner changes', async () => {
     const requests: Array<(response: Response) => void> = []
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
       requests.push(resolve)
@@ -93,7 +93,7 @@ describe('Reference Scope options resource', () => {
     }
   })
 
-  it('retains loaded options when the picker closes in the same session', async () => {
+  it('retains loaded options when the picker closes for the same owner', async () => {
     const options = {
       status: 'ready' as const,
       options: [{ type: 'class' as const, value: 'class-a', label: 'A組' }],
@@ -133,6 +133,54 @@ describe('Reference Scope options resource', () => {
         status: 'ready',
         value: options,
       })
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('discards a pending response when the picker closes', async () => {
+    const requests: Array<(response: Response) => void> = []
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      requests.push(resolve)
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const observed: ReferenceScopeOptionsResourceResult[] = []
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const render = async (requested: boolean) => {
+      await act(async () => {
+        root.render(
+          <ResourceProbe sessionKey="student-session-a" requested={requested}>
+            {(result) => {
+              observed.push(result)
+              return null
+            }}
+          </ResourceProbe>,
+        )
+      })
+    }
+
+    try {
+      await render(true)
+      expect(observed.at(-1)?.state).toEqual({ status: 'loading' })
+
+      await render(false)
+      expect(observed.at(-1)?.state).toEqual({ status: 'idle' })
+      await act(async () => {
+        requests[0]?.({
+          ok: true,
+          json: async () => ({
+            status: 'ready',
+            options: [{ type: 'class', value: 'stale', label: '古い組' }],
+          }),
+        } as Response)
+        await Promise.resolve()
+      })
+      expect(observed.at(-1)?.state).toEqual({ status: 'idle' })
+
+      await render(true)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
     } finally {
       await act(async () => root.unmount())
       container.remove()

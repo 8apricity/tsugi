@@ -191,4 +191,72 @@ describe('Reference Daily Plan resource', () => {
       container.remove()
     }
   })
+
+  it('does not reuse an old ready value when returning to an identity', async () => {
+    const requests: Array<(response: Response) => void> = []
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      requests.push(resolve)
+    })))
+    const observed: ReferenceDailyPlanResourceResult[] = []
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const observe = (result: ReferenceDailyPlanResourceResult) => {
+      observed.push(result)
+      return null
+    }
+    const selectionA = {
+      schoolDate: '2026-07-27',
+      referenceScope: {
+        type: 'class' as const,
+        value: 'class-2-4',
+        label: '2年4組',
+      },
+    }
+    const selectionB = {
+      schoolDate: '2026-07-28',
+      referenceScope: selectionA.referenceScope,
+    }
+    const responseFor = (schoolDate: string) => ({
+      ok: true,
+      json: async () => ({
+        status: 'ready',
+        referenceScope: { type: 'class', value: 'class-2-4' },
+        schoolDate,
+        tasks: [],
+        periods: [],
+        notes: [],
+      }),
+    } as Response)
+
+    try {
+      await act(async () => {
+        root.render(
+          <ResourceProbe selection={selectionA}>{observe}</ResourceProbe>,
+        )
+      })
+      await act(async () => {
+        requests[0]?.(responseFor(selectionA.schoolDate))
+        await Promise.resolve()
+      })
+      expect(observed.at(-1)?.state.status).toBe('ready')
+
+      await act(async () => {
+        root.render(
+          <ResourceProbe selection={selectionB}>{observe}</ResourceProbe>,
+        )
+      })
+      expect(observed.at(-1)?.state).toEqual({ status: 'loading' })
+
+      await act(async () => {
+        root.render(
+          <ResourceProbe selection={selectionA}>{observe}</ResourceProbe>,
+        )
+      })
+      expect(observed.at(-1)?.state).toEqual({ status: 'loading' })
+      expect(requests).toHaveLength(3)
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
 })

@@ -185,6 +185,10 @@ test.describe('authenticated Direct Change review', () => {
     page,
   }) => {
     let detailRequestCount = 0
+    let releaseStaleDetailRequest: () => void = () => undefined
+    const staleDetailRequestGate = new Promise<void>((resolve) => {
+      releaseStaleDetailRequest = resolve
+    })
     await page.route('**/api/timetable-changes/direct/*', async (route) => {
       if (new URL(route.request().url()).pathname.endsWith('/options')) {
         await route.continue()
@@ -197,6 +201,15 @@ test.describe('authenticated Direct Change review', () => {
           contentType: 'application/json',
           body: JSON.stringify({ status: 'unavailable' }),
         })
+        return
+      }
+      if (detailRequestCount === 3) {
+        await staleDetailRequestGate
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: 'unavailable' }),
+        }).catch(() => undefined)
         return
       }
       await route.continue()
@@ -250,6 +263,16 @@ test.describe('authenticated Direct Change review', () => {
     await detail.getByRole('button', { name: '編集履歴に戻る' }).click()
     await expect(history).toBeVisible()
     await expect(entry).toBeFocused()
+
+    await entry.click()
+    await expect(detail.getByText('変更内容を読み込んでいます…')).toBeVisible()
+    await detail.getByRole('button', { name: '編集履歴に戻る' }).click()
+    await entry.click()
+    await expect.poll(() => detailRequestCount).toBe(4)
+    await expect(detail.locator('.direct-change-detail')).toBeVisible()
+    releaseStaleDetailRequest()
+    await expect(detail.getByRole('alert')).toHaveCount(0)
+    await detail.getByRole('button', { name: '編集履歴に戻る' }).click()
 
     await history.getByRole('button', { name: '閉じる' }).click()
     await expect(history).toHaveCount(0)

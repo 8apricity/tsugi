@@ -139,7 +139,7 @@ describe('Reference Scope options resource', () => {
     }
   })
 
-  it('discards a pending response when the picker closes', async () => {
+  it('continues the first load when the picker closes for the same owner', async () => {
     const requests: Array<(response: Response) => void> = []
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
       requests.push(resolve)
@@ -166,7 +166,7 @@ describe('Reference Scope options resource', () => {
       expect(observed.at(-1)?.state).toEqual({ status: 'loading' })
 
       await render(false)
-      expect(observed.at(-1)?.state).toEqual({ status: 'idle' })
+      expect(observed.at(-1)?.state).toEqual({ status: 'loading' })
       await act(async () => {
         requests[0]?.({
           ok: true,
@@ -177,10 +177,16 @@ describe('Reference Scope options resource', () => {
         } as Response)
         await Promise.resolve()
       })
-      expect(observed.at(-1)?.state).toEqual({ status: 'idle' })
+      expect(observed.at(-1)?.state).toEqual({
+        status: 'ready',
+        value: {
+          status: 'ready',
+          options: [{ type: 'class', value: 'stale', label: '古い組' }],
+        },
+      })
 
       await render(true)
-      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
     } finally {
       await act(async () => root.unmount())
       container.remove()

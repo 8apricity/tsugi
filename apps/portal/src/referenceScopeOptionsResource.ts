@@ -7,6 +7,7 @@ import {
   useAsyncResource,
   type AsyncResourceResult,
 } from './asyncResource'
+import { isRecord } from './resourceResponse'
 
 export type ReferenceScopeOptionsResourceResult =
   AsyncResourceResult<ReferenceScopeOptions>
@@ -18,28 +19,27 @@ export function useReferenceScopeOptionsResource({
   cacheOwnerKey: string | null
   requested: boolean
 }): ReferenceScopeOptionsResourceResult {
-  const [cacheState, setCacheState] = useState<{
+  const [cacheRequest, setCacheRequest] = useState<{
     ownerKey: string | null
-    generation: number
-    value: ReferenceScopeOptions | null
+    loadRequested: boolean
   }>({
     ownerKey: cacheOwnerKey,
-    generation: 0,
-    value: null,
+    loadRequested: requested && cacheOwnerKey !== null,
   })
-  const cacheMatchesOwner = cacheState.ownerKey === cacheOwnerKey
-  if (!cacheMatchesOwner) {
-    setCacheState({
+  if (cacheRequest.ownerKey !== cacheOwnerKey) {
+    setCacheRequest({
       ownerKey: cacheOwnerKey,
-      generation: 0,
-      value: null,
+      loadRequested: requested && cacheOwnerKey !== null,
+    })
+  } else if (requested && !cacheRequest.loadRequested) {
+    setCacheRequest({
+      ownerKey: cacheOwnerKey,
+      loadRequested: true,
     })
   }
-  const cachedValue = cacheMatchesOwner ? cacheState.value : null
-  const generation = cacheMatchesOwner ? cacheState.generation : 0
   const identityKey =
-    requested && cacheOwnerKey !== null && cachedValue === null
-      ? `${cacheOwnerKey}:${generation}`
+    cacheRequest.loadRequested && cacheRequest.ownerKey !== null
+      ? cacheRequest.ownerKey
       : null
   const load = useCallback(async (signal: AbortSignal) => {
     const response = await fetch('/api/daily-plans/reference/options', {
@@ -54,40 +54,7 @@ export function useReferenceScopeOptionsResource({
     }
     return value
   }, [])
-  const resource = useAsyncResource({ identityKey, load })
-  if (
-    requested &&
-    cacheOwnerKey !== null &&
-    resource.state.status === 'ready' &&
-    cachedValue !== resource.state.value
-  ) {
-    setCacheState({
-      ownerKey: cacheOwnerKey,
-      generation,
-      value: resource.state.value,
-    })
-  }
-
-  const retry = useCallback(() => {
-    if (!requested || cacheOwnerKey === null) return
-    setCacheState((current) => ({
-      ownerKey: cacheOwnerKey,
-      generation:
-        current.ownerKey === cacheOwnerKey ? current.generation + 1 : 0,
-      value: null,
-    }))
-  }, [cacheOwnerKey, requested])
-
-  if (cacheOwnerKey === null) {
-    return { state: { status: 'idle' }, retry }
-  }
-  if (cachedValue !== null) {
-    return { state: { status: 'ready', value: cachedValue }, retry }
-  }
-  if (!requested) {
-    return { state: { status: 'idle' }, retry }
-  }
-  return { state: resource.state, retry }
+  return useAsyncResource({ identityKey, load })
 }
 
 function isReferenceScopeOptions(
@@ -112,8 +79,4 @@ function isReferenceScopeOption(
     typeof value.value === 'string' &&
     typeof value.label === 'string'
   )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }

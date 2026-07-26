@@ -186,8 +186,12 @@ test.describe('authenticated Direct Change review', () => {
   }) => {
     let detailRequestCount = 0
     let releaseStaleDetailRequest: () => void = () => undefined
+    let markStaleDetailRequestSettled: () => void = () => undefined
     const staleDetailRequestGate = new Promise<void>((resolve) => {
       releaseStaleDetailRequest = resolve
+    })
+    const staleDetailRequestSettled = new Promise<void>((resolve) => {
+      markStaleDetailRequestSettled = resolve
     })
     await page.route('**/api/timetable-changes/direct/*', async (route) => {
       if (new URL(route.request().url()).pathname.endsWith('/options')) {
@@ -205,11 +209,17 @@ test.describe('authenticated Direct Change review', () => {
       }
       if (detailRequestCount === 3) {
         await staleDetailRequestGate
-        await route.fulfill({
-          status: 503,
-          contentType: 'application/json',
-          body: JSON.stringify({ status: 'unavailable' }),
-        }).catch(() => undefined)
+        try {
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ status: 'unavailable' }),
+          })
+        } catch {
+          // The old route may already be aborted. Settlement still matters.
+        } finally {
+          markStaleDetailRequestSettled()
+        }
         return
       }
       await route.continue()
@@ -271,6 +281,7 @@ test.describe('authenticated Direct Change review', () => {
     await expect.poll(() => detailRequestCount).toBe(4)
     await expect(detail.locator('.direct-change-detail')).toBeVisible()
     releaseStaleDetailRequest()
+    await staleDetailRequestSettled
     await expect(detail.getByRole('alert')).toHaveCount(0)
     await detail.getByRole('button', { name: '編集履歴に戻る' }).click()
 

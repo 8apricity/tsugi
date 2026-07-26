@@ -11,6 +11,7 @@ import {
   useAsyncResource,
   type AsyncResourceResult,
 } from './asyncResource'
+import { isRecord } from './resourceResponse'
 
 type RouteResourceSelection = {
   routeInstanceId: string
@@ -54,36 +55,49 @@ export type TimetableChangeDetailResourceResult =
 export function useTaskEditHistoryResource(
   selection: (RouteResourceSelection & { taskId: string }) | null,
 ): TaskEditHistoryResourceResult {
-  return useEntityEditHistoryResource<TaskEditHistoryResponse>({
-    routeInstanceId: selection?.routeInstanceId,
-    entityKind: 'task',
-    entityId: selection?.taskId,
-    responseIdKey: 'taskId',
-  })
+  return useEntityEditHistoryResource(
+    selection
+      ? {
+          routeInstanceId: selection.routeInstanceId,
+          entityId: selection.taskId,
+        }
+      : null,
+    'task',
+  )
 }
 
 export function useNoteEditHistoryResource(
   selection: (RouteResourceSelection & { noteId: string }) | null,
 ): NoteEditHistoryResourceResult {
-  return useEntityEditHistoryResource<NoteEditHistoryResponse>({
-    routeInstanceId: selection?.routeInstanceId,
-    entityKind: 'note',
-    entityId: selection?.noteId,
-    responseIdKey: 'noteId',
-  })
+  return useEntityEditHistoryResource(
+    selection
+      ? {
+          routeInstanceId: selection.routeInstanceId,
+          entityId: selection.noteId,
+        }
+      : null,
+    'note',
+  )
 }
 
-function useEntityEditHistoryResource<T>({
-  routeInstanceId,
-  entityKind,
-  entityId,
-  responseIdKey,
-}: {
-  routeInstanceId: string | undefined
-  entityKind: 'task' | 'note'
-  entityId: string | undefined
-  responseIdKey: 'taskId' | 'noteId'
-}): AsyncResourceResult<T> {
+type EntityEditHistoryKind = 'task' | 'note'
+
+type EntityEditHistoryResponseByKind = {
+  task: TaskEditHistoryResponse
+  note: NoteEditHistoryResponse
+}
+
+const entityEditHistoryResponseIdKey = {
+  task: 'taskId',
+  note: 'noteId',
+} as const satisfies Record<EntityEditHistoryKind, 'taskId' | 'noteId'>
+
+function useEntityEditHistoryResource<K extends EntityEditHistoryKind>(
+  selection: (RouteResourceSelection & { entityId: string }) | null,
+  entityKind: K,
+): AsyncResourceResult<EntityEditHistoryResponseByKind[K]> {
+  const routeInstanceId = selection?.routeInstanceId
+  const entityId = selection?.entityId
   const identityKey = routeInstanceId && entityId
     ? `${routeInstanceId}:${entityKind}:${entityId}`
     : null
@@ -95,6 +109,7 @@ function useEntityEditHistoryResource<T>({
     )
     if (!response.ok) throw new Error('Edit History unavailable')
     const value = await response.json() as unknown
+    const responseIdKey = entityEditHistoryResponseIdKey[entityKind]
     if (
       !isRecord(value) ||
       value.status !== 'ready' ||
@@ -103,8 +118,8 @@ function useEntityEditHistoryResource<T>({
     ) {
       throw new Error('Edit History response did not match selection')
     }
-    return value as T
-  }, [entityId, entityKind, responseIdKey])
+    return value as EntityEditHistoryResponseByKind[K]
+  }, [entityId, entityKind])
   return useAsyncResource({ identityKey, load })
 }
 
@@ -189,8 +204,4 @@ export function useTimetableChangeDetailResource(
     return value as DirectTimetableChangeDetail
   }, [sharedInformationChangeId])
   return useAsyncResource({ identityKey, load })
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }

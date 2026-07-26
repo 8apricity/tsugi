@@ -7,6 +7,7 @@ import {
   useAsyncResource,
   type AsyncResourceResult,
 } from './asyncResource'
+import { isRecord } from './resourceResponse'
 
 export type ReferenceDailyPlanSelection = {
   schoolDate: string
@@ -85,8 +86,4 @@ function referenceDailyPlanMatchesSelection(
     Array.isArray(value.periods) &&
     Array.isArray(value.notes)
   )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }

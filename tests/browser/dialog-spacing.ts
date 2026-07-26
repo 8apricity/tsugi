@@ -9,7 +9,9 @@ export async function expectCompactReadOnlyDialogSpacing(
   const [bodySpacing, firstContentMargin, horizontalContentMargin] =
     await Promise.all([
       body.evaluate((element) => {
-        const style = getComputedStyle(element)
+        const style = element.ownerDocument.defaultView!.getComputedStyle(
+          element,
+        )
         return {
           top: style.paddingTop,
           right: style.paddingRight,
@@ -17,9 +19,12 @@ export async function expectCompactReadOnlyDialogSpacing(
           left: style.paddingLeft,
         }
       }),
-      firstContent.evaluate((element) => getComputedStyle(element).marginTop),
+      firstContent.evaluate((element) =>
+        element.ownerDocument.defaultView!.getComputedStyle(element).marginTop),
       horizontalContent.evaluate((element) => {
-        const style = getComputedStyle(element)
+        const style = element.ownerDocument.defaultView!.getComputedStyle(
+          element,
+        )
         return {
           right: style.marginRight,
           left: style.marginLeft,

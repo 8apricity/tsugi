@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -85,19 +86,21 @@ import {
 import { DailyLessonNoteList } from "./dailyLessonNoteView";
 import { ReferenceDailyPlanNotes } from "./referenceDailyPlanNoteView";
 import type {
-  ReferenceDailyPlanContent,
   ReferenceScopeOption,
-  ReferenceScopeOptions,
 } from "../shared/referenceDailyPlan";
-import {
-  TaskEditHistoryDialog,
-  type TaskEditHistoryState,
-} from "./taskEditHistoryView";
+import { useReferenceDailyPlanResource } from "./referenceDailyPlanResource";
+import { useReferenceScopeOptionsResource } from "./referenceScopeOptionsResource";
+import { TaskEditHistoryDialog } from "./taskEditHistoryView";
 import { NoteBodyFields, TaskDetailDialog } from "./taskDetailView";
+import { NoteEditHistoryDialog } from "./noteEditHistoryView";
 import {
-  NoteEditHistoryDialog,
-  type NoteEditHistoryState,
-} from "./noteEditHistoryView";
+  useNoteEditHistoryResource,
+  useTaskEditHistoryResource,
+  useTimetableChangeDetailResource,
+  useTimetableEditHistoryResource,
+  type DirectTimetableChangeDetail,
+  type TimetableChangeHistoryEntry,
+} from "./editHistoryResource";
 import { NoteDetailDialog } from "./noteDetailView";
 import {
   formatSchoolDate as formatUiSchoolDate,
@@ -217,55 +220,16 @@ type TimetableLayerDialog = {
     | TimetableLayerState;
 };
 
-type TimetableChangeHistoryEntry = {
-  sharedInformationChangeId: string;
-  sharedInformationItemId: string;
-  changeKind: "add" | "update" | "remove";
-  sourceType: "direct" | "proposal";
-  primaryActorDisplayName: string;
-  changedAt: number;
-  before: TimetableReplacement | null;
-  after: TimetableReplacement | null;
-};
-
-type TimetableChangeHistoryResponse = {
-  status: "ready";
-  targetScope: { type: TargetScopeType; value: string };
-  changeDate: string;
-  periodNumber: number;
-  entries: TimetableChangeHistoryEntry[];
-};
-
-type DirectTimetableChangeDetail = TimetableChangeHistoryEntry & {
-  status: "ready";
-  targetScope: { type: TargetScopeType; value: string };
-  changeDate: string;
-  periodNumber: number;
-};
-
 type TimetableHistoryDialog = {
   routeInstanceId: string;
-  detailRouteInstanceId: string | null;
   targetScopeType: TargetScopeType;
   changeDate: string;
   periodNumber: number;
-  requestId: number;
-  history:
-    | { status: "loading" }
-    | { status: "error" }
-    | TimetableChangeHistoryResponse;
-  detail:
-    | null
-    | { status: "loading"; sharedInformationChangeId: string }
-    | { status: "error"; sharedInformationChangeId: string }
-    | DirectTimetableChangeDetail;
 };
 
 type TaskHistoryDialog = {
   routeInstanceId: string;
   task: DailyPlanTaskForCache;
-  requestId: number;
-  state: TaskEditHistoryState;
 };
 
 type TaskRemovalConfirmation = {
@@ -288,8 +252,6 @@ type NoteEditorForm = NewNoteDraftForm & {
 type NoteHistoryDialog = {
   routeInstanceId: string;
   note: DailyPlanNoteForCache;
-  requestId: number;
-  state: NoteEditHistoryState;
 };
 
 type NoteDialogParent = "task-detail" | "daily-lesson-detail";
@@ -314,18 +276,6 @@ type EditorInitialForms = {
   task: TaskEditorForm | null;
   note: NoteEditorForm | null;
 };
-
-type ReferenceScopeOptionsState =
-  | { status: "loading" }
-  | { status: "error" }
-  | ReferenceScopeOptions;
-
-type ReferenceDailyPlanState =
-  | { status: "error"; schoolDate: string; referenceScopeValue: string }
-  | ({
-      status: "ready";
-      referenceScopeValue: string;
-    } & ReferenceDailyPlanContent);
 
 type PendingChangeContentTimetable = Pick<
   ChangeContentTimetableItem,
@@ -508,13 +458,13 @@ function App() {
   const [status, setStatus] = useState<RequestStatus>("checking");
   const [message, setMessage] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [referenceScopeOptions, setReferenceScopeOptions] =
-    useState<ReferenceScopeOptionsState | null>(null);
   const [referencePickerScopeKey, setReferencePickerScopeKey] = useState("");
   const [referenceScope, setReferenceScope] =
     useState<ReferenceScopeOption | null>(null);
-  const [referenceDailyPlan, setReferenceDailyPlan] =
-    useState<ReferenceDailyPlanState | null>(null);
+  const studentAccountSessionKey = useMemo(
+    () => studentAccount ? crypto.randomUUID() : null,
+    [studentAccount],
+  );
   const menuAreaRef = useRef<HTMLDivElement | null>(null);
   const [dailyPlanClient] = useState(() =>
     createDailyPlanClient({
@@ -541,6 +491,14 @@ function App() {
     dailyPlanClient.subscribe,
     dailyPlanClient.getSnapshot,
     dailyPlanClient.getSnapshot,
+  );
+  const referenceDailyPlanResource = useReferenceDailyPlanResource(
+    referenceScope
+      ? {
+          schoolDate: selectedSchoolDate,
+          referenceScope,
+        }
+      : null,
   );
   const datePickerRef = useRef<HTMLElement | null>(null);
   const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -578,6 +536,23 @@ function App() {
   const dialogRouteExists = (kind: DialogRoute["kind"]) =>
     dialogFlowSnapshot.routes.some((route) => route.kind === kind);
   const referencePickerOpen = dialogRouteExists("reference-picker");
+  const referenceScopeOptionsResource = useReferenceScopeOptionsResource({
+    studentAccountSessionKey:
+      status === "authenticated" ? studentAccountSessionKey : null,
+    requested: referencePickerOpen,
+  });
+  const readyReferenceScopeOptions =
+    referenceScopeOptionsResource.state.status === "ready"
+      ? referenceScopeOptionsResource.state.value
+      : null;
+  const effectiveReferencePickerScopeKey =
+    readyReferenceScopeOptions?.options.some(
+      (option) => referenceScopeKey(option) === referencePickerScopeKey,
+    )
+      ? referencePickerScopeKey
+      : readyReferenceScopeOptions?.options[0]
+        ? referenceScopeKey(readyReferenceScopeOptions.options[0])
+        : "";
   const [timetableEditorOptions, setTimetableEditorOptions] =
     useState<TimetableEditorOptions | null>(null);
   const [timetableEditorForm, setTimetableEditorForm] =
@@ -649,6 +624,45 @@ function App() {
     useState<TimetableLayerDialog | null>(null);
   const [timetableHistoryDialog, setTimetableHistoryDialog] =
     useState<TimetableHistoryDialog | null>(null);
+  const timetableChangeDetailRoute = dialogFlowSnapshot.routes.findLast(
+    (route) => route.kind === "timetable-change-detail",
+  );
+  const taskEditHistoryResource = useTaskEditHistoryResource(
+    taskHistoryDialog
+      ? {
+          routeInstanceId: taskHistoryDialog.routeInstanceId,
+          taskId: taskHistoryDialog.task.taskId,
+        }
+      : null,
+  );
+  const noteEditHistoryResource = useNoteEditHistoryResource(
+    noteHistoryDialog
+      ? {
+          routeInstanceId: noteHistoryDialog.routeInstanceId,
+          noteId: noteHistoryDialog.note.noteId,
+        }
+      : null,
+  );
+  const timetableEditHistoryResource = useTimetableEditHistoryResource(
+    timetableHistoryDialog
+      ? {
+          routeInstanceId: timetableHistoryDialog.routeInstanceId,
+          targetScopeType: timetableHistoryDialog.targetScopeType,
+          changeDate: timetableHistoryDialog.changeDate,
+          periodNumber: timetableHistoryDialog.periodNumber,
+        }
+      : null,
+  );
+  const timetableChangeDetailResource = useTimetableChangeDetailResource(
+    timetableHistoryDialog &&
+      timetableChangeDetailRoute?.kind === "timetable-change-detail"
+      ? {
+          routeInstanceId: timetableChangeDetailRoute.instanceId,
+          sharedInformationChangeId:
+            timetableChangeDetailRoute.sharedInformationChangeId,
+        }
+      : null,
+  );
   const layerDialogSchoolDate = timetableLayerDialog?.schoolDate;
   const layerDialogRequestId = timetableLayerDialog?.requestId;
   const layerDialogRouteInstanceId = timetableLayerDialog?.routeInstanceId;
@@ -795,33 +809,6 @@ function App() {
     dailyPlanClient.reset();
     void dailyPlanClient.loadSelectedDailyPlan();
   }, [dailyPlanClient, status, studentAccount]);
-
-  useEffect(() => {
-    if (!referenceScope) return;
-    const controller = new AbortController();
-    const url = new URL("/api/daily-plans/reference", window.location.origin);
-    url.searchParams.set("date", selectedSchoolDate);
-    url.searchParams.set("scope", referenceScope.type);
-    url.searchParams.set("value", referenceScope.value);
-    fetch(url, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Reference Daily Plan unavailable");
-        return response.json() as Promise<ReferenceDailyPlanContent & { status: "ready" }>;
-      })
-      .then((dailyPlan) => setReferenceDailyPlan({
-        ...dailyPlan,
-        referenceScopeValue: referenceScope.value,
-      }))
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setReferenceDailyPlan({
-          status: "error",
-          schoolDate: selectedSchoolDate,
-          referenceScopeValue: referenceScope.value,
-        });
-      });
-    return () => controller.abort();
-  }, [referenceScope, selectedSchoolDate]);
 
   useEffect(() => {
     if (
@@ -988,133 +975,6 @@ function App() {
     pendingChangeContentTimetableRef.current = null;
     openLayerReplacementRef.current(pending.targetScopeType);
   }, [timetableEditorForm, timetableLayerDialog]);
-
-  useEffect(() => {
-    if (!timetableHistoryDialog ||
-      timetableHistoryDialog.history.status !== "loading") return;
-    const {
-      targetScopeType,
-      changeDate,
-      periodNumber,
-      requestId,
-      routeInstanceId,
-    } = timetableHistoryDialog;
-    const controller = new AbortController();
-    const url = new URL("/api/timetable-changes/history", window.location.origin);
-    url.searchParams.set("scope", targetScopeType);
-    url.searchParams.set("date", changeDate);
-    url.searchParams.set("period", String(periodNumber));
-    fetch(url, { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error("history unavailable");
-        return response.json() as Promise<TimetableChangeHistoryResponse>;
-      })
-      .then((history) => {
-        setTimetableHistoryDialog((current) =>
-          dialogFlow.hasInstance(routeInstanceId) &&
-          current?.routeInstanceId === routeInstanceId &&
-          current.requestId === requestId &&
-          current.targetScopeType === targetScopeType &&
-          current.changeDate === changeDate &&
-          current.periodNumber === periodNumber
-            ? { ...current, history }
-            : current,
-        );
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setTimetableHistoryDialog((current) =>
-          dialogFlow.hasInstance(routeInstanceId) &&
-          current?.routeInstanceId === routeInstanceId &&
-          current.requestId === requestId &&
-          current.targetScopeType === targetScopeType &&
-          current.changeDate === changeDate &&
-          current.periodNumber === periodNumber
-            ? { ...current, history: { status: "error" } }
-            : current,
-        );
-      });
-    return () => controller.abort();
-  }, [dialogFlow, timetableHistoryDialog]);
-
-  useEffect(() => {
-    if (!taskHistoryDialog || taskHistoryDialog.state.status !== "loading") {
-      return;
-    }
-    const { task, requestId, routeInstanceId } = taskHistoryDialog;
-    const { taskId } = task;
-    const controller = new AbortController();
-    fetch(`/api/tasks/${encodeURIComponent(taskId)}/history`, {
-      signal: controller.signal,
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error("Task Edit History unavailable");
-        return response.json() as Promise<
-          Extract<TaskEditHistoryState, { status: "ready" }>
-        >;
-      })
-      .then((history) => {
-        setTaskHistoryDialog((current) =>
-          dialogFlow.hasInstance(routeInstanceId) &&
-          current?.routeInstanceId === routeInstanceId &&
-          current.task.taskId === taskId &&
-          current.requestId === requestId
-            ? { ...current, state: history }
-            : current,
-        );
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setTaskHistoryDialog((current) =>
-          dialogFlow.hasInstance(routeInstanceId) &&
-          current?.routeInstanceId === routeInstanceId &&
-          current.task.taskId === taskId &&
-          current.requestId === requestId
-            ? { ...current, state: { status: "error" } }
-            : current,
-        );
-      });
-    return () => controller.abort();
-  }, [dialogFlow, taskHistoryDialog]);
-
-  useEffect(() => {
-    if (!noteHistoryDialog || noteHistoryDialog.state.status !== "loading") {
-      return;
-    }
-    const { note, requestId, routeInstanceId } = noteHistoryDialog;
-    const controller = new AbortController();
-    fetch(`/api/notes/${encodeURIComponent(note.noteId)}/history`, {
-      signal: controller.signal,
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error("Note Edit History unavailable");
-        return response.json() as Promise<
-          Extract<NoteEditHistoryState, { status: "ready" }>
-        >;
-      })
-      .then((history) => {
-        setNoteHistoryDialog((current) =>
-          dialogFlow.hasInstance(routeInstanceId) &&
-          current?.routeInstanceId === routeInstanceId &&
-          current.note.noteId === note.noteId &&
-          current.requestId === requestId
-            ? { ...current, state: history }
-            : current,
-        );
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setNoteHistoryDialog((current) =>
-          dialogFlow.hasInstance(routeInstanceId) &&
-          current?.routeInstanceId === routeInstanceId &&
-          current.note.noteId === note.noteId &&
-          current.requestId === requestId
-            ? { ...current, state: { status: "error" } }
-            : current,
-        );
-      });
-    return () => controller.abort();
-  }, [dialogFlow, noteHistoryDialog]);
 
   useEffect(() => {
     if (dailyPlanState.status !== "ready") return;
@@ -1481,7 +1341,6 @@ function App() {
     setTaskHistoryDialog(null);
     setTimetableLayerDialog(null);
     setTimetableEditorOptions(null);
-    setReferenceScopeOptions(null);
     setReferencePickerScopeKey("");
     setReferenceScope(null);
     setMenuOpen(false);
@@ -1664,8 +1523,7 @@ function App() {
           timetableHistoryDialog.periodNumber === route.periodNumber &&
           timetableHistoryDialog.targetScopeType === route.targetScopeType;
       case "timetable-change-detail":
-        return timetableHistoryDialog?.detailRouteInstanceId ===
-          route.instanceId;
+        return Boolean(timetableHistoryDialog);
       case "reference-picker":
       case "change-content":
         return true;
@@ -1696,12 +1554,6 @@ function App() {
       }
     } else if (route.kind === "task-detail") {
       setTaskDetail(null);
-    } else if (route.kind === "timetable-change-detail") {
-      setTimetableHistoryDialog((current) =>
-        current
-          ? { ...current, detail: null, detailRouteInstanceId: null }
-          : current
-      );
     } else if (route.kind === "timetable-history") {
       setTimetableHistoryDialog(null);
     } else if (route.kind === "timetable-editor") {
@@ -2481,23 +2333,6 @@ function App() {
     return { dialog, scrollContainer };
   }
 
-  async function loadReferenceScopeOptions() {
-    setReferenceScopeOptions({ status: "loading" });
-    try {
-      const response = await fetch("/api/daily-plans/reference/options");
-      if (!response.ok) throw new Error("Reference Scope options unavailable");
-      const options = (await response.json()) as ReferenceScopeOptions;
-      setReferenceScopeOptions(options);
-      setReferencePickerScopeKey(
-        options.options.length > 0
-          ? referenceScopeKey(options.options[0])
-          : "",
-      );
-    } catch {
-      setReferenceScopeOptions({ status: "error" });
-    }
-  }
-
   function openReferencePicker() {
     setMenuOpen(false);
     const transition = dialogFlow.openReferencePicker({
@@ -2507,29 +2342,32 @@ function App() {
       },
     });
     if (transition.status === "rejected") return;
+    if (referenceScopeOptionsResource.state.status === "error") {
+      referenceScopeOptionsResource.retry();
+    }
     if (referenceScope) {
       setReferencePickerScopeKey(referenceScopeKey(referenceScope));
-    }
-    if (referenceScopeOptions === null) {
-      void loadReferenceScopeOptions();
     }
   }
 
   function selectReferenceScope(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (referenceScopeOptions?.status !== "ready") return;
-    const option = referenceScopeOptions.options.find(
-      (candidate) => referenceScopeKey(candidate) === referencePickerScopeKey,
+    if (referenceScopeOptionsResource.state.status !== "ready") return;
+    const option = referenceScopeOptionsResource.state.value.options.find(
+      (candidate) =>
+        referenceScopeKey(candidate) === effectiveReferencePickerScopeKey,
     );
     if (!option) return;
     if (
       referenceScope?.type === option.type &&
       referenceScope.value === option.value
     ) {
+      if (referenceDailyPlanResource.state.status === "error") {
+        referenceDailyPlanResource.retry();
+      }
       applyDialogFlowResult(dialogFlow.completeCurrent());
       return;
     }
-    setReferenceDailyPlan(null);
     setReferenceScope(option);
     applyDialogFlowResult(dialogFlow.completeCurrent());
   }
@@ -2670,8 +2508,6 @@ function App() {
     setNoteHistoryDialog({
       routeInstanceId,
       note,
-      requestId: Date.now(),
-      state: { status: "loading" },
     });
   }
 
@@ -3247,13 +3083,9 @@ function App() {
     if (!routeInstanceId) return;
     setTimetableHistoryDialog({
       routeInstanceId,
-      detailRouteInstanceId: null,
       targetScopeType,
       changeDate: timetableLayerDialog.schoolDate,
       periodNumber: timetableLayerDialog.periodNumber,
-      requestId: 0,
-      history: { status: "loading" },
-      detail: null,
     });
   }
 
@@ -3271,12 +3103,10 @@ function App() {
     setTaskHistoryDialog({
       routeInstanceId,
       task,
-      requestId: 0,
-      state: { status: "loading" },
     });
   }
 
-  async function openDirectChangeDetail(sharedInformationChangeId: string) {
+  function openDirectChangeDetail(sharedInformationChangeId: string) {
     if (
       topDialogRoute?.kind !== "timetable-change-detail" ||
       topDialogRoute.sharedInformationChangeId !== sharedInformationChangeId
@@ -3289,41 +3119,6 @@ function App() {
         },
       });
       if (transition.status === "rejected") return;
-    }
-    const detailRoute = dialogFlow.getSnapshot().routes.at(-1);
-    if (detailRoute?.kind !== "timetable-change-detail") return;
-    const routeInstanceId = detailRoute.instanceId;
-    setTimetableHistoryDialog((current) => current ? {
-      ...current,
-      detailRouteInstanceId: routeInstanceId,
-      detail: { status: "loading", sharedInformationChangeId },
-    } : current);
-    try {
-      const response = await fetch(
-        `/api/timetable-changes/direct/${encodeURIComponent(sharedInformationChangeId)}`,
-      );
-      if (!response.ok) throw new Error("detail unavailable");
-      const detail = await response.json() as DirectTimetableChangeDetail;
-      setTimetableHistoryDialog((current) =>
-        dialogFlow.hasInstance(routeInstanceId) &&
-        dialogFlow.getSnapshot().routes.at(-1)?.instanceId === routeInstanceId &&
-        current?.detailRouteInstanceId === routeInstanceId &&
-        current.detail?.sharedInformationChangeId === sharedInformationChangeId
-          ? { ...current, detail }
-          : current,
-      );
-    } catch {
-      setTimetableHistoryDialog((current) =>
-        dialogFlow.hasInstance(routeInstanceId) &&
-        dialogFlow.getSnapshot().routes.at(-1)?.instanceId === routeInstanceId &&
-        current?.detailRouteInstanceId === routeInstanceId &&
-        current.detail?.sharedInformationChangeId === sharedInformationChangeId
-          ? {
-              ...current,
-              detail: { status: "error", sharedInformationChangeId },
-            }
-          : current,
-      );
     }
   }
 
@@ -3789,18 +3584,17 @@ function App() {
             lessonName: period.lessonName,
           }))
         : null;
-    const referencePlanMatchesSelection = Boolean(
-      referenceScope &&
-      referenceDailyPlan &&
-      referenceDailyPlan.schoolDate === selectedSchoolDate &&
-      referenceDailyPlan.referenceScopeValue === referenceScope.value,
-    );
+    const referenceDailyPlan =
+      referenceDailyPlanResource.state.status === "ready"
+        ? referenceDailyPlanResource.state.value
+        : null;
     const referencePlanReady =
-      referencePlanMatchesSelection &&
-      referenceDailyPlan?.status === "ready" &&
+      referenceScope !== null &&
+      referenceDailyPlan !== null &&
       referenceBasePeriods !== null;
     const referencePlanError =
-      referencePlanMatchesSelection && referenceDailyPlan?.status === "error";
+      referenceScope !== null &&
+      referenceDailyPlanResource.state.status === "error";
 
     const taskEditorFields = taskEditorForm ? (
       <>
@@ -4140,18 +3934,27 @@ function App() {
             {referenceScope && referencePlanError ? (
               <div className="panel state-panel" role="alert">
                 <h2>参照する予定を読み込めませんでした</h2>
-                <p>範囲を選び直すか、時間をおいて再度お試しください。</p>
-                <button
-                  className="button-secondary"
-                  type="button"
-                  onClick={openReferencePicker}
-                >
-                  範囲を選び直す
-                </button>
+                <p>再読み込みするか、参照する範囲を選び直してください。</p>
+                <div className="state-panel-actions">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={referenceDailyPlanResource.retry}
+                  >
+                    再読み込み
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={openReferencePicker}
+                  >
+                    範囲を選び直す
+                  </button>
+                </div>
               </div>
             ) : null}
 
-            {referenceScope && referencePlanReady ? (
+            {referenceScope && referencePlanReady && referenceDailyPlan ? (
               <>
                 <div className="reference-scope-banner" role="status">
                   自分の時間割で<strong>{referenceScope.label}</strong>を参照中
@@ -4677,18 +4480,18 @@ function App() {
               size="compact"
               onClose={requestDialogCloseAll}
             >
-                {referenceScopeOptions?.status === "loading" ||
-                referenceScopeOptions === null ? (
+                {referenceScopeOptionsResource.state.status === "idle" ||
+                referenceScopeOptionsResource.state.status === "loading" ? (
                   <p className="reference-scope-dialog-status" role="status">
                     選べる範囲を読み込んでいます…
                   </p>
-                ) : referenceScopeOptions.status === "error" ? (
+                ) : referenceScopeOptionsResource.state.status === "error" ? (
                   <div className="reference-scope-dialog-status" role="alert">
                     <p>選べる範囲を読み込めませんでした。</p>
                     <button
                       className="button-secondary"
                       type="button"
-                      onClick={() => void loadReferenceScopeOptions()}
+                      onClick={referenceScopeOptionsResource.retry}
                     >
                       再読み込み
                     </button>
@@ -4701,29 +4504,38 @@ function App() {
                     <label>
                       <span>参照する変更適用範囲</span>
                       <select
-                        value={referencePickerScopeKey}
+                        value={effectiveReferencePickerScopeKey}
                         onChange={(event) =>
                           setReferencePickerScopeKey(event.target.value)}
-                        disabled={referenceScopeOptions.options.length === 0}
+                        disabled={
+                          referenceScopeOptionsResource.state.value.options
+                            .length === 0
+                        }
                       >
-                        {referenceScopeOptions.options.map((option) => (
+                        {referenceScopeOptionsResource.state.value.options.map(
+                          (option) => (
                           <option
                             key={referenceScopeKey(option)}
                             value={referenceScopeKey(option)}
                           >
                             {option.label}
                           </option>
-                        ))}
+                          )
+                        )}
                       </select>
                     </label>
-                    {referenceScopeOptions.options.length === 0 ? (
+                    {referenceScopeOptionsResource.state.value.options.length ===
+                    0 ? (
                       <p className="empty-state">参照できる範囲はありません。</p>
                     ) : null}
                     <div className="editor-dialog-actions">
                       <button
                         className="button-primary"
                         type="submit"
-                        disabled={referenceScopeOptions.options.length === 0}
+                        disabled={
+                          referenceScopeOptionsResource.state.value.options
+                            .length === 0
+                        }
                       >
                         参照する
                       </button>
@@ -5110,38 +4922,28 @@ function App() {
               taskTitle={taskHistoryDialog.task.title}
               targetScopeContext={targetScopeContext}
               referenceSchoolDate={selectedSchoolDate}
-              state={taskHistoryDialog.state}
+              state={taskEditHistoryResource.state}
               active={
                 topDialogRouteIs("task-history") &&
                 dialogFlowSnapshot.overlay === null
               }
               onBack={goBackFromTaskHistory}
               onClose={requestDialogCloseAll}
-              onRetry={() => setTaskHistoryDialog((current) =>
-                current ? {
-                  ...current,
-                  requestId: current.requestId + 1,
-                  state: { status: "loading" },
-                } : current)}
+              onRetry={taskEditHistoryResource.retry}
             />
           ) : null}
 
           {noteHistoryDialog && dialogRouteExists("note-history") ? (
             <NoteEditHistoryDialog
               targetScopeContext={targetScopeContext}
-              state={noteHistoryDialog.state}
+              state={noteEditHistoryResource.state}
               active={
                 topDialogRouteIs("note-history") &&
                 dialogFlowSnapshot.overlay === null
               }
               onBack={goBackFromNoteHistory}
               onClose={requestDialogCloseAll}
-              onRetry={() => setNoteHistoryDialog((current) =>
-                current ? {
-                  ...current,
-                  requestId: current.requestId + 1,
-                  state: { status: "loading" },
-                } : current)}
+              onRetry={noteEditHistoryResource.retry}
             />
           ) : null}
 
@@ -5167,39 +4969,37 @@ function App() {
               onClose={requestDialogCloseAll}
             >
 
-                {timetableHistoryDialog.history.status === "loading" ? (
+                {timetableEditHistoryResource.state.status === "idle" ||
+                timetableEditHistoryResource.state.status === "loading" ? (
                   <p className="layer-dialog-status" aria-live="polite">
                     編集履歴を読み込んでいます。
                   </p>
-                ) : timetableHistoryDialog.history.status === "error" ? (
+                ) : timetableEditHistoryResource.state.status === "error" ? (
                   <div className="layer-dialog-status" role="alert">
                     <p>編集履歴を読み込めませんでした。</p>
                     <button
                       className="button-secondary"
                       type="button"
-                      onClick={() => setTimetableHistoryDialog((current) =>
-                        current ? {
-                          ...current,
-                          requestId: current.requestId + 1,
-                          history: { status: "loading" },
-                        } : current)}
+                      onClick={timetableEditHistoryResource.retry}
                     >
                       再読み込み
                     </button>
                   </div>
-                ) : timetableHistoryDialog.history.entries.length === 0 ? (
+                ) : timetableEditHistoryResource.state.value.entries.length ===
+                0 ? (
                   <p className="history-empty-state">
                     この日・時限・変更適用範囲には編集履歴がありません。
                   </p>
                 ) : (
                   <div className="history-list" aria-label="編集履歴">
-                    {timetableHistoryDialog.history.entries.map((entry) => (
+                    {timetableEditHistoryResource.state.value.entries.map(
+                      (entry) => (
                       <button
                         className="history-row"
                         type="button"
                         key={entry.sharedInformationChangeId}
                         data-change-id={entry.sharedInformationChangeId}
-                        onClick={() => void openDirectChangeDetail(
+                        onClick={() => openDirectChangeDetail(
                           entry.sharedInformationChangeId,
                         )}
                       >
@@ -5216,13 +5016,15 @@ function App() {
                         </time>
                         <span aria-hidden="true">›</span>
                       </button>
-                    ))}
+                      )
+                    )}
                   </div>
                 )}
             </ReadOnlyDialog>
           ) : null}
 
-          {timetableHistoryDialog?.detail &&
+          {timetableHistoryDialog &&
+            timetableChangeDetailRoute?.kind === "timetable-change-detail" &&
             dialogRouteExists("timetable-change-detail") ? (
             <ReadOnlyDialog
               active={
@@ -5244,27 +5046,25 @@ function App() {
               onClose={requestDialogCloseAll}
             >
 
-                {timetableHistoryDialog.detail.status === "loading" ? (
+                {timetableChangeDetailResource.state.status === "idle" ||
+                timetableChangeDetailResource.state.status === "loading" ? (
                   <p className="layer-dialog-status" aria-live="polite">
                     変更内容を読み込んでいます…
                   </p>
-                ) : timetableHistoryDialog.detail.status === "error" ? (
+                ) : timetableChangeDetailResource.state.status === "error" ? (
                   <div className="layer-dialog-status" role="alert">
                     <p>変更内容を読み込めませんでした。</p>
                     <button
                       className="button-secondary"
                       type="button"
-                      onClick={() => void openDirectChangeDetail(
-                        timetableHistoryDialog.detail!
-                          .sharedInformationChangeId,
-                      )}
+                      onClick={timetableChangeDetailResource.retry}
                     >
                       再読み込み
                     </button>
                   </div>
                 ) : (
                   <DirectChangeDetailView
-                    detail={timetableHistoryDialog.detail}
+                    detail={timetableChangeDetailResource.state.value}
                     targetScopeContext={targetScopeContext}
                     referenceSchoolDate={selectedSchoolDate}
                   />

@@ -80,7 +80,7 @@ describe('Task Edit History dialog', () => {
         taskTitle="地理ワークを提出"
         targetScopeContext={{ grade: 2, classNumber: 3, trackName: '文科' }}
         referenceSchoolDate="2026-07-10"
-        state={history}
+        state={{ status: 'ready', value: history }}
         onBack={() => undefined}
         onClose={() => undefined}
         onRetry={() => undefined}

@@ -132,6 +132,100 @@ test.describe('draft lifecycle', () => {
     await expect(page.getByText(title, { exact: true })).toHaveCount(0)
   })
 
+  test('discards Reference Scope options from an ended Student Account session', async ({
+    page,
+  }, testInfo) => {
+    let optionRequestCount = 0
+    let releaseFirstRequest: () => void = () => undefined
+    const firstRequestGate = new Promise<void>((resolve) => {
+      releaseFirstRequest = resolve
+    })
+    await page.route('**/api/daily-plans/reference/options', async (route) => {
+      optionRequestCount += 1
+      if (optionRequestCount !== 1) {
+        await route.continue()
+        return
+      }
+      await firstRequestGate
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'ready',
+          options: [{
+            type: 'class',
+            value: 'stale-class',
+            label: '前のアカウントの組',
+          }],
+        }),
+      }).catch(() => undefined)
+    })
+
+    await useStoredSession(page, testInfo.project.name, 'secondary')
+    await page.goto('/')
+    await page.getByRole('button', { name: 'メニュー' }).click()
+    await page.getByRole('button', { name: 'ほかの範囲を参照' }).click()
+    const firstPicker = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
+    await expect(firstPicker.getByRole('status')).toContainText(
+      '選べる範囲を読み込んでいます',
+    )
+    await page.keyboard.press('Escape')
+
+    await page.getByRole('button', { name: 'メニュー' }).click()
+    await page.getByRole('button', { name: 'ログアウト' }).click()
+    await expect(
+      page.getByRole('heading', { name: '学校のメールでログイン' }),
+    ).toBeVisible()
+    releaseFirstRequest()
+
+    await useStoredSession(page, testInfo.project.name, 'post-logout')
+    await page.reload()
+    await page.getByRole('button', { name: 'メニュー' }).click()
+    await page.getByRole('button', { name: 'ほかの範囲を参照' }).click()
+    const secondPicker = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
+    await expect.poll(() => optionRequestCount).toBe(2)
+    await expect(secondPicker.getByRole('combobox')).toBeVisible()
+    await expect(secondPicker.getByText('前のアカウントの組')).toHaveCount(0)
+  })
+
+  test('retries the same Reference Scope after a Daily Plan error', async ({
+    page,
+  }) => {
+    let requestCount = 0
+    await page.route('**/api/daily-plans/reference?*', async (route) => {
+      requestCount += 1
+      if (requestCount <= 2) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: 'daily-plan-unavailable' }),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: 'メニュー' }).click()
+    await page.getByRole('button', { name: 'ほかの範囲を参照' }).click()
+    let picker = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
+    await picker.getByRole('button', { name: '参照する' }).click()
+
+    const error = page.getByRole('alert').filter({
+      hasText: '参照する予定を読み込めませんでした',
+    })
+    await expect(error).toBeVisible()
+    await error.getByRole('button', { name: '範囲を選び直す' }).click()
+    picker = page.getByRole('dialog', { name: 'ほかの範囲を参照' })
+    await picker.getByRole('button', { name: '参照する' }).click()
+    await expect.poll(() => requestCount).toBe(2)
+    await expect(error).toBeVisible()
+
+    await error.getByRole('button', { name: '再読み込み' }).click()
+    await expect.poll(() => requestCount).toBe(3)
+    await expect(page.getByText('参照中', { exact: true })).toBeVisible()
+  })
+
   test('keeps Reference Scope read-only without ending the editing session', async ({
     page,
   }) => {

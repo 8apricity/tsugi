@@ -184,6 +184,23 @@ test.describe('authenticated Direct Change review', () => {
   test('retains Timetable history beneath a change detail', async ({
     page,
   }) => {
+    let detailRequestCount = 0
+    await page.route('**/api/timetable-changes/direct/*', async (route) => {
+      if (new URL(route.request().url()).pathname.endsWith('/options')) {
+        await route.continue()
+        return
+      }
+      detailRequestCount += 1
+      if (detailRequestCount === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: 'unavailable' }),
+        })
+        return
+      }
+      await route.continue()
+    })
     await page.goto('/')
     await page.getByRole('button', { name: 'この日の予定を編集' }).click()
     await saveTimetableChange(page)
@@ -217,6 +234,12 @@ test.describe('authenticated Direct Change review', () => {
 
     const detail = page.getByRole('dialog', { name: '変更の詳細' })
     await expect(detail).toBeVisible()
+    await expect(detail.getByRole('alert')).toContainText(
+      '変更内容を読み込めませんでした',
+    )
+    await detail.getByRole('button', { name: '再読み込み' }).click()
+    await expect.poll(() => detailRequestCount).toBe(2)
+    await expect(detail.locator('.direct-change-detail')).toBeVisible()
     await expectCompactReadOnlyDialogSpacing(
       detail,
       detail.locator('.direct-change-detail'),

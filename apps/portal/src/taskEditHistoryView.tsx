@@ -9,11 +9,10 @@ import {
   type TargetScopeDisplayContext,
 } from './uiCopy'
 import { ReadOnlyDialog } from './dialogFoundation'
+import type { AsyncResourceState } from './asyncResource'
 
 export type TaskEditHistoryState =
-  | { status: 'loading' }
-  | { status: 'error' }
-  | TaskEditHistoryResponse
+  AsyncResourceState<TaskEditHistoryResponse>
 
 export function TaskEditHistoryDialog({
   taskTitle,
@@ -45,7 +44,7 @@ export function TaskEditHistoryDialog({
       onBack={onBack}
       onClose={onClose}
     >
-      {state.status === 'loading' ? (
+      {state.status === 'idle' || state.status === 'loading' ? (
           <p className="layer-dialog-status" aria-live="polite">
             編集履歴を読み込んでいます…
           </p>
@@ -60,12 +59,12 @@ export function TaskEditHistoryDialog({
           <>
             <p className="task-history-scope">
               変更適用範囲: {targetScopeLabel(
-                state.targetScope.type,
+                state.value.targetScope.type,
                 targetScopeContext,
               )}
             </p>
             <ol className="task-history-list" aria-label="タスクの編集履歴">
-              {state.entries.map((entry) => (
+              {state.value.entries.map((entry) => (
                 <li key={entry.sharedInformationChangeId}>
                   <article className="task-history-entry">
                     <header>

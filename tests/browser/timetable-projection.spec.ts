@@ -1,20 +1,15 @@
 import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
 
 test('edit mode shows projected transitions, including identical and removal drafts', async ({
   page,
 }, testInfo) => {
   const customLessonName = '地域横断型のとても長い探究プロジェクト演習'
   const noteBody = `removal-note-${testInfo.project.name}`
-  await page.goto('/')
-  const mondayIndex = testInfo.project.name === 'webkit-iphone' ? 1 : 0
-  await page.locator('.date-cell').filter({
-    has: page.getByText('月', { exact: true }),
-  }).nth(mondayIndex).click()
-
-  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
-  const firstPeriod = page.locator('.period-row').filter({
-    has: page.locator('.period-number', { hasText: '1' }),
-  })
+  const firstPeriod = await openMondayForEditing(
+    page,
+    testInfo.project.name,
+  )
   await expect(firstPeriod.locator('.lesson-name')).toHaveText('数Ⅱβ（月1）')
 
   await firstPeriod.getByRole('button', { name: /^1限/ }).click()
@@ -156,16 +151,10 @@ test('edit mode shows projected transitions, including identical and removal dra
 test('uses a neutral mixed color for replacement and removal layer drafts', async ({
   page,
 }, testInfo) => {
-  await page.goto('/')
-  const mondayIndex = testInfo.project.name === 'webkit-iphone' ? 1 : 0
-  await page.locator('.date-cell').filter({
-    has: page.getByText('月', { exact: true }),
-  }).nth(mondayIndex).click()
-  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
-
-  const firstPeriod = page.locator('.period-row').filter({
-    has: page.locator('.period-number', { hasText: '1' }),
-  })
+  const firstPeriod = await openMondayForEditing(
+    page,
+    testInfo.project.name,
+  )
   await firstPeriod.getByRole('button', { name: /^1限/ }).click()
   const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
   await layerDialog.locator(
@@ -197,16 +186,10 @@ test('uses a neutral mixed color for replacement and removal layer drafts', asyn
 test('keeps removal visible when a Timetable Change draft conflicts', async ({
   page,
 }, testInfo) => {
-  await page.goto('/')
-  const mondayIndex = testInfo.project.name === 'webkit-iphone' ? 1 : 0
-  await page.locator('.date-cell').filter({
-    has: page.getByText('月', { exact: true }),
-  }).nth(mondayIndex).click()
-  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
-
-  const firstPeriod = page.locator('.period-row').filter({
-    has: page.locator('.period-number', { hasText: '1' }),
-  })
+  const firstPeriod = await openMondayForEditing(
+    page,
+    testInfo.project.name,
+  )
   await firstPeriod.getByRole('button', { name: /^1限/ }).click()
   const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
   await layerDialog.locator(
@@ -284,7 +267,19 @@ test('keeps removal visible when a Timetable Change draft conflicts', async ({
   })).toBeVisible()
 })
 
-async function applyCurrentDraft(page: import('@playwright/test').Page) {
+async function openMondayForEditing(page: Page, projectName: string) {
+  await page.goto('/')
+  const mondayIndex = projectName === 'webkit-iphone' ? 1 : 0
+  await page.locator('.date-cell').filter({
+    has: page.getByText('月', { exact: true }),
+  }).nth(mondayIndex).click()
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  return page.locator('.period-row').filter({
+    has: page.locator('.period-number', { hasText: '1' }),
+  })
+}
+
+async function applyCurrentDraft(page: Page) {
   await page.getByRole('button', { name: '変更を反映（1）' }).click()
   await page.getByRole('dialog', { name: '変更を反映' })
     .getByRole('button', { name: '確定' }).click()

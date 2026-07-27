@@ -2018,6 +2018,7 @@ button.timetable-layer-row {
   gap: 12px;
   width: 100%;
   padding: 14px 38px 14px 14px;
+  box-sizing: border-box;
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);

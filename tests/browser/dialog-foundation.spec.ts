@@ -253,6 +253,13 @@ test.describe('authenticated Daily Plan dialog foundation', () => {
       history.locator('.shared-history-scope'),
       history.locator('.shared-history-list'),
     )
+    const historyBodyWidth = await history
+      .locator('.editor-dialog-body')
+      .evaluate((body) => ({
+        client: body.clientWidth,
+        scroll: body.scrollWidth,
+      }))
+    expect(historyBodyWidth.scroll).toBeLessThanOrEqual(historyBodyWidth.client)
     const historyEntry = history.locator('.shared-history-row').first()
     await historyEntry.click()
     const changeDetail = page.getByRole('dialog', { name: '変更の詳細' })

@@ -48,23 +48,28 @@ function LifecycleGlyph({
 export function LifecycleIcon({
   kind,
   conflicted = false,
+  preserveKindGlyphOnConflict = false,
   className = '',
   showTitle = true,
 }: {
   kind: LifecycleKind
   conflicted?: boolean
+  preserveKindGlyphOnConflict?: boolean
   className?: string
   showTitle?: boolean
 }) {
   const label = lifecycleLabel(kind, conflicted)
+  const preserveKindGlyph = conflicted && preserveKindGlyphOnConflict
   return (
     <span
-      className={`lifecycle-icon lifecycle-${conflicted ? 'conflict' : kind}${className ? ` ${className}` : ''}`}
+      className={`lifecycle-icon lifecycle-${conflicted ? 'conflict' : kind}${
+        preserveKindGlyph ? ' lifecycle-kind-conflict' : ''
+      }${className ? ` ${className}` : ''}`}
       role="img"
       aria-label={label}
       {...(showTitle ? { title: lifecycleTitle(kind, conflicted) } : {})}
     >
-      <LifecycleGlyph kind={kind} conflicted={conflicted} />
+      <LifecycleGlyph kind={kind} conflicted={conflicted && !preserveKindGlyph} />
     </span>
   )
 }

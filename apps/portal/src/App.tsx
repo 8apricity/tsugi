@@ -4128,6 +4128,9 @@ function App() {
                                         key={draft.sourceId}
                                         kind={draft.changeKind}
                                         conflicted={draft.conflicted}
+                                        preserveKindGlyphOnConflict={
+                                          draft.changeKind === "remove"
+                                        }
                                       />
                                     ))}
                                   </span>

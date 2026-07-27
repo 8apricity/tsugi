@@ -31,6 +31,8 @@ test('edit mode shows projected transitions, including identical and removal dra
 
   const transition = firstPeriod.locator('.lesson-transition')
   await expect(transition).toHaveText('数Ⅱβ（月1）▶家庭（月3）')
+  await expect(firstPeriod.locator('.period-inspect-button'))
+    .toHaveCSS('background-color', 'rgb(217, 238, 240)')
   await expect(transition.locator('.lesson-transition-arrow'))
     .toHaveAttribute('aria-hidden', 'true')
   await expect(firstPeriod.getByRole('button', {
@@ -190,6 +192,96 @@ test('uses a neutral mixed color for replacement and removal layer drafts', asyn
     .toHaveCount(1)
   await expect(firstPeriod.getByRole('img', { name: /追加予定|更新予定/ }))
     .toHaveCount(1)
+})
+
+test('keeps removal visible when a Timetable Change draft conflicts', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/')
+  const mondayIndex = testInfo.project.name === 'webkit-iphone' ? 1 : 0
+  await page.locator('.date-cell').filter({
+    has: page.getByText('月', { exact: true }),
+  }).nth(mondayIndex).click()
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+
+  const firstPeriod = page.locator('.period-row').filter({
+    has: page.locator('.period-number', { hasText: '1' }),
+  })
+  await firstPeriod.getByRole('button', { name: /^1限/ }).click()
+  const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+  await layerDialog.locator(
+    '[data-target-scope-type="class"] .timetable-layer-row',
+  ).click()
+  const editor = page.getByRole('dialog', { name: '時間割変更' })
+  const includeChange = editor.getByRole('checkbox', {
+    name: '時間割も変更する',
+  })
+  if (!(await includeChange.isChecked())) await includeChange.check()
+  await editor.getByRole('button', { name: '月4', exact: true }).click()
+  await editor.getByRole('button', { name: '下書きを保存' }).click()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+  await applyCurrentDraft(page)
+
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+  await firstPeriod.getByRole('button', { name: /^1限/ }).click()
+  await layerDialog.locator(
+    '[data-target-scope-type="class"] .timetable-layer-row',
+  ).click()
+  await editor.getByRole('checkbox', { name: '削除予定にする' }).check()
+  await editor.getByRole('button', { name: '下書きを保存' }).click()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+
+  await page.route('**/api/shared-information/direct-changes', async (route) => {
+    const payload = route.request().postDataJSON() as {
+      changes: Array<{
+        targetScopeType: string
+        changeDate: string
+        periodNumber: number
+      }>
+    }
+    const [change] = payload.changes
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'idempotency-conflict',
+        conflictingKeys: [{
+          targetScopeType: change.targetScopeType,
+          changeDate: change.changeDate,
+          periodNumber: change.periodNumber,
+        }],
+        conflictingSourceIds: [],
+      }),
+    })
+  })
+  await page.getByRole('button', { name: '変更を反映（1）' }).click()
+  await page.getByRole('dialog', { name: '変更を反映' })
+    .getByRole('button', { name: '確定' }).click()
+  await expect(page.getByText(
+    '表示中の内容が更新されました。ほかの変更と重なっている下書きを確認してください。',
+    { exact: true },
+  )).toBeVisible()
+
+  await expect(firstPeriod.locator('.period-inspect-button'))
+    .toHaveCSS('background-color', 'rgb(255, 248, 230)')
+  const removalConflict = firstPeriod.getByRole('img', {
+    name: '削除予定・要確認',
+  })
+  await expect(removalConflict).toHaveCount(1)
+  await expect(removalConflict.locator('[data-glyph="ごみ箱"]')).toBeVisible()
+  await expect(removalConflict.locator('[data-glyph="警告"]')).toHaveCount(0)
+
+  await firstPeriod.getByRole('button', { name: /^1限/ }).click()
+  const removalLayer = layerDialog.locator(
+    '.layer-row-shell[data-target-scope-type="class"]',
+  )
+  await expect(removalLayer).toHaveCSS(
+    'background-color',
+    'rgb(255, 248, 230)',
+  )
+  await expect(removalLayer.getByRole('img', {
+    name: '時間割変更の削除予定',
+  })).toBeVisible()
 })
 
 async function applyCurrentDraft(page: import('@playwright/test').Page) {

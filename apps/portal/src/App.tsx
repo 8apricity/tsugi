@@ -95,10 +95,10 @@ import { NoteBodyFields, TaskDetailDialog } from "./taskDetailView";
 import { NoteEditHistoryDialog } from "./noteEditHistoryView";
 import {
   useNoteEditHistoryResource,
+  useSharedInformationChangeDetailResource,
   useTaskEditHistoryResource,
-  useTimetableChangeDetailResource,
   useTimetableEditHistoryResource,
-  type DirectTimetableChangeDetail,
+  type TimetableChangeDetail,
   type TimetableChangeHistoryEntry,
 } from "./editHistoryResource";
 import { NoteDetailDialog } from "./noteDetailView";
@@ -653,7 +653,8 @@ function App() {
         }
       : null,
   );
-  const timetableChangeDetailResource = useTimetableChangeDetailResource(
+  const sharedInformationChangeDetailResource =
+    useSharedInformationChangeDetailResource(
     timetableHistoryDialog &&
       timetableChangeDetailRoute?.kind === "timetable-change-detail"
       ? {
@@ -662,7 +663,7 @@ function App() {
             timetableChangeDetailRoute.sharedInformationChangeId,
         }
       : null,
-  );
+    );
   const layerDialogSchoolDate = timetableLayerDialog?.schoolDate;
   const layerDialogRequestId = timetableLayerDialog?.requestId;
   const layerDialogRouteInstanceId = timetableLayerDialog?.routeInstanceId;
@@ -5046,25 +5047,31 @@ function App() {
               onClose={requestDialogCloseAll}
             >
 
-                {timetableChangeDetailResource.state.status === "idle" ||
-                timetableChangeDetailResource.state.status === "loading" ? (
+                {sharedInformationChangeDetailResource.state.status === "idle" ||
+                sharedInformationChangeDetailResource.state.status === "loading" ? (
                   <p className="layer-dialog-status" aria-live="polite">
                     変更内容を読み込んでいます…
                   </p>
-                ) : timetableChangeDetailResource.state.status === "error" ? (
+                ) : sharedInformationChangeDetailResource.state.status ===
+                  "error" ? (
                   <div className="layer-dialog-status" role="alert">
                     <p>変更内容を読み込めませんでした。</p>
                     <button
                       className="button-secondary"
                       type="button"
-                      onClick={timetableChangeDetailResource.retry}
+                      onClick={sharedInformationChangeDetailResource.retry}
                     >
                       再読み込み
                     </button>
                   </div>
+                ) : sharedInformationChangeDetailResource.state.value.kind !==
+                  "timetable_change" ? (
+                  <p className="layer-dialog-status" role="alert">
+                    変更内容を読み込めませんでした。
+                  </p>
                 ) : (
-                  <DirectChangeDetailView
-                    detail={timetableChangeDetailResource.state.value}
+                  <TimetableChangeDetailView
+                    detail={sharedInformationChangeDetailResource.state.value}
                     targetScopeContext={targetScopeContext}
                     referenceSchoolDate={selectedSchoolDate}
                   />
@@ -6416,12 +6423,12 @@ function PeriodWheelPicker({
   );
 }
 
-function DirectChangeDetailView({
+function TimetableChangeDetailView({
   detail,
   targetScopeContext,
   referenceSchoolDate,
 }: {
-  detail: DirectTimetableChangeDetail;
+  detail: TimetableChangeDetail;
   targetScopeContext?: TargetScopeDisplayContext;
   referenceSchoolDate: string;
 }) {
@@ -6429,8 +6436,18 @@ function DirectChangeDetailView({
     <div className="direct-change-detail">
       <dl className="history-detail-grid">
         <div><dt>変更内容</dt><dd>{changeKindLabel(detail.changeKind)}</dd></div>
-        <div><dt>反映方法</dt><dd>強制変更</dd></div>
-        <div><dt>変更者</dt><dd>{detail.primaryActorDisplayName}</dd></div>
+        <div>
+          <dt>反映方法</dt>
+          <dd>{detail.source.type === "direct"
+            ? "強制変更"
+            : "提案による変更"}</dd>
+        </div>
+        {detail.source.type === "direct" ? (
+          <div>
+            <dt>変更者</dt>
+            <dd>{detail.source.primaryActorDisplayName}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>日時</dt>
           <dd><time dateTime={new Date(detail.changedAt).toISOString()}>

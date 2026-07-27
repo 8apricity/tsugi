@@ -6,7 +6,11 @@ import type {
   TaskEditHistoryResponse,
 } from '../shared/taskEditHistory'
 import type { TargetScopeType } from '../shared/targetScope'
-import type { TimetableReplacement } from './sharedInformationEditorClient'
+import type {
+  SharedInformationChangeDetail,
+  TimetableChangeDetail,
+  TimetableHistorySnapshot,
+} from '../shared/editHistory'
 import {
   useAsyncResource,
   type AsyncResourceResult,
@@ -24,8 +28,8 @@ export type TimetableChangeHistoryEntry = {
   sourceType: 'direct' | 'proposal'
   primaryActorDisplayName: string
   changedAt: number
-  before: TimetableReplacement | null
-  after: TimetableReplacement | null
+  before: TimetableHistorySnapshot | null
+  after: TimetableHistorySnapshot | null
 }
 
 export type TimetableChangeHistoryResponse = {
@@ -36,21 +40,16 @@ export type TimetableChangeHistoryResponse = {
   entries: TimetableChangeHistoryEntry[]
 }
 
-export type DirectTimetableChangeDetail = TimetableChangeHistoryEntry & {
-  status: 'ready'
-  targetScope: { type: TargetScopeType; value: string }
-  changeDate: string
-  periodNumber: number
-}
-
 export type TaskEditHistoryResourceResult =
   AsyncResourceResult<TaskEditHistoryResponse>
 export type NoteEditHistoryResourceResult =
   AsyncResourceResult<NoteEditHistoryResponse>
 export type TimetableEditHistoryResourceResult =
   AsyncResourceResult<TimetableChangeHistoryResponse>
-export type TimetableChangeDetailResourceResult =
-  AsyncResourceResult<DirectTimetableChangeDetail>
+export type SharedInformationChangeDetailResourceResult =
+  AsyncResourceResult<SharedInformationChangeDetail>
+
+export type { SharedInformationChangeDetail, TimetableChangeDetail }
 
 export function useTaskEditHistoryResource(
   selection: (RouteResourceSelection & { taskId: string }) | null,
@@ -169,11 +168,11 @@ export function useTimetableEditHistoryResource(
   return useAsyncResource({ identityKey, load })
 }
 
-export function useTimetableChangeDetailResource(
+export function useSharedInformationChangeDetailResource(
   selection: (RouteResourceSelection & {
     sharedInformationChangeId: string
   }) | null,
-): TimetableChangeDetailResourceResult {
+): SharedInformationChangeDetailResourceResult {
   const routeInstanceId = selection?.routeInstanceId
   const sharedInformationChangeId = selection?.sharedInformationChangeId
   const identityKey = routeInstanceId && sharedInformationChangeId
@@ -181,27 +180,31 @@ export function useTimetableChangeDetailResource(
     : null
   const load = useCallback(async (signal: AbortSignal) => {
     if (!sharedInformationChangeId) {
-      throw new Error('Timetable Change detail selection is missing')
+      throw new Error('Shared Information Change Detail selection is missing')
     }
     const response = await fetch(
-      `/api/timetable-changes/direct/${
+      `/api/shared-information-changes/${
         encodeURIComponent(sharedInformationChangeId)
       }`,
       { signal },
     )
-    if (!response.ok) throw new Error('Timetable Change detail unavailable')
+    if (!response.ok) {
+      throw new Error('Shared Information Change Detail unavailable')
+    }
     const value = await response.json() as unknown
     if (
       !isRecord(value) ||
       value.status !== 'ready' ||
       value.sharedInformationChangeId !== sharedInformationChangeId ||
+      !['timetable_change', 'task', 'note'].includes(String(value.kind)) ||
       !isRecord(value.targetScope) ||
-      typeof value.changeDate !== 'string' ||
-      typeof value.periodNumber !== 'number'
+      !isRecord(value.source)
     ) {
-      throw new Error('Timetable Change detail response did not match selection')
+      throw new Error(
+        'Shared Information Change Detail response did not match selection',
+      )
     }
-    return value as DirectTimetableChangeDetail
+    return value as SharedInformationChangeDetail
   }, [sharedInformationChangeId])
   return useAsyncResource({ identityKey, load })
 }

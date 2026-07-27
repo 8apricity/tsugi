@@ -516,8 +516,8 @@ export type TimetableChangeHistoryStore = {
     changeDate: string
     periodNumber: number
   }): Promise<HistoricalTimetableChange[]>
-  listTimetableChangeItemHistoryByChangeId(
-    sharedInformationChangeId: string,
+  listTimetableChangeItemHistory(
+    sharedInformationItemId: string,
   ): Promise<HistoricalTimetableChange[]>
 }
 
@@ -532,6 +532,19 @@ export type NoteEditHistoryStore = {
     sharedInformationItemId: string,
   ): Promise<HistoricalNoteChange[]>
 }
+
+export type EditHistoryStore =
+  & TaskEditHistoryStore
+  & NoteEditHistoryStore
+  & TimetableChangeHistoryStore
+  & {
+    findSharedInformationChange(
+      sharedInformationChangeId: string,
+    ): Promise<{
+      kind: 'timetable_change' | 'task' | 'note'
+      sharedInformationItemId: string
+    } | null>
+  }
 
 export type PersistenceSeedStore = {
   saveStudentAccount(record: StudentAccount): Promise<void>
@@ -549,9 +562,7 @@ export type PersistenceAdapters = {
   dailyPlan: DailyPlanStore
   directChange: DirectChangeStore
   directTimetableChange: DirectTimetableChangeStore
-  timetableChangeHistory: TimetableChangeHistoryStore
-  taskEditHistory: TaskEditHistoryStore
-  noteEditHistory: NoteEditHistoryStore
+  editHistory: EditHistoryStore
   seed: PersistenceSeedStore
 }
 
@@ -563,7 +574,8 @@ export class InMemoryPersistenceAdapters
     DirectChangeStore,
     TimetableChangeHistoryStore,
     TaskEditHistoryStore,
-    NoteEditHistoryStore
+    NoteEditHistoryStore,
+    EditHistoryStore
 {
   private records: VerificationCodeRequestRecord[] = []
   private studentAccounts: StudentAccount[] = []
@@ -1314,17 +1326,32 @@ export class InMemoryPersistenceAdapters
       .map((change) => this.mapHistoricalTimetableChange(change))
   }
 
-  async listTimetableChangeItemHistoryByChangeId(
-    sharedInformationChangeId: string,
+  async listTimetableChangeItemHistory(
+    sharedInformationItemId: string,
   ) {
-    const selected = [...this.directTimetableChangeOperations.values()].find(
-      (change) => change.latestChangeId === sharedInformationChangeId,
-    )
-    if (!selected) return []
     return [...this.directTimetableChangeOperations.values()]
       .filter((change) =>
-        change.sharedInformationItemId === selected.sharedInformationItemId)
+        change.sharedInformationItemId === sharedInformationItemId)
       .map((change) => this.mapHistoricalTimetableChange(change))
+  }
+
+  async findSharedInformationChange(sharedInformationChangeId: string) {
+    for (const [kind, changes] of [
+      ['timetable_change', this.directTimetableChangeOperations],
+      ['task', this.directTaskOperations],
+      ['note', this.directNoteOperations],
+    ] as const) {
+      const selected = [...changes.values()].find(
+        (change) => change.latestChangeId === sharedInformationChangeId,
+      )
+      if (selected) {
+        return {
+          kind,
+          sharedInformationItemId: selected.sharedInformationItemId,
+        }
+      }
+    }
+    return null
   }
 
   async listTaskEditHistory(sharedInformationItemId: string) {
@@ -1822,7 +1849,8 @@ export class D1PersistenceAdapters
     DirectTimetableChangeStore,
     TimetableChangeHistoryStore,
     TaskEditHistoryStore,
-    NoteEditHistoryStore
+    NoteEditHistoryStore,
+    EditHistoryStore
 {
   private readonly db: D1Database
 
@@ -3662,17 +3690,35 @@ export class D1PersistenceAdapters
     )
   }
 
-  async listTimetableChangeItemHistoryByChangeId(
-    sharedInformationChangeId: string,
+  async listTimetableChangeItemHistory(
+    sharedInformationItemId: string,
   ) {
     return this.queryTimetableChangeHistory(
-      `i.shared_information_item_id = (
-         select selected.shared_information_item_id
-         from shared_information_changes selected
-         where selected.shared_information_change_id = ?
-       )`,
-      [sharedInformationChangeId],
+      `i.shared_information_item_id = ?`,
+      [sharedInformationItemId],
     )
+  }
+
+  async findSharedInformationChange(sharedInformationChangeId: string) {
+    const row = await this.db
+      .prepare(
+        `select i.kind, c.shared_information_item_id
+         from shared_information_changes c
+         join shared_information_items i
+           on i.shared_information_item_id = c.shared_information_item_id
+         where c.shared_information_change_id = ?`,
+      )
+      .bind(sharedInformationChangeId)
+      .first<{
+        kind: 'timetable_change' | 'task' | 'note'
+        shared_information_item_id: string
+      }>()
+    return row
+      ? {
+          kind: row.kind,
+          sharedInformationItemId: row.shared_information_item_id,
+        }
+      : null
   }
 
   async listTaskEditHistory(sharedInformationItemId: string) {
@@ -4227,9 +4273,7 @@ export function createInMemoryPersistenceAdapters(): PersistenceAdapters {
     dailyPlan: implementation,
     directChange: implementation,
     directTimetableChange: implementation,
-    timetableChangeHistory: implementation,
-    taskEditHistory: implementation,
-    noteEditHistory: implementation,
+    editHistory: implementation,
     seed: implementation,
   }
 }
@@ -4243,9 +4287,7 @@ export function createD1PersistenceAdapters(db: D1Database): PersistenceAdapters
     dailyPlan: implementation,
     directChange: implementation,
     directTimetableChange: implementation,
-    timetableChangeHistory: implementation,
-    taskEditHistory: implementation,
-    noteEditHistory: implementation,
+    editHistory: implementation,
     seed: implementation,
   }
 }

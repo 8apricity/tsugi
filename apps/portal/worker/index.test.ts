@@ -568,14 +568,16 @@ function readTimetableChangeHistory(
   return worker.fetch(new Request(url, { headers: cookie ? { cookie } : {} }), env)
 }
 
-function readDirectTimetableChangeDetail(
+function readSharedInformationChangeDetail(
   env: Env,
   cookie: string,
   sharedInformationChangeId: string,
 ) {
   return worker.fetch(
     new Request(
-      `https://tsugi.test/api/timetable-changes/direct/${encodeURIComponent(sharedInformationChangeId)}`,
+      `https://tsugi.test/api/shared-information-changes/${
+        encodeURIComponent(sharedInformationChangeId)
+      }`,
       { headers: cookie ? { cookie } : {} },
     ),
     env,
@@ -1435,7 +1437,7 @@ describe('Timetable Change Edit History API', () => {
       }),
     ])
 
-    const detailResponse = await readDirectTimetableChangeDetail(
+    const detailResponse = await readSharedInformationChangeDetail(
       env,
       cookie,
       `${updateId}:change`,
@@ -1443,11 +1445,14 @@ describe('Timetable Change Edit History API', () => {
     expect(detailResponse.status).toBe(200)
     expect(await detailResponse.json()).toMatchObject({
       status: 'ready',
+      kind: 'timetable_change',
       sharedInformationChangeId: `${updateId}:change`,
       sharedInformationItemId: firstItemId,
       changeKind: 'update',
-      sourceType: 'direct',
-      primaryActorDisplayName: 'Test Humanities 1',
+      source: {
+        type: 'direct',
+        primaryActorDisplayName: 'Test Humanities 1',
+      },
       changedAt: Date.parse('2026-07-10T00:01:00.000Z'),
       targetScope: { type: 'track', value: '2026-grade-2-class-3-humanities' },
       changeDate: '2026-07-10',
@@ -1459,6 +1464,15 @@ describe('Timetable Change Edit History API', () => {
         referenceLabel: '★',
       },
     })
+    expect((await worker.fetch(
+      new Request(
+        `https://tsugi.test/api/timetable-changes/direct/${
+          encodeURIComponent(`${updateId}:change`)
+        }`,
+        { headers: { cookie } },
+      ),
+      env,
+    )).status).toBe(404)
 
     const layers = await (await readTimetableChangeLayers(env, cookie)).json()
     expect(JSON.stringify(layers)).not.toContain('primaryActorDisplayName')
@@ -1487,12 +1501,12 @@ describe('Timetable Change Edit History API', () => {
     const otherTrackHistory = await readTimetableChangeHistory(env, scienceCookie)
     expect(otherTrackHistory.status).toBe(200)
     expect(await otherTrackHistory.json()).toMatchObject({ entries: [] })
-    expect((await readDirectTimetableChangeDetail(
+    expect((await readSharedInformationChangeDetail(
       env,
       scienceCookie,
       `${itemId}:change`,
     )).status).toBe(404)
-    expect((await readDirectTimetableChangeDetail(
+    expect((await readSharedInformationChangeDetail(
       env,
       '',
       `${itemId}:change`,
@@ -1646,6 +1660,39 @@ describe('Task Edit History API', () => {
           },
         },
       ],
+    })
+
+    const detail = await readSharedInformationChangeDetail(
+      env,
+      cookie,
+      `${updateId}:change`,
+    )
+    expect(detail.status).toBe(200)
+    await expect(detail.json()).resolves.toEqual({
+      status: 'ready',
+      kind: 'task',
+      sharedInformationChangeId: `${updateId}:change`,
+      sharedInformationItemId: taskId,
+      changeKind: 'update',
+      source: {
+        type: 'direct',
+        primaryActorDisplayName: 'Test Humanities 1',
+      },
+      changedAt: Date.parse('2026-07-10T00:00:00.000Z'),
+      targetScope: {
+        type: 'track',
+        value: '2026-grade-2-class-3-humanities',
+      },
+      before: {
+        title: '地理の準備',
+        dueDate: '2026-07-10',
+        relatedLessonName: '地理総合',
+      },
+      after: {
+        title: '地理ワークを提出',
+        dueDate: '2026-07-11',
+        relatedLessonName: '地理',
+      },
     })
   })
 
@@ -2841,6 +2888,31 @@ describe('Unified Direct Change API', () => {
         },
         { changeKind: 'add', before: null, after: { body: '追加時\n全文' } },
       ],
+    })
+    const detail = await readSharedInformationChangeDetail(
+      env,
+      trackCookie,
+      `${removeId}:change`,
+    )
+    expect(detail.status).toBe(200)
+    await expect(detail.json()).resolves.toEqual({
+      status: 'ready',
+      kind: 'note',
+      sharedInformationChangeId: `${removeId}:change`,
+      sharedInformationItemId: noteId,
+      changeKind: 'remove',
+      source: {
+        type: 'direct',
+        primaryActorDisplayName: 'Test Humanities 1',
+      },
+      changedAt: Date.parse('2026-07-09T01:02:03.000Z'),
+      targetScope: {
+        type: 'track',
+        value: '2026-grade-2-class-3-humanities',
+      },
+      before: { body: '更新時\n全文' },
+      after: null,
+      removalReason: 'student',
     })
     expect((await readNoteEditHistory(env, outsideCookie, noteId)).status)
       .toBe(404)

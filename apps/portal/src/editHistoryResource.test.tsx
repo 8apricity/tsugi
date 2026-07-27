@@ -4,18 +4,18 @@ import { act, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  useSharedInformationChangeDetailResource,
   useTaskEditHistoryResource,
-  useTimetableChangeDetailResource,
+  type SharedInformationChangeDetailResourceResult,
   type TaskEditHistoryResourceResult,
-  type TimetableChangeDetailResourceResult,
 } from './editHistoryResource'
 
 function DetailResourceProbe({
   children,
 }: {
-  children(result: TimetableChangeDetailResourceResult): ReactNode
+  children(result: SharedInformationChangeDetailResourceResult): ReactNode
 }) {
-  return children(useTimetableChangeDetailResource({
+  return children(useSharedInformationChangeDetailResource({
     routeInstanceId: 'detail-route-1',
     sharedInformationChangeId: 'change-1',
   }))
@@ -32,7 +32,7 @@ function TaskHistoryResourceProbe({
   }))
 }
 
-describe('Timetable Change detail resource', () => {
+describe('Shared Information Change Detail resource', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -43,7 +43,7 @@ describe('Timetable Change detail resource', () => {
       requests.push(resolve)
     }))
     vi.stubGlobal('fetch', fetchMock)
-    const observed: TimetableChangeDetailResourceResult[] = []
+    const observed: SharedInformationChangeDetailResourceResult[] = []
     const container = document.createElement('div')
     const root = createRoot(container)
 
@@ -59,6 +59,10 @@ describe('Timetable Change detail resource', () => {
         )
       })
       expect(observed.at(-1)?.state).toEqual({ status: 'loading' })
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/shared-information-changes/change-1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
 
       await act(async () => {
         observed.at(-1)?.retry()
@@ -67,11 +71,14 @@ describe('Timetable Change detail resource', () => {
 
       const detail = {
         status: 'ready' as const,
+        kind: 'timetable_change' as const,
         sharedInformationChangeId: 'change-1',
         sharedInformationItemId: 'item-1',
         changeKind: 'update' as const,
-        sourceType: 'direct' as const,
-        primaryActorDisplayName: 'テスト生徒',
+        source: {
+          type: 'direct' as const,
+          primaryActorDisplayName: 'テスト生徒',
+        },
         changedAt: 1_774_569_600_000,
         before: null,
         after: { type: 'lesson_name' as const, lessonName: '数学' },

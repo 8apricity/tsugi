@@ -661,7 +661,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
     ).resolves.toEqual([])
     await expect(
-      adapters.noteEditHistory.listNoteEditHistory(note.sharedInformationItemId),
+      adapters.editHistory.listNoteEditHistory(note.sharedInformationItemId),
     ).resolves.toEqual(expect.arrayContaining([
       { changeKind: 'add', snapshot: { body: note.body } },
       {
@@ -1008,7 +1008,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       select count(*) as count from shared_information_changes
       where shared_information_item_id = ? and change_kind = 'remove'
     `).get(noteId)).toEqual({ count: 1 })
-    await expect(adapters.noteEditHistory.listNoteEditHistory(noteId))
+    await expect(adapters.editHistory.listNoteEditHistory(noteId))
       .resolves.toEqual(expect.arrayContaining([
         expect.objectContaining({
           changeKind: 'remove',
@@ -1077,7 +1077,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       where shared_information_item_id = ?
     `).run('proposal-history-change', 'proposal-history-snapshot', taskId)
 
-    const history = await adapters.taskEditHistory.listTaskEditHistory(taskId)
+    const history = await adapters.editHistory.listTaskEditHistory(taskId)
     expect(history).toHaveLength(2)
     expect(history[0]).toMatchObject({
       sourceType: 'direct',
@@ -1244,7 +1244,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       'select count(*) as count from timetable_change_snapshots',
     ).get()).toEqual({ count: 1 })
 
-    await expect(adapters.timetableChangeHistory.listTimetableChangeHistory({
+    await expect(adapters.editHistory.listTimetableChangeHistory({
       targetScope: { type: 'track', schoolYear: 2026, trackId: 'track-1' },
       changeDate: '2026-07-10',
       periodNumber: 1,
@@ -1468,7 +1468,7 @@ describe.each(targetScopeMembershipAdapterCases)(
         }),
       ])
       await expect(
-        adapters.timetableChangeHistory.listTimetableChangeHistory({
+        adapters.editHistory.listTimetableChangeHistory({
           targetScope: change.targetScope,
           changeDate: change.changeDate,
           periodNumber: change.periodNumber,
@@ -1562,7 +1562,7 @@ describe.each(targetScopeMembershipAdapterCases)(
         normalizedFullLessonName: '履歴地理総合',
       })
 
-      await expect(adapters.taskEditHistory.listTaskEditHistory(taskId))
+      await expect(adapters.editHistory.listTaskEditHistory(taskId))
         .resolves.toEqual([
           expect.objectContaining({
             sharedInformationChangeId: add.latestChangeId,
@@ -1591,6 +1591,51 @@ describe.each(targetScopeMembershipAdapterCases)(
             snapshot: null,
           }),
         ])
+    })
+  },
+)
+
+describe.each(targetScopeMembershipAdapterCases)(
+  'Shared Information Change lookup adapter conformance: %s',
+  (_name, createAdapters) => {
+    it('resolves a Change ID to its Shared Information Kind and Item', async () => {
+      const adapters = createAdapters()
+      await adapters.seed.saveStudentAccount({
+        studentAccountId: 'change-lookup-student',
+        schoolEmail: 'change-lookup@example.invalid',
+        displayName: 'Change Lookup Student',
+      })
+      const taskId = '40744444-4444-4444-8444-444444444444'
+      const add = {
+        kind: 'task',
+        changeKind: 'add',
+        sourceId: taskId,
+        sharedInformationItemId: taskId,
+        latestChangeId: `${taskId}:change`,
+        targetScope: {
+          type: 'student',
+          schoolYear: 2026,
+          studentAccountId: 'change-lookup-student',
+        },
+        title: 'Lookup Task',
+        dueDate: null,
+        relatedLessonName: null,
+        changedByStudentAccountId: 'change-lookup-student',
+        changedAt: 1,
+        createdAt: 1,
+      } satisfies DirectChangeOperation
+
+      await expect(adapters.directChange.commitDirectChanges([add]))
+        .resolves.toMatchObject({ status: 'applied' })
+      await expect(
+        adapters.editHistory.findSharedInformationChange(add.latestChangeId),
+      ).resolves.toEqual({
+        kind: 'task',
+        sharedInformationItemId: taskId,
+      })
+      await expect(
+        adapters.editHistory.findSharedInformationChange('unknown-change'),
+      ).resolves.toBeNull()
     })
   },
 )

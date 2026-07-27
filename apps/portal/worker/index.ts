@@ -22,16 +22,16 @@ import {
   readTimetableChangeLayers,
 } from "./timetableChangeLayers";
 import {
-  readDirectTimetableChangeDetail,
-  readTimetableChangeHistory,
-} from "./timetableChangeHistory";
-import {
   readReferenceDailyPlan,
   readReferenceScopeOptions,
   readReferenceTasks,
 } from "./referenceDailyPlan";
-import { readTaskEditHistory } from "./taskEditHistory";
-import { readNoteEditHistory } from "./noteEditHistory";
+import {
+  readNoteEditHistory,
+  readSharedInformationChangeDetail,
+  readTaskEditHistory,
+  readTimetableChangeHistory,
+} from "./editHistory";
 
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
@@ -563,7 +563,7 @@ export default {
         now: Date.now(),
         studentAccountStore: persistence.studentAccount,
         dailyPlanStore: persistence.dailyPlan,
-        historyStore: persistence.timetableChangeHistory,
+        historyStore: persistence.editHistory,
       });
       if (result.status === "unauthenticated") {
         return Response.json(result, { status: 401 });
@@ -580,24 +580,29 @@ export default {
       return Response.json(result);
     }
 
-    const directChangeDetailPrefix = "/api/timetable-changes/direct/";
+    const sharedInformationChangeDetailPrefix =
+      "/api/shared-information-changes/";
     if (
-      url.pathname.startsWith(directChangeDetailPrefix) &&
-      url.pathname !== "/api/timetable-changes/direct/options" &&
+      url.pathname.startsWith(sharedInformationChangeDetailPrefix) &&
       request.method === "GET"
     ) {
       const sharedInformationChangeId = decodeURIComponent(
-        url.pathname.slice(directChangeDetailPrefix.length),
+        url.pathname.slice(sharedInformationChangeDetailPrefix.length),
       );
-      if (!sharedInformationChangeId) return new Response(null, { status: 404 });
+      if (
+        !sharedInformationChangeId ||
+        sharedInformationChangeId.includes("/")
+      ) {
+        return new Response(null, { status: 404 });
+      }
       const persistence = await getPersistenceAdapters(env);
-      const result = await readDirectTimetableChangeDetail({
+      const result = await readSharedInformationChangeDetail({
         sessionToken: readCookie(request, sessionCookieName),
         sharedInformationChangeId,
         now: Date.now(),
         studentAccountStore: persistence.studentAccount,
         dailyPlanStore: persistence.dailyPlan,
-        historyStore: persistence.timetableChangeHistory,
+        historyStore: persistence.editHistory,
       });
       if (result.status === "unauthenticated") {
         return Response.json(result, { status: 401 });
@@ -683,7 +688,7 @@ export default {
         now: Date.now(),
         studentAccountStore: persistence.studentAccount,
         dailyPlanStore: persistence.dailyPlan,
-        historyStore: persistence.taskEditHistory,
+        historyStore: persistence.editHistory,
       });
       if (result.status === "unauthenticated") {
         return Response.json(result, { status: 401 });
@@ -709,7 +714,7 @@ export default {
         now: Date.now(),
         studentAccountStore: persistence.studentAccount,
         dailyPlanStore: persistence.dailyPlan,
-        historyStore: persistence.noteEditHistory,
+        historyStore: persistence.editHistory,
       });
       if (result.status === "unauthenticated") {
         return Response.json(result, { status: 401 });

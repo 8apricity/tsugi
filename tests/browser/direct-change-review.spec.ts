@@ -262,10 +262,12 @@ test.describe('authenticated Direct Change review', () => {
     )
     await detail.getByRole('button', { name: '再読み込み' }).click()
     await expect.poll(() => detailRequestCount).toBe(2)
-    await expect(detail.locator('.direct-change-detail')).toBeVisible()
+    await expect(
+      detail.locator('.shared-information-change-detail'),
+    ).toBeVisible()
     await expectCompactReadOnlyDialogSpacing(
       detail,
-      detail.locator('.direct-change-detail'),
+      detail.locator('.shared-information-change-detail'),
     )
     await expect(history).toHaveAttribute('aria-hidden', 'true')
     await expect(history).toHaveAttribute('inert', '')
@@ -279,7 +281,9 @@ test.describe('authenticated Direct Change review', () => {
     await detail.getByRole('button', { name: '編集履歴に戻る' }).click()
     await entry.click()
     await expect.poll(() => detailRequestCount).toBe(4)
-    await expect(detail.locator('.direct-change-detail')).toBeVisible()
+    await expect(
+      detail.locator('.shared-information-change-detail'),
+    ).toBeVisible()
     releaseStaleDetailRequest()
     await staleDetailRequestSettled
     await expect(detail.getByRole('alert')).toHaveCount(0)

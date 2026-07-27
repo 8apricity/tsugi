@@ -117,7 +117,7 @@ describe('Shared Information Change Detail resource', () => {
     }
   })
 
-  it('rejects a Direct Change detail without Named Attribution', async () => {
+  it('rejects Shared Information Change Detail without Named Attribution', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({

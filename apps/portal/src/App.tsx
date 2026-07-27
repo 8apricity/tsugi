@@ -3107,7 +3107,9 @@ function App() {
     });
   }
 
-  function openDirectChangeDetail(sharedInformationChangeId: string) {
+  function openSharedInformationChangeDetail(
+    sharedInformationChangeId: string,
+  ) {
     if (
       topDialogRoute?.kind !== "timetable-change-detail" ||
       topDialogRoute.sharedInformationChangeId !== sharedInformationChangeId
@@ -5000,7 +5002,7 @@ function App() {
                         type="button"
                         key={entry.sharedInformationChangeId}
                         data-change-id={entry.sharedInformationChangeId}
-                        onClick={() => openDirectChangeDetail(
+                        onClick={() => openSharedInformationChangeDetail(
                           entry.sharedInformationChangeId,
                         )}
                       >
@@ -5009,7 +5011,7 @@ function App() {
                         </span>
                         <strong>{storedTransitionLabel(entry)}</strong>
                         <span>{entry.sourceType === "direct"
-                          ? "強制変更"
+                          ? "直接反映"
                           : "提案による変更"}</span>
                         <span>{entry.primaryActorDisplayName}</span>
                         <time dateTime={new Date(entry.changedAt).toISOString()}>
@@ -6433,7 +6435,7 @@ function TimetableSharedInformationChangeDetailView({
   referenceSchoolDate: string;
 }) {
   return (
-    <div className="direct-change-detail">
+    <div className="shared-information-change-detail">
       <dl className="history-detail-grid">
         <div><dt>変更内容</dt><dd>{changeKindLabel(detail.changeKind)}</dd></div>
         <div>

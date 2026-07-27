@@ -76,7 +76,7 @@ describe('Edit History', () => {
     }
   })
 
-  it('rejects Timetable Change Detail when its immutable slot changes', async () => {
+  it('rejects Shared Information Change Detail when its Timetable slot changes', async () => {
     const accessStore = await authenticatedStore()
     const itemId = 'item-1'
     const changeId = 'change-2'
@@ -299,6 +299,94 @@ describe('Edit History', () => {
         dueDate: null,
         relatedLessonName: null,
       },
+    })
+  })
+
+  it('returns proposal-sourced Note detail without changing Note history shape', async () => {
+    const accessStore = await authenticatedStore()
+    const noteId = 'note-1'
+    const targetScope = {
+      type: 'track' as const,
+      schoolYear: 2026,
+      trackId: 'track-1',
+    }
+    const changes: HistoricalNoteChange[] = [
+      {
+        sharedInformationChangeId: 'direct-change',
+        sharedInformationItemId: noteId,
+        precedingChangeId: null,
+        changeKind: 'add',
+        sourceType: 'direct',
+        primaryActorDisplayName: 'Student',
+        targetScope,
+        changedAt: now,
+        snapshot: { body: '提案前' },
+        relatedContext: { type: 'none' },
+        removalReason: null,
+      },
+      {
+        sharedInformationChangeId: 'proposal-change',
+        sharedInformationItemId: noteId,
+        precedingChangeId: 'direct-change',
+        changeKind: 'update',
+        sourceType: 'proposal',
+        targetScope,
+        changedAt: now + 1,
+        snapshot: { body: '提案後' },
+        relatedContext: { type: 'none' },
+        removalReason: null,
+      },
+    ]
+    const historyStore: EditHistoryStore = {
+      findSharedInformationChange: async () => ({
+        kind: 'note',
+        sharedInformationItemId: noteId,
+      }),
+      listTaskEditHistory: async () => [],
+      listNoteEditHistory: async () => changes,
+      listTimetableChangeHistory: async () => [],
+      listTimetableChangeItemHistory: async () => [],
+    }
+
+    await expect(readSharedInformationChangeDetail({
+      sessionToken,
+      sharedInformationChangeId: 'proposal-change',
+      now,
+      studentAccountStore: accessStore,
+      dailyPlanStore: accessStore,
+      historyStore,
+    })).resolves.toEqual({
+      status: 'ready',
+      kind: 'note',
+      sharedInformationChangeId: 'proposal-change',
+      sharedInformationItemId: noteId,
+      changeKind: 'update',
+      source: { type: 'proposal' },
+      changedAt: now + 1,
+      targetScope: { type: 'track', value: 'track-1' },
+      before: { body: '提案前' },
+      after: { body: '提案後' },
+    })
+    await expect(readNoteEditHistory({
+      sessionToken,
+      sharedInformationItemId: noteId,
+      now,
+      studentAccountStore: accessStore,
+      dailyPlanStore: accessStore,
+      historyStore,
+    })).resolves.toEqual({
+      status: 'ready',
+      noteId,
+      targetScope: { type: 'track', value: 'track-1' },
+      entries: [{
+        sharedInformationChangeId: 'direct-change',
+        changeKind: 'add',
+        sourceType: 'direct',
+        primaryActorDisplayName: 'Student',
+        changedAt: now,
+        before: null,
+        after: { body: '提案前' },
+      }],
     })
   })
 

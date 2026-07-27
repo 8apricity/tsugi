@@ -73,7 +73,7 @@ export function TaskEditHistoryDialog({
                       </span>
                       {entry.sourceType === 'direct' ? (
                         <span className="task-history-actor">
-                          <small>強制変更・変更者</small>
+                          <small>直接反映・変更者</small>
                           <strong>{entry.primaryActorDisplayName}</strong>
                         </span>
                       ) : (

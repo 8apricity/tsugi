@@ -189,18 +189,21 @@ export async function readNoteEditHistory({
       `${scopeKey(change.targetScope)}:${
         noteRelatedContextKey(change.relatedContext)
       }`,
-    toEntry: ({ change, before, after }) => ({
-      sharedInformationChangeId: change.sharedInformationChangeId,
-      changeKind: change.changeKind,
-      sourceType: 'direct',
-      primaryActorDisplayName: change.primaryActorDisplayName,
-      changedAt: change.changedAt,
-      before,
-      after,
-      ...(change.changeKind === 'remove' && change.removalReason
-        ? { removalReason: change.removalReason }
-        : {}),
-    }),
+    toEntry: ({ change, before, after }) =>
+      change.sourceType === 'proposal'
+        ? null
+        : {
+            sharedInformationChangeId: change.sharedInformationChangeId,
+            changeKind: change.changeKind,
+            sourceType: 'direct',
+            primaryActorDisplayName: change.primaryActorDisplayName,
+            changedAt: change.changedAt,
+            before,
+            after,
+            ...(change.changeKind === 'remove' && change.removalReason
+              ? { removalReason: change.removalReason }
+              : {}),
+          },
     toResponse: (selected, entries) => ({
       status: 'ready',
       noteId: selected.sharedInformationItemId,
@@ -476,7 +479,7 @@ async function readItemEditHistory<
   immutableKey?: (change: TChange) => string
   toEntry: (
     transition: ItemHistoryTransition<TSnapshot, TChange>,
-  ) => TEntry
+  ) => TEntry | null
   toResponse: (selected: TChange, entries: TEntry[]) => TResponse
 }) {
   const access = await currentHistoryAccess({
@@ -504,7 +507,11 @@ async function readItemEditHistory<
     immutableKey,
   )
   if (transitions === null) return { status: 'unavailable' as const }
-  return toResponse(selected, transitions.map(toEntry).reverse())
+  const entries = transitions
+    .map(toEntry)
+    .filter((entry): entry is TEntry => entry !== null)
+    .reverse()
+  return toResponse(selected, entries)
 }
 
 function reconstructItemTransitions<

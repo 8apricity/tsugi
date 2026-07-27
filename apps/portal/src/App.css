@@ -2161,7 +2161,7 @@ button.timetable-layer-row {
   color: var(--color-muted);
 }
 
-.direct-change-detail {
+.shared-information-change-detail {
   display: grid;
   gap: 24px;
   margin-top: 20px;

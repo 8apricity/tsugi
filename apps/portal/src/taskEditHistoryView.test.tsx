@@ -97,7 +97,7 @@ describe('Task Edit History dialog', () => {
     expect(markup).toContain('タスクの編集履歴')
     expect(markup).toContain('変更適用範囲: 文科')
     expect(markup).not.toContain('track-1')
-    expect(markup).toContain('強制変更・変更者')
+    expect(markup).toContain('直接反映・変更者')
     expect(markup).toContain('提案による変更')
     expect(markup).toContain('Sora')
     expect(markup).toContain('Haru')

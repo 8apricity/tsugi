@@ -1039,7 +1039,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       ]))
   })
 
-  it('retains applied Task proposal changes without exposing proposal participants', async () => {
+  it('retains applied proposal changes without exposing proposal participants', async () => {
     const database = createTestDatabase()
     const adapters = createD1PersistenceAdapters(
       new SqliteD1Database(database) as unknown as D1Database,
@@ -1114,6 +1114,66 @@ describe('D1 Direct Timetable Change persistence', () => {
       },
     })
     expect('primaryActorDisplayName' in history[1]).toBe(false)
+
+    const noteId = '33a22222-2222-4222-8222-222222222222'
+    const noteAdd = {
+      kind: 'note',
+      changeKind: 'add',
+      sourceId: noteId,
+      sharedInformationItemId: noteId,
+      latestChangeId: `${noteId}:change`,
+      targetScope: add.targetScope,
+      schoolDate: null,
+      body: '提案前',
+      changedByStudentAccountId: 'proposal-history-student',
+      changedAt: 3,
+      createdAt: 3,
+    } satisfies DirectChangeOperation
+    await adapters.directTimetableChange.commitDirectChanges([noteAdd])
+
+    database.prepare(`
+      insert into note_snapshots (
+        note_snapshot_id, body, related_context_type,
+        related_school_date, related_period_number, related_task_item_id,
+        created_at
+      ) values (?, '提案後', 'none', null, null, null, ?)
+    `).run(
+      'proposal-note-history-snapshot',
+      '1970-01-01T00:00:00.004Z',
+    )
+    database.prepare(`
+      insert into shared_information_changes (
+        shared_information_change_id, shared_information_item_id,
+        change_kind, source_type, source_id, preceding_change_id,
+        changed_by_student_account_id, changed_at, note_snapshot_id
+      ) values (?, ?, 'update', 'proposal', null, ?, ?, ?, ?)
+    `).run(
+      'proposal-note-history-change',
+      noteId,
+      noteAdd.latestChangeId,
+      'proposal-history-student',
+      '1970-01-01T00:00:00.004Z',
+      'proposal-note-history-snapshot',
+    )
+    database.prepare(`
+      update shared_information_items
+      set latest_change_id = ?, current_note_snapshot_id = ?
+      where shared_information_item_id = ?
+    `).run(
+      'proposal-note-history-change',
+      'proposal-note-history-snapshot',
+      noteId,
+    )
+
+    const noteHistory = await adapters.editHistory.listNoteEditHistory(noteId)
+    expect(noteHistory).toHaveLength(2)
+    expect(noteHistory[1]).toMatchObject({
+      sourceType: 'proposal',
+      precedingChangeId: noteAdd.latestChangeId,
+      snapshot: { body: '提案後' },
+      relatedContext: { type: 'none' },
+    })
+    expect('primaryActorDisplayName' in noteHistory[1]).toBe(false)
   })
 
   it('backfills applied predecessors for existing Shared Information Changes', () => {

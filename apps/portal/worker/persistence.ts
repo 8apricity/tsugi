@@ -328,13 +328,11 @@ export type HistoricalTaskChange = HistoricalTaskChangeBase & (
   | { sourceType: 'proposal'; primaryActorDisplayName?: never }
 )
 
-export type HistoricalNoteChange = {
+type HistoricalNoteChangeBase = {
   sharedInformationChangeId: string
   sharedInformationItemId: string
   changeKind: 'add' | 'update' | 'remove'
-  sourceType: 'direct'
   targetScope: TargetScope
-  primaryActorDisplayName: string
   changedAt: number
   precedingChangeId: string | null
   snapshot: NoteHistorySnapshot | null
@@ -350,6 +348,11 @@ export type HistoricalNoteChange = {
     | null
   removalReason: 'student' | 'task_cascade' | null
 }
+
+export type HistoricalNoteChange = HistoricalNoteChangeBase & (
+  | { sourceType: 'direct'; primaryActorDisplayName: string }
+  | { sourceType: 'proposal'; primaryActorDisplayName?: never }
+)
 
 export type CompleteInitialSetupTransactionInput = {
   setupSessionTokenHash: string
@@ -1809,7 +1812,7 @@ type HistoricalNoteChangeRow = {
   shared_information_change_id: string
   shared_information_item_id: string
   change_kind: 'add' | 'update' | 'remove'
-  source_type: 'direct'
+  source_type: 'direct' | 'proposal'
   school_year: number
   scope_type: TargetScopeType
   grade: number | null
@@ -3823,7 +3826,6 @@ export class D1PersistenceAdapters
              limit 1
            )
          where i.kind = 'note' and i.shared_information_item_id = ?
-           and c.source_type = 'direct'
            and (select count(*) from target_scope_parts scope_part_count
                 where scope_part_count.target_scope_id = s.target_scope_id) = 1`,
       )
@@ -4721,13 +4723,11 @@ function mapHistoricalTaskChangeRow(
 function mapHistoricalNoteChangeRow(
   row: HistoricalNoteChangeRow,
 ): HistoricalNoteChange {
-  return {
+  const change = {
     sharedInformationChangeId: row.shared_information_change_id,
     sharedInformationItemId: row.shared_information_item_id,
     changeKind: row.change_kind,
-    sourceType: 'direct',
     targetScope: mapTargetScopeRow(row),
-    primaryActorDisplayName: row.display_name,
     changedAt: Date.parse(row.changed_at),
     precedingChangeId: row.preceding_change_id,
     snapshot: row.change_kind === 'remove'
@@ -4736,6 +4736,13 @@ function mapHistoricalNoteChangeRow(
     relatedContext: mapHistoricalNoteRelatedContext(row),
     removalReason: row.removal_reason,
   }
+  return row.source_type === 'direct'
+    ? {
+        ...change,
+        sourceType: 'direct',
+        primaryActorDisplayName: row.display_name,
+      }
+    : { ...change, sourceType: 'proposal' }
 }
 
 function mapHistoricalNoteRelatedContext(

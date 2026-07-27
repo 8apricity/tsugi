@@ -77,6 +77,10 @@ _Avoid_: Master, official information, approved item, canonical item
 An accepted change proposal or direct change that has been applied to shared information. Shared information changes form the history from which active shared information can be understood.
 _Avoid_: Patch, commit, revision, audit log
 
+**Shared Information Change Detail**:
+The Target Scope student view of one applied Shared Information Change. It shows the change kind, source, applied time, and the before and after values relevant to its Shared Information Kind, with Named Attribution only after Target Scope membership is established. A shared information change detail presents the same causal transition as Edit History, is unavailable through Reference Scope inspection, and applies equally to changes originating from accepted Change Proposals and Direct Changes.
+_Avoid_: Direct change detail, timetable change detail, reference scope detail
+
 **Change Proposal**:
 A proposed addition, update, or removal of shared information. A change proposal is pending until enough approvals accept it or enough rejections reject it.
 _Avoid_: Candidate, edit, revision, correction

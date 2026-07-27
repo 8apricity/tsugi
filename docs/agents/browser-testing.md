@@ -17,6 +17,12 @@ commands run one required project for focused diagnosis. WebKit results show
 WebKit compatibility; they are not Safari certification. Real Safari remains
 a separate manual verification surface.
 
+The required matrix runs Chromium and WebKit as separate Playwright processes.
+Each process therefore starts `browser:test:serve` independently and recreates
+the disposable browser-test D1 before its project. This prevents Shared
+Information Changes applied by one engine from changing another engine's
+starting state.
+
 For an explicit check against an installed branded Google Chrome binary, run:
 
 ```powershell

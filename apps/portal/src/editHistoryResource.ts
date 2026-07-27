@@ -5,10 +5,13 @@ import type {
 import type {
   TaskEditHistoryResponse,
 } from '../shared/taskEditHistory'
-import type { TargetScopeType } from '../shared/targetScope'
+import {
+  isTargetScopeType,
+  type TargetScopeType,
+} from '../shared/targetScope'
 import type {
   SharedInformationChangeDetail,
-  TimetableChangeDetail,
+  TimetableSharedInformationChangeDetail,
   TimetableHistorySnapshot,
 } from '../shared/editHistory'
 import {
@@ -49,7 +52,10 @@ export type TimetableEditHistoryResourceResult =
 export type SharedInformationChangeDetailResourceResult =
   AsyncResourceResult<SharedInformationChangeDetail>
 
-export type { SharedInformationChangeDetail, TimetableChangeDetail }
+export type {
+  SharedInformationChangeDetail,
+  TimetableSharedInformationChangeDetail,
+}
 
 export function useTaskEditHistoryResource(
   selection: (RouteResourceSelection & { taskId: string }) | null,
@@ -192,14 +198,7 @@ export function useSharedInformationChangeDetailResource(
       throw new Error('Shared Information Change Detail unavailable')
     }
     const value = await response.json() as unknown
-    if (
-      !isRecord(value) ||
-      value.status !== 'ready' ||
-      value.sharedInformationChangeId !== sharedInformationChangeId ||
-      !['timetable_change', 'task', 'note'].includes(String(value.kind)) ||
-      !isRecord(value.targetScope) ||
-      !isRecord(value.source)
-    ) {
+    if (!isSharedInformationChangeDetail(value, sharedInformationChangeId)) {
       throw new Error(
         'Shared Information Change Detail response did not match selection',
       )
@@ -207,4 +206,95 @@ export function useSharedInformationChangeDetailResource(
     return value as SharedInformationChangeDetail
   }, [sharedInformationChangeId])
   return useAsyncResource({ identityKey, load })
+}
+
+function isSharedInformationChangeDetail(
+  value: unknown,
+  expectedChangeId: string,
+): value is SharedInformationChangeDetail {
+  if (
+    !isRecord(value) ||
+    value.status !== 'ready' ||
+    value.sharedInformationChangeId !== expectedChangeId ||
+    typeof value.sharedInformationItemId !== 'string' ||
+    !['add', 'update', 'remove'].includes(String(value.changeKind)) ||
+    typeof value.changedAt !== 'number' ||
+    !isTargetScope(value.targetScope) ||
+    !isChangeSource(value.source) ||
+    !isNullableRecord(value.before) ||
+    !isNullableRecord(value.after)
+  ) return false
+
+  if (value.kind === 'timetable_change') {
+    return typeof value.changeDate === 'string' &&
+      Number.isInteger(value.periodNumber) &&
+      isTimetableSnapshot(value.before) &&
+      isTimetableSnapshot(value.after)
+  }
+  if (value.kind === 'task') {
+    return isTaskSnapshot(value.before) && isTaskSnapshot(value.after)
+  }
+  if (value.kind === 'note') {
+    return isNoteSnapshot(value.before) &&
+      isNoteSnapshot(value.after) &&
+      (
+        value.removalReason === undefined ||
+        value.removalReason === 'student' ||
+        value.removalReason === 'task_cascade'
+      )
+  }
+  return false
+}
+
+function isTargetScope(value: unknown) {
+  return isRecord(value) &&
+    isTargetScopeType(value.type) &&
+    typeof value.value === 'string'
+}
+
+function isChangeSource(value: unknown) {
+  return isRecord(value) && (
+    value.type === 'proposal' ||
+    (
+      value.type === 'direct' &&
+      typeof value.primaryActorDisplayName === 'string'
+    )
+  )
+}
+
+function isNullableRecord(value: unknown) {
+  return value === null || isRecord(value)
+}
+
+function isTaskSnapshot(value: unknown) {
+  return value === null || (
+    isRecord(value) &&
+    typeof value.title === 'string' &&
+    (value.dueDate === null || typeof value.dueDate === 'string') &&
+    (
+      value.relatedLessonName === null ||
+      typeof value.relatedLessonName === 'string'
+    )
+  )
+}
+
+function isNoteSnapshot(value: unknown) {
+  return value === null ||
+    (isRecord(value) && typeof value.body === 'string')
+}
+
+function isTimetableSnapshot(value: unknown) {
+  if (value === null) return true
+  if (!isRecord(value)) return false
+  if (value.type === 'cancelled') return true
+  if (value.type === 'lesson_name') {
+    return typeof value.lessonName === 'string'
+  }
+  if (value.type === 'period_reference') {
+    return Number.isInteger(value.weekday) &&
+      Number.isInteger(value.periodNumber)
+  }
+  return value.type === 'floating_lesson_reference' &&
+    typeof value.floatingLessonReferenceLabelId === 'string' &&
+    typeof value.referenceLabel === 'string'
 }

@@ -834,6 +834,26 @@ describe('D1 Direct Timetable Change persistence', () => {
     ).resolves.toEqual([
       expect.objectContaining({ replacement: { type: 'lesson_name', lessonName: '更新後' } }),
     ])
+    database.prepare(
+      `update timetable_change_snapshots
+       set change_date = '2026-07-11'
+       where timetable_change_snapshot_id = ?`,
+    ).run(`${updateTimetable.sourceId}:snapshot`)
+    await expect(
+      adapters.editHistory.listTimetableChangeItemHistory(
+        timetable.sharedInformationItemId,
+      ),
+    ).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sharedInformationChangeId: updateTimetable.latestChangeId,
+        changeDate: '2026-07-11',
+      }),
+    ]))
+    database.prepare(
+      `update timetable_change_snapshots
+       set change_date = '2026-07-10'
+       where timetable_change_snapshot_id = ?`,
+    ).run(`${updateTimetable.sourceId}:snapshot`)
 
     await expect(
       adapters.directTimetableChange.commitDirectChanges([
@@ -1014,6 +1034,7 @@ describe('D1 Direct Timetable Change persistence', () => {
           changeKind: 'remove',
           removalReason: 'task_cascade',
           primaryActorDisplayName: 'Task Note Student',
+          relatedContext: { type: 'task', taskItemId: taskId },
         }),
       ]))
   })
@@ -1624,15 +1645,63 @@ describe.each(targetScopeMembershipAdapterCases)(
         changedAt: 1,
         createdAt: 1,
       } satisfies DirectChangeOperation
+      const timetableId = '40755555-5555-4555-8555-555555555555'
+      const timetable = {
+        kind: 'timetable_change',
+        changeKind: 'add',
+        sourceId: timetableId,
+        sharedInformationItemId: timetableId,
+        latestChangeId: `${timetableId}:change`,
+        targetScope: add.targetScope,
+        changeDate: '2026-07-10',
+        periodNumber: 1,
+        replacement: { type: 'cancelled' },
+        changedByStudentAccountId: 'change-lookup-student',
+        changedAt: 2,
+      } satisfies DirectChangeOperation
+      const noteId = '40766666-6666-4666-8666-666666666666'
+      const note = {
+        kind: 'note',
+        changeKind: 'add',
+        sourceId: noteId,
+        sharedInformationItemId: noteId,
+        latestChangeId: `${noteId}:change`,
+        targetScope: add.targetScope,
+        schoolDate: null,
+        body: 'Lookup Note',
+        changedByStudentAccountId: 'change-lookup-student',
+        changedAt: 3,
+        createdAt: 3,
+      } satisfies DirectChangeOperation
 
-      await expect(adapters.directChange.commitDirectChanges([add]))
-        .resolves.toMatchObject({ status: 'applied' })
       await expect(
-        adapters.editHistory.findSharedInformationChange(add.latestChangeId),
-      ).resolves.toEqual({
-        kind: 'task',
-        sharedInformationItemId: taskId,
-      })
+        adapters.directChange.commitDirectChanges([add, timetable, note]),
+      )
+        .resolves.toMatchObject({ status: 'applied' })
+      for (const expected of [
+        {
+          changeId: add.latestChangeId,
+          kind: 'task',
+          itemId: taskId,
+        },
+        {
+          changeId: timetable.latestChangeId,
+          kind: 'timetable_change',
+          itemId: timetableId,
+        },
+        {
+          changeId: note.latestChangeId,
+          kind: 'note',
+          itemId: noteId,
+        },
+      ] as const) {
+        await expect(
+          adapters.editHistory.findSharedInformationChange(expected.changeId),
+        ).resolves.toEqual({
+          kind: expected.kind,
+          sharedInformationItemId: expected.itemId,
+        })
+      }
       await expect(
         adapters.editHistory.findSharedInformationChange('unknown-change'),
       ).resolves.toBeNull()

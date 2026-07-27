@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   InMemoryPersistenceAdapters,
   type EditHistoryStore,
+  type HistoricalNoteChange,
   type HistoricalTaskChange,
   type HistoricalTimetableChange,
+  type NoteEditHistoryStore,
   type TaskEditHistoryStore,
   type TimetableChangeHistoryStore,
 } from './persistence'
 import {
+  readNoteEditHistory,
   readSharedInformationChangeDetail,
   readTaskEditHistory,
   readTimetableChangeHistory,
@@ -71,6 +74,64 @@ describe('Edit History', () => {
         ...input,
       }
     }
+  })
+
+  it('rejects Timetable Change Detail when its immutable slot changes', async () => {
+    const accessStore = await authenticatedStore()
+    const itemId = 'item-1'
+    const changeId = 'change-2'
+    const targetScope = {
+      type: 'track' as const,
+      schoolYear: 2026,
+      trackId: 'track-1',
+    }
+    const changes: HistoricalTimetableChange[] = [
+      {
+        sharedInformationChangeId: 'change-1',
+        sharedInformationItemId: itemId,
+        precedingChangeId: null,
+        changeKind: 'add',
+        sourceType: 'direct',
+        targetScope,
+        changeDate: '2026-07-27',
+        periodNumber: 1,
+        primaryActorDisplayName: 'Student',
+        changedAt: now,
+        replacement: { type: 'lesson_name', lessonName: '数学' },
+      },
+      {
+        sharedInformationChangeId: changeId,
+        sharedInformationItemId: itemId,
+        precedingChangeId: 'change-1',
+        changeKind: 'update',
+        sourceType: 'direct',
+        targetScope,
+        changeDate: '2026-07-28',
+        periodNumber: 1,
+        primaryActorDisplayName: 'Student',
+        changedAt: now + 1,
+        replacement: { type: 'lesson_name', lessonName: '英語' },
+      },
+    ]
+    const historyStore: EditHistoryStore = {
+      findSharedInformationChange: async () => ({
+        kind: 'timetable_change',
+        sharedInformationItemId: itemId,
+      }),
+      listTaskEditHistory: async () => [],
+      listNoteEditHistory: async () => [],
+      listTimetableChangeHistory: async () => [],
+      listTimetableChangeItemHistory: async () => changes,
+    }
+
+    await expect(readSharedInformationChangeDetail({
+      sessionToken,
+      sharedInformationChangeId: changeId,
+      now,
+      studentAccountStore: accessStore,
+      dailyPlanStore: accessStore,
+      historyStore,
+    })).resolves.toEqual({ status: 'unavailable' })
   })
 
   it('rejects a Task history whose immutable Target Scope changes', async () => {
@@ -239,6 +300,196 @@ describe('Edit History', () => {
         relatedLessonName: null,
       },
     })
+  })
+
+  it('rejects a Note history whose immutable Related Context changes', async () => {
+    const accessStore = await authenticatedStore()
+    const noteId = 'note-1'
+    const common = {
+      sharedInformationItemId: noteId,
+      sourceType: 'direct' as const,
+      targetScope: {
+        type: 'track' as const,
+        schoolYear: 2026,
+        trackId: 'track-1',
+      },
+      primaryActorDisplayName: 'Student',
+      changedAt: now,
+      removalReason: null,
+    }
+    const historyStore: NoteEditHistoryStore = {
+      listNoteEditHistory: async () => [
+        {
+          ...common,
+          sharedInformationChangeId: 'change-1',
+          changeKind: 'add',
+          precedingChangeId: null,
+          snapshot: { body: '追加' },
+          relatedContext: {
+            type: 'school_date',
+            schoolDate: '2026-07-27',
+          },
+        },
+        {
+          ...common,
+          sharedInformationChangeId: 'change-2',
+          changeKind: 'update',
+          precedingChangeId: 'change-1',
+          snapshot: { body: '更新' },
+          relatedContext: {
+            type: 'school_date',
+            schoolDate: '2026-07-28',
+          },
+        },
+      ] satisfies HistoricalNoteChange[],
+    }
+
+    await expect(readNoteEditHistory({
+      sessionToken,
+      sharedInformationItemId: noteId,
+      now,
+      studentAccountStore: accessStore,
+      dailyPlanStore: accessStore,
+      historyStore,
+    })).resolves.toEqual({ status: 'unavailable' })
+  })
+
+  it('rejects branching and cyclic Task history chains', async () => {
+    const accessStore = await authenticatedStore()
+    const taskId = 'task-1'
+    const root = taskHistoryChange({
+      sharedInformationChangeId: 'root',
+      precedingChangeId: null,
+      changeKind: 'add',
+    })
+    const histories = [
+      [
+        root,
+        taskHistoryChange({
+          sharedInformationChangeId: 'left',
+          precedingChangeId: 'root',
+          changeKind: 'update',
+        }),
+        taskHistoryChange({
+          sharedInformationChangeId: 'right',
+          precedingChangeId: 'root',
+          changeKind: 'update',
+        }),
+      ],
+      [
+        taskHistoryChange({
+          sharedInformationChangeId: 'left',
+          precedingChangeId: 'right',
+          changeKind: 'update',
+        }),
+        taskHistoryChange({
+          sharedInformationChangeId: 'right',
+          precedingChangeId: 'left',
+          changeKind: 'update',
+        }),
+      ],
+    ]
+
+    for (const changes of histories) {
+      await expect(readTaskEditHistory({
+        sessionToken,
+        sharedInformationItemId: taskId,
+        now,
+        studentAccountStore: accessStore,
+        dailyPlanStore: accessStore,
+        historyStore: {
+          listTaskEditHistory: async () => changes,
+        },
+      })).resolves.toEqual({ status: 'unavailable' })
+    }
+
+    function taskHistoryChange({
+      sharedInformationChangeId,
+      precedingChangeId,
+      changeKind,
+    }: Pick<
+      HistoricalTaskChange,
+      'sharedInformationChangeId' | 'precedingChangeId' | 'changeKind'
+    >): HistoricalTaskChange {
+      return {
+        sharedInformationChangeId,
+        sharedInformationItemId: taskId,
+        precedingChangeId,
+        changeKind,
+        sourceType: 'direct',
+        primaryActorDisplayName: 'Student',
+        targetScope: {
+          type: 'track',
+          schoolYear: 2026,
+          trackId: 'track-1',
+        },
+        changedAt: now,
+        snapshot: { title: '数学', dueDate: null, relatedLessonName: null },
+      }
+    }
+  })
+
+  it('authorizes the requested Change before rejecting mixed-scope history', async () => {
+    const accessStore = await authenticatedStore()
+    const taskId = 'task-1'
+    const changes: HistoricalTaskChange[] = [
+      {
+        sharedInformationChangeId: 'allowed-change',
+        sharedInformationItemId: taskId,
+        precedingChangeId: null,
+        changeKind: 'add',
+        sourceType: 'direct',
+        primaryActorDisplayName: 'Student',
+        targetScope: {
+          type: 'track',
+          schoolYear: 2026,
+          trackId: 'track-1',
+        },
+        changedAt: now,
+        snapshot: { title: '数学', dueDate: null, relatedLessonName: null },
+      },
+      {
+        sharedInformationChangeId: 'outside-change',
+        sharedInformationItemId: taskId,
+        precedingChangeId: 'allowed-change',
+        changeKind: 'update',
+        sourceType: 'direct',
+        primaryActorDisplayName: 'Other Student',
+        targetScope: {
+          type: 'track',
+          schoolYear: 2026,
+          trackId: 'track-2',
+        },
+        changedAt: now + 1,
+        snapshot: { title: '英語', dueDate: null, relatedLessonName: null },
+      },
+    ]
+    const historyStore: EditHistoryStore = {
+      findSharedInformationChange: async () => ({
+        kind: 'task',
+        sharedInformationItemId: taskId,
+      }),
+      listTaskEditHistory: async () => changes,
+      listNoteEditHistory: async () => [],
+      listTimetableChangeHistory: async () => [],
+      listTimetableChangeItemHistory: async () => [],
+    }
+    const input = {
+      sessionToken,
+      now,
+      studentAccountStore: accessStore,
+      dailyPlanStore: accessStore,
+      historyStore,
+    }
+
+    await expect(readSharedInformationChangeDetail({
+      ...input,
+      sharedInformationChangeId: 'allowed-change',
+    })).resolves.toEqual({ status: 'unavailable' })
+    await expect(readSharedInformationChangeDetail({
+      ...input,
+      sharedInformationChangeId: 'outside-change',
+    })).resolves.toEqual({ status: 'not-found' })
   })
 })
 

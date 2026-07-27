@@ -98,7 +98,7 @@ import {
   useSharedInformationChangeDetailResource,
   useTaskEditHistoryResource,
   useTimetableEditHistoryResource,
-  type TimetableChangeDetail,
+  type TimetableSharedInformationChangeDetail,
   type TimetableChangeHistoryEntry,
 } from "./editHistoryResource";
 import { NoteDetailDialog } from "./noteDetailView";
@@ -5070,7 +5070,7 @@ function App() {
                     変更内容を読み込めませんでした。
                   </p>
                 ) : (
-                  <TimetableChangeDetailView
+                  <TimetableSharedInformationChangeDetailView
                     detail={sharedInformationChangeDetailResource.state.value}
                     targetScopeContext={targetScopeContext}
                     referenceSchoolDate={selectedSchoolDate}
@@ -6423,12 +6423,12 @@ function PeriodWheelPicker({
   );
 }
 
-function TimetableChangeDetailView({
+function TimetableSharedInformationChangeDetailView({
   detail,
   targetScopeContext,
   referenceSchoolDate,
 }: {
-  detail: TimetableChangeDetail;
+  detail: TimetableSharedInformationChangeDetail;
   targetScopeContext?: TargetScopeDisplayContext;
   referenceSchoolDate: string;
 }) {
@@ -6439,7 +6439,7 @@ function TimetableChangeDetailView({
         <div>
           <dt>反映方法</dt>
           <dd>{detail.source.type === "direct"
-            ? "強制変更"
+            ? "直接反映"
             : "提案による変更"}</dd>
         </div>
         {detail.source.type === "direct" ? (

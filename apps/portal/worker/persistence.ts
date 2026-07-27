@@ -338,6 +338,16 @@ export type HistoricalNoteChange = {
   changedAt: number
   precedingChangeId: string | null
   snapshot: NoteHistorySnapshot | null
+  relatedContext:
+    | { type: 'none' }
+    | { type: 'school_date'; schoolDate: string }
+    | {
+        type: 'daily_lesson'
+        schoolDate: string
+        periodNumber: number
+      }
+    | { type: 'task'; taskItemId: string }
+    | null
   removalReason: 'student' | 'task_cascade' | null
 }
 
@@ -1389,6 +1399,19 @@ export class InMemoryPersistenceAdapters
   }
 
   async listNoteEditHistory(sharedInformationItemId: string) {
+    const initial = [...this.directNoteOperations.values()].find(
+      (
+        change,
+      ): change is Extract<
+        DirectChangeOperation,
+        { kind: 'note'; changeKind: 'add' }
+      > =>
+        change.sharedInformationItemId === sharedInformationItemId &&
+        change.changeKind === 'add',
+    )
+    const relatedContext = initial
+      ? directNoteRelatedContext(initial)
+      : null
     return [...this.directNoteOperations.values()]
       .filter((change) =>
         change.sharedInformationItemId === sharedInformationItemId)
@@ -1409,6 +1432,7 @@ export class InMemoryPersistenceAdapters
         snapshot: change.changeKind === 'remove'
           ? null
           : { body: change.body },
+        relatedContext,
         removalReason: change.changeKind === 'remove'
           ? change.removalReason
           : null,
@@ -1796,6 +1820,11 @@ type HistoricalNoteChangeRow = {
   changed_at: string
   preceding_change_id: string | null
   body: string | null
+  related_context_type:
+    | 'none' | 'school_date' | 'daily_lesson' | 'task' | null
+  related_school_date: string | null
+  related_period_number: number | null
+  related_task_item_id: string | null
   removal_reason: 'student' | 'task_cascade' | null
 }
 
@@ -3759,7 +3788,19 @@ export class D1PersistenceAdapters
                 c.shared_information_item_id, c.change_kind, c.source_type,
                 s.school_year, p.scope_type, p.grade, p.class_id, p.track_id,
                 p.student_account_id, actor.display_name, c.changed_at,
-                c.preceding_change_id, note.body, c.removal_reason
+                c.preceding_change_id, note.body, c.removal_reason,
+                coalesce(note.related_context_type,
+                         initial_note.related_context_type)
+                  as related_context_type,
+                coalesce(note.related_school_date,
+                         initial_note.related_school_date)
+                  as related_school_date,
+                coalesce(note.related_period_number,
+                         initial_note.related_period_number)
+                  as related_period_number,
+                coalesce(note.related_task_item_id,
+                         initial_note.related_task_item_id)
+                  as related_task_item_id
          from shared_information_changes c
          join shared_information_items i
            on i.shared_information_item_id = c.shared_information_item_id
@@ -3769,6 +3810,18 @@ export class D1PersistenceAdapters
            on actor.student_account_id = c.changed_by_student_account_id
          left join note_snapshots note
            on note.note_snapshot_id = c.note_snapshot_id
+         join note_snapshots initial_note
+           on initial_note.note_snapshot_id = (
+             select first_change.note_snapshot_id
+             from shared_information_changes first_change
+             where first_change.shared_information_item_id =
+               i.shared_information_item_id
+               and first_change.note_snapshot_id is not null
+             order by (first_change.preceding_change_id is not null),
+                      first_change.changed_at,
+                      first_change.shared_information_change_id
+             limit 1
+           )
          where i.kind = 'note' and i.shared_information_item_id = ?
            and c.source_type = 'direct'
            and (select count(*) from target_scope_parts scope_part_count
@@ -3788,7 +3841,10 @@ export class D1PersistenceAdapters
         `select c.shared_information_change_id,
                 c.shared_information_item_id, c.change_kind, c.source_type,
                 s.school_year, p.scope_type, p.grade, p.class_id, p.track_id,
-                p.student_account_id, slot.change_date, slot.period_number,
+                p.student_account_id,
+                coalesce(snapshot.change_date, slot.change_date) as change_date,
+                coalesce(snapshot.period_number, slot.period_number)
+                  as period_number,
                 snapshot.replacement_type,
                 snapshot.registered_lesson_name_id,
                 coalesce(registered_lesson.short_lesson_name,
@@ -3809,7 +3865,9 @@ export class D1PersistenceAdapters
            from shared_information_changes first_change
            where first_change.shared_information_item_id = i.shared_information_item_id
              and first_change.timetable_change_snapshot_id is not null
-           order by first_change.changed_at, first_change.shared_information_change_id
+           order by (first_change.preceding_change_id is not null),
+                    first_change.changed_at,
+                    first_change.shared_information_change_id
            limit 1
          )
          left join timetable_change_snapshots snapshot
@@ -4675,8 +4733,43 @@ function mapHistoricalNoteChangeRow(
     snapshot: row.change_kind === 'remove'
       ? null
       : { body: row.body ?? '' },
+    relatedContext: mapHistoricalNoteRelatedContext(row),
     removalReason: row.removal_reason,
   }
+}
+
+function mapHistoricalNoteRelatedContext(
+  row: Pick<
+    HistoricalNoteChangeRow,
+    'related_context_type' | 'related_school_date' |
+    'related_period_number' | 'related_task_item_id'
+  >,
+): HistoricalNoteChange['relatedContext'] {
+  if (row.related_context_type === 'none') return { type: 'none' }
+  if (
+    row.related_context_type === 'school_date' &&
+    row.related_school_date !== null
+  ) {
+    return { type: 'school_date', schoolDate: row.related_school_date }
+  }
+  if (
+    row.related_context_type === 'daily_lesson' &&
+    row.related_school_date !== null &&
+    row.related_period_number !== null
+  ) {
+    return {
+      type: 'daily_lesson',
+      schoolDate: row.related_school_date,
+      periodNumber: row.related_period_number,
+    }
+  }
+  if (
+    row.related_context_type === 'task' &&
+    row.related_task_item_id !== null
+  ) {
+    return { type: 'task', taskItemId: row.related_task_item_id }
+  }
+  return null
 }
 
 function mapRegisteredLessonNameRow(row: {
@@ -4702,6 +4795,25 @@ function targetScopeColumns(change: Pick<ActiveTimetableChange | ActiveTask | Ac
     studentAccountId:
       targetScope.type === 'student' ? targetScope.studentAccountId : null,
   }
+}
+
+function directNoteRelatedContext(
+  change: Extract<
+    DirectChangeOperation,
+    { kind: 'note'; changeKind: 'add' }
+  >,
+): NonNullable<HistoricalNoteChange['relatedContext']> {
+  if (change.relatedTaskItemId) {
+    return { type: 'task', taskItemId: change.relatedTaskItemId }
+  }
+  if (change.schoolDate === null) return { type: 'none' }
+  return change.periodNumber == null
+    ? { type: 'school_date', schoolDate: change.schoolDate }
+    : {
+        type: 'daily_lesson',
+        schoolDate: change.schoolDate,
+        periodNumber: change.periodNumber,
+      }
 }
 
 function exactTargetScopeQuery(

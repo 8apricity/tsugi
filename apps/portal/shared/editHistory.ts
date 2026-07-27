@@ -32,7 +32,7 @@ type SharedInformationChangeDetailBase = {
   }
 }
 
-export type TimetableChangeDetail =
+export type TimetableSharedInformationChangeDetail =
   & SharedInformationChangeDetailBase
   & {
     kind: 'timetable_change'
@@ -42,7 +42,7 @@ export type TimetableChangeDetail =
     after: TimetableHistorySnapshot | null
   }
 
-export type TaskChangeDetail =
+export type TaskSharedInformationChangeDetail =
   & SharedInformationChangeDetailBase
   & {
     kind: 'task'
@@ -50,7 +50,7 @@ export type TaskChangeDetail =
     after: TaskHistorySnapshot | null
   }
 
-export type NoteChangeDetail =
+export type NoteSharedInformationChangeDetail =
   & SharedInformationChangeDetailBase
   & {
     kind: 'note'
@@ -60,6 +60,6 @@ export type NoteChangeDetail =
   }
 
 export type SharedInformationChangeDetail =
-  | TimetableChangeDetail
-  | TaskChangeDetail
-  | NoteChangeDetail
+  | TimetableSharedInformationChangeDetail
+  | TaskSharedInformationChangeDetail
+  | NoteSharedInformationChangeDetail

@@ -12,12 +12,14 @@ import {
 
 function DetailResourceProbe({
   children,
+  sharedInformationChangeId = 'change-1',
 }: {
   children(result: SharedInformationChangeDetailResourceResult): ReactNode
+  sharedInformationChangeId?: string
 }) {
   return children(useSharedInformationChangeDetailResource({
     routeInstanceId: 'detail-route-1',
-    sharedInformationChangeId: 'change-1',
+    sharedInformationChangeId,
   }))
 }
 
@@ -108,6 +110,120 @@ describe('Shared Information Change Detail resource', () => {
       expect(observed.at(-1)?.state).toEqual({
         status: 'ready',
         value: detail,
+      })
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('rejects a Direct Change detail without Named Attribution', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'ready',
+        kind: 'task',
+        sharedInformationChangeId: 'change-1',
+        sharedInformationItemId: 'task-1',
+        changeKind: 'add',
+        source: { type: 'direct' },
+        changedAt: 1_774_569_600_000,
+        targetScope: { type: 'class', value: 'class-2-3' },
+        before: null,
+        after: {
+          title: '数学',
+          dueDate: null,
+          relatedLessonName: null,
+        },
+      }),
+    } as Response))
+    const observed: SharedInformationChangeDetailResourceResult[] = []
+    const container = document.createElement('div')
+    const root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(
+          <DetailResourceProbe>
+            {(result) => {
+              observed.push(result)
+              return null
+            }}
+          </DetailResourceProbe>,
+        )
+        await Promise.resolve()
+      })
+      expect(observed.at(-1)?.state).toEqual({ status: 'error' })
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('keeps the newly selected Change when the old request resolves late', async () => {
+    const requests: Array<(response: Response) => void> = []
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      requests.push(resolve)
+    })))
+    const observed: SharedInformationChangeDetailResourceResult[] = []
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const renderProbe = (sharedInformationChangeId: string) => (
+      <DetailResourceProbe
+        sharedInformationChangeId={sharedInformationChangeId}
+      >
+        {(result) => {
+          observed.push(result)
+          return null
+        }}
+      </DetailResourceProbe>
+    )
+    const detail = (sharedInformationChangeId: string) => ({
+      status: 'ready' as const,
+      kind: 'task' as const,
+      sharedInformationChangeId,
+      sharedInformationItemId: `item-${sharedInformationChangeId}`,
+      changeKind: 'add' as const,
+      source: {
+        type: 'direct' as const,
+        primaryActorDisplayName: 'テスト生徒',
+      },
+      changedAt: 1_774_569_600_000,
+      targetScope: { type: 'class' as const, value: 'class-2-3' },
+      before: null,
+      after: {
+        title: '数学',
+        dueDate: null,
+        relatedLessonName: null,
+      },
+    })
+
+    try {
+      await act(async () => root.render(renderProbe('change-1')))
+      await act(async () => root.render(renderProbe('change-2')))
+
+      await act(async () => {
+        requests[1]?.({
+          ok: true,
+          json: async () => detail('change-2'),
+        } as Response)
+        await Promise.resolve()
+      })
+      expect(observed.at(-1)?.state).toEqual({
+        status: 'ready',
+        value: detail('change-2'),
+      })
+
+      await act(async () => {
+        requests[0]?.({
+          ok: true,
+          json: async () => detail('change-1'),
+        } as Response)
+        await Promise.resolve()
+      })
+      expect(observed.at(-1)?.state).toEqual({
+        status: 'ready',
+        value: detail('change-2'),
       })
     } finally {
       await act(async () => root.unmount())

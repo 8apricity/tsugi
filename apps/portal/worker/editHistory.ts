@@ -120,66 +120,45 @@ export async function readTaskEditHistory({
   sharedInformationItemId: string
   historyStore: TaskEditHistoryStore
 }) {
-  const access = await currentHistoryAccess({
+  return readItemEditHistory<
+    TaskHistorySnapshot,
+    HistoricalTaskChange,
+    TaskEditHistoryEntry,
+    TaskEditHistoryResponse
+  >({
     sessionToken,
     now,
     studentAccountStore,
     dailyPlanStore,
-  })
-  if (access.status !== 'ready') return access
-
-  const changes = await historyStore.listTaskEditHistory(
     sharedInformationItemId,
-  )
-  const selected = changes[0]
-  if (
-    !selected ||
-    !studentCanViewTargetScopeNamedAttribution(
-      access.affiliation,
-      selected.targetScope,
-    )
-  ) {
-    return { status: 'not-found' as const }
-  }
-
-  const transitions = reconstructItemTransitions<
-    TaskHistorySnapshot,
-    HistoricalTaskChange
-  >(
-    changes,
-    sharedInformationItemId,
-  )
-  if (transitions === null) return { status: 'unavailable' as const }
-  const entries: TaskEditHistoryEntry[] = transitions.map(({
-    change,
-    before,
-    after,
-  }): TaskEditHistoryEntry => {
-    const entry = {
-      sharedInformationChangeId: change.sharedInformationChangeId,
-      changeKind: change.changeKind,
-      changedAt: change.changedAt,
-      before,
-      after,
-    }
-    return change.sourceType === 'direct'
-      ? {
-          ...entry,
-          sourceType: 'direct',
-          primaryActorDisplayName: change.primaryActorDisplayName,
-        }
-      : { ...entry, sourceType: 'proposal' }
-  }).reverse()
-  const response: TaskEditHistoryResponse = {
-    status: 'ready',
-    taskId: selected.sharedInformationItemId,
-    targetScope: {
-      type: selected.targetScope.type,
-      value: targetScopeValue(selected.targetScope),
+    loadChanges: () =>
+      historyStore.listTaskEditHistory(sharedInformationItemId),
+    toEntry: ({ change, before, after }) => {
+      const entry = {
+        sharedInformationChangeId: change.sharedInformationChangeId,
+        changeKind: change.changeKind,
+        changedAt: change.changedAt,
+        before,
+        after,
+      }
+      return change.sourceType === 'direct'
+        ? {
+            ...entry,
+            sourceType: 'direct',
+            primaryActorDisplayName: change.primaryActorDisplayName,
+          }
+        : { ...entry, sourceType: 'proposal' }
     },
-    entries,
-  }
-  return response
+    toResponse: (selected, entries) => ({
+      status: 'ready',
+      taskId: selected.sharedInformationItemId,
+      targetScope: {
+        type: selected.targetScope.type,
+        value: targetScopeValue(selected.targetScope),
+      },
+      entries,
+    }),
+  })
 }
 
 export async function readNoteEditHistory({
@@ -193,58 +172,45 @@ export async function readNoteEditHistory({
   sharedInformationItemId: string
   historyStore: NoteEditHistoryStore
 }) {
-  const access = await currentHistoryAccess({
+  return readItemEditHistory<
+    NoteHistorySnapshot,
+    HistoricalNoteChange,
+    NoteEditHistoryEntry,
+    NoteEditHistoryResponse
+  >({
     sessionToken,
     now,
     studentAccountStore,
     dailyPlanStore,
-  })
-  if (access.status !== 'ready') return access
-
-  const changes = await historyStore.listNoteEditHistory(
     sharedInformationItemId,
-  )
-  const selected = changes[0]
-  if (
-    !selected ||
-    !studentCanViewTargetScopeNamedAttribution(
-      access.affiliation,
-      selected.targetScope,
-    )
-  ) {
-    return { status: 'not-found' as const }
-  }
-  const transitions = reconstructItemTransitions<
-    NoteHistorySnapshot,
-    HistoricalNoteChange
-  >(changes, sharedInformationItemId)
-  if (transitions === null) return { status: 'unavailable' as const }
-  const entries: NoteEditHistoryEntry[] = transitions.map(({
-    change,
-    before,
-    after,
-  }): NoteEditHistoryEntry => ({
-    sharedInformationChangeId: change.sharedInformationChangeId,
-    changeKind: change.changeKind,
-    sourceType: 'direct',
-    primaryActorDisplayName: change.primaryActorDisplayName,
-    changedAt: change.changedAt,
-    before,
-    after,
-    ...(change.changeKind === 'remove' && change.removalReason
-      ? { removalReason: change.removalReason }
-      : {}),
-  })).reverse()
-  const response: NoteEditHistoryResponse = {
-    status: 'ready',
-    noteId: selected.sharedInformationItemId,
-    targetScope: {
-      type: selected.targetScope.type,
-      value: targetScopeValue(selected.targetScope),
-    },
-    entries,
-  }
-  return response
+    loadChanges: () =>
+      historyStore.listNoteEditHistory(sharedInformationItemId),
+    immutableKey: (change) =>
+      `${scopeKey(change.targetScope)}:${
+        noteRelatedContextKey(change.relatedContext)
+      }`,
+    toEntry: ({ change, before, after }) => ({
+      sharedInformationChangeId: change.sharedInformationChangeId,
+      changeKind: change.changeKind,
+      sourceType: 'direct',
+      primaryActorDisplayName: change.primaryActorDisplayName,
+      changedAt: change.changedAt,
+      before,
+      after,
+      ...(change.changeKind === 'remove' && change.removalReason
+        ? { removalReason: change.removalReason }
+        : {}),
+    }),
+    toResponse: (selected, entries) => ({
+      status: 'ready',
+      noteId: selected.sharedInformationItemId,
+      targetScope: {
+        type: selected.targetScope.type,
+        value: targetScopeValue(selected.targetScope),
+      },
+      entries,
+    }),
+  })
 }
 
 export async function readSharedInformationChangeDetail({
@@ -272,91 +238,184 @@ export async function readSharedInformationChangeDetail({
   if (!identity) {
     return { status: 'not-found' as const }
   }
-  if (identity.kind === 'timetable_change') {
-    const changes = await historyStore.listTimetableChangeItemHistory(
-      identity.sharedInformationItemId,
-    )
-    if (
-      changes.some((change) =>
-        change.sharedInformationItemId !== identity.sharedInformationItemId
-      )
-    ) return { status: 'unavailable' as const }
-    const selected = changes.find(
-      (change) =>
-        change.sharedInformationChangeId === sharedInformationChangeId,
-    )
-    if (
-      !selected ||
-      !studentCanViewTargetScopeNamedAttribution(
-        access.affiliation,
-        selected.targetScope,
-      )
-    ) {
-      return { status: 'not-found' as const }
-    }
-    const entries = reconstructTimetableTransitions(changes, {
-      targetScopeType: selected.targetScope.type,
-      targetScopeValue: targetScopeValue(selected.targetScope),
-      changeDate: selected.changeDate,
-      periodNumber: selected.periodNumber,
-    })
-    if (entries === null) return { status: 'unavailable' as const }
-    const entry = entries.find(
-      (candidate) =>
-        candidate.sharedInformationChangeId === sharedInformationChangeId,
-    )
-    if (!entry) return { status: 'not-found' as const }
-    const detail: SharedInformationChangeDetail = {
-      status: 'ready',
-      kind: 'timetable_change',
-      sharedInformationChangeId,
-      sharedInformationItemId: identity.sharedInformationItemId,
-      changeKind: entry.changeKind,
-      source: changeSource(entry),
-      changedAt: entry.changedAt,
-      targetScope: {
-        type: selected.targetScope.type,
-        value: targetScopeValue(selected.targetScope),
-      },
-      changeDate: selected.changeDate,
-      periodNumber: selected.periodNumber,
-      before: entry.before,
-      after: entry.after,
-    }
-    return detail
-  }
-  const changes = identity.kind === 'task'
-    ? await historyStore.listTaskEditHistory(identity.sharedInformationItemId)
-    : await historyStore.listNoteEditHistory(identity.sharedInformationItemId)
-  const selected = changes[0]
-  if (
-    !selected ||
-    !studentCanViewTargetScopeNamedAttribution(
+  const canView = (change: {
+    targetScope: HistoricalTaskChange['targetScope']
+  }) =>
+    studentCanViewTargetScopeNamedAttribution(
       access.affiliation,
-      selected.targetScope,
+      change.targetScope,
     )
-  ) {
+
+  switch (identity.kind) {
+    case 'timetable_change':
+      return readTimetableSharedInformationChangeDetail({
+        sharedInformationChangeId,
+        sharedInformationItemId: identity.sharedInformationItemId,
+        changes: await historyStore.listTimetableChangeItemHistory(
+          identity.sharedInformationItemId,
+        ),
+        canView,
+      })
+    case 'task':
+      return readItemSharedInformationChangeDetail<
+        TaskHistorySnapshot,
+        HistoricalTaskChange
+      >({
+        sharedInformationChangeId,
+        sharedInformationItemId: identity.sharedInformationItemId,
+        changes: await historyStore.listTaskEditHistory(
+          identity.sharedInformationItemId,
+        ),
+        canView,
+        toDetail: (common) => ({ ...common, kind: 'task' }),
+      })
+    case 'note':
+      return readItemSharedInformationChangeDetail<
+        NoteHistorySnapshot,
+        HistoricalNoteChange
+      >({
+        sharedInformationChangeId,
+        sharedInformationItemId: identity.sharedInformationItemId,
+        changes: await historyStore.listNoteEditHistory(
+          identity.sharedInformationItemId,
+        ),
+        canView,
+        immutableKey: (change) =>
+          `${scopeKey(change.targetScope)}:${
+            noteRelatedContextKey(change.relatedContext)
+          }`,
+        toDetail: (common, change) => ({
+          ...common,
+          kind: 'note',
+          ...(change.changeKind === 'remove' && change.removalReason
+            ? { removalReason: change.removalReason }
+            : {}),
+        }),
+      })
+  }
+}
+
+type CanViewHistoricalChange = (change: {
+  targetScope: HistoricalTaskChange['targetScope']
+}) => boolean
+
+function readTimetableSharedInformationChangeDetail({
+  sharedInformationChangeId,
+  sharedInformationItemId,
+  changes,
+  canView,
+}: {
+  sharedInformationChangeId: string
+  sharedInformationItemId: string
+  changes: HistoricalTimetableChange[]
+  canView: CanViewHistoricalChange
+}) {
+  if (
+    changes.some((change) =>
+      change.sharedInformationItemId !== sharedInformationItemId
+    )
+  ) return { status: 'unavailable' as const }
+  const selected = changes.find(
+    (change) =>
+      change.sharedInformationChangeId === sharedInformationChangeId,
+  )
+  if (!selected || !canView(selected)) {
     return { status: 'not-found' as const }
   }
-  const transitions = identity.kind === 'task'
-    ? reconstructItemTransitions<TaskHistorySnapshot, HistoricalTaskChange>(
-        changes as HistoricalTaskChange[],
-        identity.sharedInformationItemId,
-      )
-    : reconstructItemTransitions<NoteHistorySnapshot, HistoricalNoteChange>(
-        changes as HistoricalNoteChange[],
-        identity.sharedInformationItemId,
-      )
+  const entries = reconstructTimetableTransitions(changes, {
+    targetScopeType: selected.targetScope.type,
+    targetScopeValue: targetScopeValue(selected.targetScope),
+    changeDate: selected.changeDate,
+    periodNumber: selected.periodNumber,
+  })
+  if (entries === null) return { status: 'unavailable' as const }
+  const entry = entries.find(
+    (candidate) =>
+      candidate.sharedInformationChangeId === sharedInformationChangeId,
+  )
+  if (!entry) return { status: 'not-found' as const }
+  const detail: SharedInformationChangeDetail = {
+    status: 'ready',
+    kind: 'timetable_change',
+    sharedInformationChangeId,
+    sharedInformationItemId,
+    changeKind: entry.changeKind,
+    source: changeSource(entry),
+    changedAt: entry.changedAt,
+    targetScope: {
+      type: selected.targetScope.type,
+      value: targetScopeValue(selected.targetScope),
+    },
+    changeDate: selected.changeDate,
+    periodNumber: selected.periodNumber,
+    before: entry.before,
+    after: entry.after,
+  }
+  return detail
+}
+
+type ItemChangeDetailCommon<TSnapshot> = {
+  status: 'ready'
+  sharedInformationChangeId: string
+  sharedInformationItemId: string
+  changeKind: 'add' | 'update' | 'remove'
+  source: SharedInformationChangeSource
+  changedAt: number
+  targetScope: {
+    type: HistoricalTaskChange['targetScope']['type']
+    value: string
+  }
+  before: TSnapshot | null
+  after: TSnapshot | null
+}
+
+function readItemSharedInformationChangeDetail<
+  TSnapshot,
+  TChange extends ItemHistoryChange<TSnapshot> & {
+    sourceType: 'direct' | 'proposal'
+    primaryActorDisplayName?: string
+    changedAt: number
+  },
+>({
+  sharedInformationChangeId,
+  sharedInformationItemId,
+  changes,
+  canView,
+  immutableKey,
+  toDetail,
+}: {
+  sharedInformationChangeId: string
+  sharedInformationItemId: string
+  changes: TChange[]
+  canView: CanViewHistoricalChange
+  immutableKey?: (change: TChange) => string
+  toDetail: (
+    common: ItemChangeDetailCommon<TSnapshot>,
+    change: TChange,
+  ) => SharedInformationChangeDetail
+}) {
+  const selected = changes.find(
+    (change) =>
+      change.sharedInformationChangeId === sharedInformationChangeId,
+  )
+  if (!selected || !canView(selected)) {
+    return { status: 'not-found' as const }
+  }
+  const transitions = reconstructItemTransitions<TSnapshot, TChange>(
+    changes,
+    sharedInformationItemId,
+    immutableKey,
+  )
   if (transitions === null) return { status: 'unavailable' as const }
   const transition = transitions.find(
     ({ change }) =>
       change.sharedInformationChangeId === sharedInformationChangeId,
   )
   if (!transition) return { status: 'not-found' as const }
-  const common = {
+  return toDetail({
     status: 'ready',
     sharedInformationChangeId,
-    sharedInformationItemId: identity.sharedInformationItemId,
+    sharedInformationItemId,
     changeKind: transition.change.changeKind,
     source: changeSource(transition.change),
     changedAt: transition.change.changedAt,
@@ -366,28 +425,7 @@ export async function readSharedInformationChangeDetail({
     },
     before: transition.before,
     after: transition.after,
-  } as const
-  const detail: SharedInformationChangeDetail = identity.kind === 'task'
-    ? {
-        ...common,
-        kind: 'task',
-        before: transition.before as TaskHistorySnapshot | null,
-        after: transition.after as TaskHistorySnapshot | null,
-      }
-    : {
-        ...common,
-        kind: 'note',
-        before: transition.before as NoteHistorySnapshot | null,
-        after: transition.after as NoteHistorySnapshot | null,
-        ...(transition.change.changeKind === 'remove' &&
-          (transition.change as HistoricalNoteChange).removalReason
-          ? {
-              removalReason:
-                (transition.change as HistoricalNoteChange).removalReason!,
-            }
-          : {}),
-      }
-  return detail
+  }, transition.change)
 }
 
 function changeSource(change: {
@@ -411,29 +449,85 @@ type ItemHistoryChange<TSnapshot> = {
   snapshot: TSnapshot | null
 }
 
+type ItemHistoryTransition<TSnapshot, TChange> = {
+  change: TChange
+  before: TSnapshot | null
+  after: TSnapshot | null
+}
+
+async function readItemEditHistory<
+  TSnapshot,
+  TChange extends ItemHistoryChange<TSnapshot>,
+  TEntry,
+  TResponse,
+>({
+  sessionToken,
+  now,
+  studentAccountStore,
+  dailyPlanStore,
+  sharedInformationItemId,
+  loadChanges,
+  immutableKey,
+  toEntry,
+  toResponse,
+}: HistoryAccess & {
+  sharedInformationItemId: string
+  loadChanges: () => Promise<TChange[]>
+  immutableKey?: (change: TChange) => string
+  toEntry: (
+    transition: ItemHistoryTransition<TSnapshot, TChange>,
+  ) => TEntry
+  toResponse: (selected: TChange, entries: TEntry[]) => TResponse
+}) {
+  const access = await currentHistoryAccess({
+    sessionToken,
+    now,
+    studentAccountStore,
+    dailyPlanStore,
+  })
+  if (access.status !== 'ready') return access
+
+  const changes = await loadChanges()
+  const selected = changes[0]
+  if (
+    !selected ||
+    !studentCanViewTargetScopeNamedAttribution(
+      access.affiliation,
+      selected.targetScope,
+    )
+  ) {
+    return { status: 'not-found' as const }
+  }
+  const transitions = reconstructItemTransitions<TSnapshot, TChange>(
+    changes,
+    sharedInformationItemId,
+    immutableKey,
+  )
+  if (transitions === null) return { status: 'unavailable' as const }
+  return toResponse(selected, transitions.map(toEntry).reverse())
+}
+
 function reconstructItemTransitions<
   TSnapshot,
   TChange extends ItemHistoryChange<TSnapshot>,
 >(
   changes: TChange[],
   expectedItemId: string,
+  immutableKey: (change: TChange) => string = (change) =>
+    scopeKey(change.targetScope),
 ) {
   const selected = changes[0]
   if (!selected) return null
-  const expectedScopeKey = scopeKey(selected.targetScope)
+  const expectedImmutableKey = immutableKey(selected)
   if (
     changes.some((change) =>
       change.sharedInformationItemId !== expectedItemId ||
-      scopeKey(change.targetScope) !== expectedScopeKey
+      immutableKey(change) !== expectedImmutableKey
     )
   ) return null
   const ordered = orderItemChanges(changes)
   if (ordered === null) return null
-  const transitions: Array<{
-    change: TChange
-    before: TSnapshot | null
-    after: TSnapshot | null
-  }> = []
+  const transitions: Array<ItemHistoryTransition<TSnapshot, TChange>> = []
   let previous: TSnapshot | null = null
   for (const [index, change] of ordered.entries()) {
     if (
@@ -455,6 +549,21 @@ function reconstructItemTransitions<
 
 function scopeKey(scope: HistoricalTaskChange['targetScope']) {
   return `${scope.schoolYear}:${scope.type}:${targetScopeValue(scope)}`
+}
+
+function noteRelatedContextKey(
+  context: HistoricalNoteChange['relatedContext'],
+) {
+  if (context === null || context.type === 'none') {
+    return context?.type ?? 'invalid'
+  }
+  if (context.type === 'school_date') {
+    return `${context.type}:${context.schoolDate}`
+  }
+  if (context.type === 'daily_lesson') {
+    return `${context.type}:${context.schoolDate}:${context.periodNumber}`
+  }
+  return `${context.type}:${context.taskItemId}`
 }
 
 function reconstructTimetableTransitions(

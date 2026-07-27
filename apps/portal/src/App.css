@@ -277,12 +277,29 @@ button.period-inspect-button:active {
   background: #f3f8f8;
 }
 
-.period-row.draft-edited {
+.period-row.draft-edited .period-inspect-button {
   background: #d9eef0;
 }
 
+.period-row.draft-removal .period-inspect-button {
+  background: #fdecec;
+}
+
+.period-row.draft-mixed .period-inspect-button {
+  background: #f3eefb;
+}
+
+.period-row.draft-conflicted .period-inspect-button {
+  background: #fff8e6;
+}
+
 @media (forced-colors: active) {
-  .period-row.draft-edited {
+  .period-row:is(
+    .draft-edited,
+    .draft-removal,
+    .draft-mixed,
+    .draft-conflicted
+  ) .period-inspect-button {
     outline: 2px dashed ButtonText;
     outline-offset: -3px;
   }
@@ -358,19 +375,7 @@ button.period-inspect-button:active {
   color: var(--color-primary);
 }
 
-.timetable-change-removal-draft {
-  isolation: isolate;
-  margin: -4px -8px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  background: #fbe8e8;
-}
-
-.timetable-change-removal-draft > :not(.timetable-change-removal-mark) {
-  opacity: 0.54;
-}
-
-.timetable-change-removal-mark,
+.layer-removal-mark,
 .note-removal-mark,
 .task-removal-mark {
   position: absolute;
@@ -381,19 +386,13 @@ button.period-inspect-button:active {
   pointer-events: none;
 }
 
-.timetable-change-removal-mark svg,
+.layer-removal-mark svg,
 .note-removal-mark svg,
 .task-removal-mark svg {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
-}
-
-.timetable-change-removal-mark svg {
-  width: 21px;
-  height: 21px;
-  stroke: #8b2f2f;
 }
 
 .task-pill {
@@ -495,6 +494,11 @@ button.period-inspect-button:active {
   background: transparent;
   color: #46545a;
   font-size: 13px;
+}
+
+.daily-lesson-note-list .note-related.note-draft:not(.note-removal-draft) {
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-soft);
 }
 
 .layer-note-list .note-item {
@@ -757,11 +761,13 @@ button.period-inspect-button:active {
   opacity: 0.48;
 }
 
+.layer-removal-mark,
 .note-removal-mark,
 .task-removal-mark {
   color: rgba(138, 61, 61, 0.58);
 }
 
+.layer-removal-mark svg,
 .note-removal-mark svg,
 .task-removal-mark svg {
   width: 38px;
@@ -1773,6 +1779,16 @@ body.page-scroll-locked {
 .layer-row-shell.has-menu.desired {
   border: 2px dashed var(--color-border);
   background: var(--color-accent-soft);
+}
+
+.layer-row-shell.has-menu.removal-draft {
+  position: relative;
+  border-color: #e3b4b4;
+  background: #fdecec;
+}
+
+.layer-row-shell.has-menu.removal-draft > :not(.layer-removal-mark) {
+  opacity: 0.48;
 }
 
 .layer-row-shell.has-menu.conflict {

@@ -1628,12 +1628,6 @@ export function createSharedInformationEditorClient({
         ? { ...draft, conflicted: conflictKeys.has(draftKey(draft)) }
         : undefined
     },
-    isLessonEdited(changeDate: string, periodNumber: number) {
-      return drafts.some(
-        (draft) =>
-          draft.changeDate === changeDate && draft.periodNumber === periodNumber,
-      )
-    },
     previewLayerState(
       state: TimetableLayerState,
       resolveReference: (reference: TimetableReference) => string | null,

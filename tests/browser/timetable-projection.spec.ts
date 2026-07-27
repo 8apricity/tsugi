@@ -95,11 +95,17 @@ test('edit mode shows projected transitions, including identical and removal dra
   await layerDialog.getByRole('button', { name: '閉じる' }).click()
 
   await expect(transition).toHaveText('家庭（月3）▶数Ⅱβ（月1）')
-  await expect(firstPeriod.locator('.timetable-change-removal-draft'))
-    .toHaveCSS('background-color', 'rgb(251, 232, 232)')
+  await expect(firstPeriod.locator('.period-inspect-button'))
+    .toHaveCSS('background-color', 'rgb(253, 236, 236)')
+  await expect(firstPeriod).not.toHaveCSS(
+    'background-color',
+    'rgb(217, 238, 240)',
+  )
+  await expect(firstPeriod.getByRole('img', { name: '削除予定' }))
+    .toHaveCount(1)
   await expect(firstPeriod.getByRole('img', {
     name: '時間割変更の削除予定',
-  })).toBeVisible()
+  })).toHaveCount(0)
   await expect(firstPeriod.getByRole('button', {
     name: /時間割変更の削除予定。/,
   })).toBeVisible()
@@ -107,7 +113,23 @@ test('edit mode shows projected transitions, including identical and removal dra
     .filter({ hasText: noteBody })
   await expect(note).toBeVisible()
   await expect(note).not.toHaveClass(/note-removal-draft/)
-  await expect(note).not.toHaveCSS('background-color', 'rgb(251, 232, 232)')
+  await expect(note).toHaveCSS('background-color', 'rgb(232, 245, 246)')
+
+  await firstPeriod.getByRole('button', { name: /^1限/ }).click()
+  const removalLayer = layerDialog.locator('.layer-row-shell').filter({
+    hasText: '3組',
+  })
+  await expect(removalLayer).toHaveCSS(
+    'background-color',
+    'rgb(253, 236, 236)',
+  )
+  await expect(removalLayer.getByText('月3', { exact: true })).toBeVisible()
+  await expect(removalLayer.getByText('削除予定', { exact: true }))
+    .toHaveCount(0)
+  await expect(removalLayer.getByRole('img', {
+    name: '時間割変更の削除予定',
+  })).toBeVisible()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
 
   await page.getByRole('button', { name: '変更を反映（2）' }).click()
   const review = page.getByRole('dialog', { name: '変更を反映' })
@@ -127,6 +149,47 @@ test('edit mode shows projected transitions, including identical and removal dra
   await expect(removalUnit).not.toContainText('削除予定')
   await expect(removalUnit).not.toContainText(noteBody)
   await expect(review.getByText(noteBody, { exact: true })).toBeVisible()
+})
+
+test('uses a neutral mixed color for replacement and removal layer drafts', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/')
+  const mondayIndex = testInfo.project.name === 'webkit-iphone' ? 1 : 0
+  await page.locator('.date-cell').filter({
+    has: page.getByText('月', { exact: true }),
+  }).nth(mondayIndex).click()
+  await page.getByRole('button', { name: 'この日の予定を編集' }).click()
+
+  const firstPeriod = page.locator('.period-row').filter({
+    has: page.locator('.period-number', { hasText: '1' }),
+  })
+  await firstPeriod.getByRole('button', { name: /^1限/ }).click()
+  const layerDialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+  await layerDialog.locator(
+    '[data-target-scope-type="class"] .timetable-layer-row',
+  ).click()
+  const editor = page.getByRole('dialog', { name: '時間割変更' })
+  await editor.getByRole('checkbox', { name: '削除予定にする' }).check()
+  await editor.getByRole('button', { name: '下書きを保存' }).click()
+
+  await layerDialog.locator(
+    '[data-target-scope-type="grade"] .timetable-layer-row',
+  ).click()
+  const includeChange = editor.getByRole('checkbox', {
+    name: '時間割も変更する',
+  })
+  if (!(await includeChange.isChecked())) await includeChange.check()
+  await editor.getByRole('button', { name: '月4', exact: true }).click()
+  await editor.getByRole('button', { name: '下書きを保存' }).click()
+  await layerDialog.getByRole('button', { name: '閉じる' }).click()
+
+  await expect(firstPeriod.locator('.period-inspect-button'))
+    .toHaveCSS('background-color', 'rgb(243, 238, 251)')
+  await expect(firstPeriod.getByRole('img', { name: '削除予定' }))
+    .toHaveCount(1)
+  await expect(firstPeriod.getByRole('img', { name: /追加予定|更新予定/ }))
+    .toHaveCount(1)
 })
 
 async function applyCurrentDraft(page: import('@playwright/test').Page) {

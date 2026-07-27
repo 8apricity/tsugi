@@ -4035,6 +4035,20 @@ function App() {
                       const removalPlanned = lifecycleDrafts.some(
                         (draft) => draft.changeKind === "remove",
                       );
+                      const replacementPlanned = lifecycleDrafts.some(
+                        (draft) => draft.changeKind !== "remove",
+                      );
+                      const timetableDraftPresentation = lifecycleDrafts.some(
+                          (draft) => draft.conflicted,
+                        )
+                        ? "draft-conflicted"
+                        : removalPlanned && replacementPlanned
+                        ? "draft-mixed"
+                        : removalPlanned
+                        ? "draft-removal"
+                        : lifecycleDrafts.length > 0
+                        ? "draft-edited"
+                        : "";
                       const accessibleLessonLabel = timetableEditor.editing
                         ? lifecycleDrafts.length > 0
                           ? dailyLessonTransitionAccessibleLabel(
@@ -4047,12 +4061,7 @@ function App() {
                       return (
                       <article
                         className={`period-row inspectable ${
-                          timetableEditorClient.isLessonEdited(
-                            selectedSchoolDate,
-                            period.periodNumber,
-                          )
-                            ? "draft-edited"
-                            : ""
+                          timetableDraftPresentation
                         } ${timetableEditor.editing ? "editable" : ""}`}
                         key={period.periodNumber}
                       >
@@ -4080,11 +4089,7 @@ function App() {
                             <span className="period-main">
                               <span className="lesson-line">
                                 <span
-                                  className={`lesson-name${
-                                    removalPlanned
-                                      ? " timetable-change-removal-draft"
-                                      : ""
-                                  }`}
+                                  className="lesson-name"
                                   {...(timetableEditor.editing
                                     ? { "aria-label": accessibleLessonLabel }
                                     : {})}
@@ -4112,12 +4117,6 @@ function App() {
                                         : <EffectiveDailyLesson lesson={period} />
                                       : period.lessonName}
                                   </span>
-                                  {removalPlanned ? (
-                                    <RemovalMark
-                                      className="timetable-change-removal-mark"
-                                      label="時間割変更の削除予定"
-                                    />
-                                  ) : null}
                                 </span>
                                 {period.hasTasks ? (
                                   <span className="task-pill">タスク</span>
@@ -5151,7 +5150,9 @@ function App() {
                         )}
                         value={
                           "removalPlanned" in layer && layer.removalPlanned
-                            ? "削除予定"
+                            ? existingDraft?.changeKind === "remove"
+                              ? replacementLabel(existingDraft.serverReplacement)
+                              : "変更内容"
                             : layer.state === "active"
                             ? replacementLabel(layer.replacement)
                             : "変更無し"
@@ -5161,7 +5162,7 @@ function App() {
                             ? layer.conflicted
                               ? "ほかの変更と重なっています"
                               : "removalPlanned" in layer && layer.removalPlanned
-                                ? "削除予定"
+                                ? undefined
                                 : "下書きの内容"
                             : layer.state === "active" && "changedAt" in layer
                             ? `最終更新 ${formatRelativeTime(layer.changedAt)}`
@@ -5170,6 +5171,9 @@ function App() {
                         desired={layer.desired}
                         conflicted={layer.conflicted}
                         lifecycleKind={existingDraft?.changeKind}
+                        removalPlanned={
+                          "removalPlanned" in layer && layer.removalPlanned
+                        }
                         onClick={
                           editable
                             ? () => openLayerReplacement(layer.targetScopeType)
@@ -5812,6 +5816,7 @@ function LayerRow({
   desired = false,
   conflicted = false,
   lifecycleKind,
+  removalPlanned = false,
   onClick,
   menuActions = [],
 }: {
@@ -5822,6 +5827,7 @@ function LayerRow({
   desired?: boolean;
   conflicted?: boolean;
   lifecycleKind?: LifecycleKind;
+  removalPlanned?: boolean;
   onClick?: () => void;
   menuActions?: Array<{
     label: string;
@@ -5835,7 +5841,7 @@ function LayerRow({
       <span className="timetable-layer-label">{label}</span>
       <strong>{value}</strong>
       <small>{detail}</small>
-      {desired && lifecycleKind ? (
+      {desired && lifecycleKind && !removalPlanned ? (
         <span className="layer-lifecycle-state">
           <LifecycleIcon kind={lifecycleKind} conflicted={conflicted} />
           <small>{lifecycleLabel(lifecycleKind, conflicted)}</small>
@@ -5845,7 +5851,7 @@ function LayerRow({
   );
   return (
       <div
-        className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${conflicted ? " conflict" : ""}`}
+        className={`layer-row-shell${menuActions.length ? " has-menu" : ""}${desired ? " desired" : ""}${removalPlanned ? " removal-draft" : ""}${conflicted ? " conflict" : ""}`}
         data-target-scope-type={targetScopeType}
       >
         {onClick ? (
@@ -5896,6 +5902,12 @@ function LayerRow({
               </div>
             ) : null}
           </div>
+        ) : null}
+        {removalPlanned ? (
+          <RemovalMark
+            className="layer-removal-mark"
+            label="時間割変更の削除予定"
+          />
         ) : null}
       </div>
   );

@@ -51,3 +51,13 @@ export function formatTaskDueLabel(
 ) {
   return dueDate ? `期限 ${formatDueDate(dueDate, referenceSchoolDate)}` : '期限なし'
 }
+
+export function formatRelativeTime(timestamp: number, now = Date.now()) {
+  const elapsed = Math.max(0, now - timestamp)
+  const minutes = Math.floor(elapsed / 60_000)
+  if (minutes < 1) return 'たった今'
+  if (minutes < 60) return `${minutes}分前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}時間前`
+  return `${Math.floor(hours / 24)}日前`
+}

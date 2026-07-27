@@ -166,7 +166,7 @@ describe('Dialog Flow', () => {
     expect(observedKinds).toEqual([['task-detail'], []])
   })
 
-  it('navigates the Timetable flow from Change Content through change detail', () => {
+  it('opens the same Shared Information Change Detail from every Edit History', () => {
     const flow = createDialogFlowClient()
 
     flow.openChangeContent()
@@ -176,22 +176,45 @@ describe('Dialog Flow', () => {
       periodNumber: 2,
       targetScopeType: 'class',
     })
-    flow.openTimetableChangeDetail({ sharedInformationChangeId: 'change-1' })
+    flow.openSharedInformationChangeDetail({
+      sharedInformationChangeId: 'timetable-change-1',
+      returnFocus: {
+        kind: 'shared-information-history-entry',
+        sharedInformationChangeId: 'timetable-change-1',
+      },
+    })
 
     expect(flow.getSnapshot().routes.map((route) => route.kind)).toEqual([
       'change-content',
       'timetable-layer',
       'timetable-history',
-      'timetable-change-detail',
+      'shared-information-change-detail',
     ])
 
-    flow.back()
-    flow.back()
-    flow.back()
+    expect(flow.back().focusTarget).toEqual({
+      kind: 'shared-information-history-entry',
+      sharedInformationChangeId: 'timetable-change-1',
+    })
+    flow.closeAll()
 
-    expect(flow.getSnapshot().routes.map((route) => route.kind)).toEqual([
-      'change-content',
-    ])
+    flow.openTaskDetail({ taskId: 'task-1' })
+    flow.openTaskHistory({ taskId: 'task-1' })
+    expect(flow.openSharedInformationChangeDetail({
+      sharedInformationChangeId: 'task-change-1',
+    }).status).toBe('changed')
+    expect(flow.getSnapshot().routes.at(-1)?.kind).toBe(
+      'shared-information-change-detail',
+    )
+    flow.closeAll()
+
+    flow.openNoteDetail({ noteId: 'note-1' })
+    flow.openNoteHistory({ noteId: 'note-1' })
+    expect(flow.openSharedInformationChangeDetail({
+      sharedInformationChangeId: 'note-change-1',
+    }).status).toBe('changed')
+    expect(flow.getSnapshot().routes.at(-1)?.kind).toBe(
+      'shared-information-change-detail',
+    )
   })
 
   it('uses the real parent route as the successful editor destination', () => {

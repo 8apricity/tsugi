@@ -60,9 +60,19 @@ test.describe('authenticated Daily Plan Note detail', () => {
     await expect(history).toBeVisible()
     await expectCompactReadOnlyDialogSpacing(
       history,
-      history.locator('.task-history-scope'),
-      history.locator('.task-history-list'),
+      history.locator('.shared-history-scope'),
+      history.locator('.shared-history-list'),
     )
+    const historyEntry = history.locator('.shared-history-row').first()
+    await historyEntry.click()
+    const changeDetail = page.getByRole('dialog', { name: '変更の詳細' })
+    await expect(changeDetail).toBeVisible()
+    await expect(changeDetail.getByText('ノート', { exact: true }))
+      .toBeVisible()
+    await changeDetail
+      .getByRole('button', { name: '編集履歴に戻る' })
+      .click()
+    await expect(historyEntry).toBeFocused()
     await history
       .getByRole('button', { name: 'ノートの詳細に戻る' })
       .click()

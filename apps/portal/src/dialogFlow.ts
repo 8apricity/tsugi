@@ -19,7 +19,7 @@ export type DialogFocusTarget =
       noteId: string
     }
   | {
-      kind: 'timetable-history-entry'
+      kind: 'shared-information-history-entry'
       sharedInformationChangeId: string
     }
   | {
@@ -92,7 +92,7 @@ export type DialogRoute =
       targetScopeType: DialogTargetScopeType
     } & DailyLessonIdentity)
   | {
-      kind: 'timetable-change-detail'
+      kind: 'shared-information-change-detail'
       sharedInformationChangeId: string
     }
 
@@ -207,7 +207,7 @@ export type DialogFlowClient = {
     targetScopeType: DialogTargetScopeType
     returnFocus?: DialogFocusTarget
   }): DialogFlowResult
-  openTimetableChangeDetail(input: {
+  openSharedInformationChangeDetail(input: {
     sharedInformationChangeId: string
     returnFocus?: DialogFocusTarget
   }): DialogFlowResult
@@ -443,13 +443,13 @@ export function createDialogFlowClient(): DialogFlowClient {
         ['timetable-layer'],
         returnFocus,
       ),
-    openTimetableChangeDetail: ({
+    openSharedInformationChangeDetail: ({
       sharedInformationChangeId,
       returnFocus,
     }) =>
       openChild(
-        { kind: 'timetable-change-detail', sharedInformationChangeId },
-        ['timetable-history'],
+        { kind: 'shared-information-change-detail', sharedInformationChangeId },
+        ['timetable-history', 'task-history', 'note-history'],
         returnFocus,
       ),
     openTaskRemovalConfirmation: () => {

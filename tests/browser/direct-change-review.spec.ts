@@ -193,11 +193,7 @@ test.describe('authenticated Direct Change review', () => {
     const staleDetailRequestSettled = new Promise<void>((resolve) => {
       markStaleDetailRequestSettled = resolve
     })
-    await page.route('**/api/timetable-changes/direct/*', async (route) => {
-      if (new URL(route.request().url()).pathname.endsWith('/options')) {
-        await route.continue()
-        return
-      }
+    await page.route('**/api/shared-information-changes/*', async (route) => {
       detailRequestCount += 1
       if (detailRequestCount === 1) {
         await route.fulfill({
@@ -247,11 +243,11 @@ test.describe('authenticated Direct Change review', () => {
       name: '編集履歴',
       includeHidden: true,
     })
-    const entry = history.locator('.history-row').first()
+    const entry = history.locator('.shared-history-row').first()
     await expect(entry).toBeVisible()
     await expectCompactReadOnlyDialogSpacing(
       history,
-      history.locator('.history-list'),
+      history.locator('.shared-history-list'),
     )
     await entry.click()
 

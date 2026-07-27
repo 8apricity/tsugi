@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatDueDate,
+  formatRelativeTime,
   formatSchoolDate,
   formatTaskDueLabel,
   targetScopeLabel,
@@ -32,5 +33,13 @@ describe('student-facing UI copy', () => {
       '期限 7月10日まで',
     )
     expect(formatTaskDueLabel(null)).toBe('期限なし')
+  })
+
+  it('formats relative times consistently across history views', () => {
+    const now = Date.parse('2026-07-27T05:00:00.000Z')
+    expect(formatRelativeTime(now - 30_000, now)).toBe('たった今')
+    expect(formatRelativeTime(now - 5 * 60_000, now)).toBe('5分前')
+    expect(formatRelativeTime(now - 3 * 60 * 60_000, now)).toBe('3時間前')
+    expect(formatRelativeTime(now - 2 * 24 * 60 * 60_000, now)).toBe('2日前')
   })
 })

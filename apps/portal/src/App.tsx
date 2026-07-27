@@ -90,20 +90,23 @@ import type {
 } from "../shared/referenceDailyPlan";
 import { useReferenceDailyPlanResource } from "./referenceDailyPlanResource";
 import { useReferenceScopeOptionsResource } from "./referenceScopeOptionsResource";
-import { TaskEditHistoryDialog } from "./taskEditHistoryView";
 import { NoteBodyFields, TaskDetailDialog } from "./taskDetailView";
-import { NoteEditHistoryDialog } from "./noteEditHistoryView";
 import {
   useNoteEditHistoryResource,
   useSharedInformationChangeDetailResource,
   useTaskEditHistoryResource,
   useTimetableEditHistoryResource,
-  type TimetableSharedInformationChangeDetail,
-  type TimetableChangeHistoryEntry,
 } from "./editHistoryResource";
+import {
+  NoteEditHistoryDialog,
+  SharedInformationChangeDetailDialog,
+  TaskEditHistoryDialog,
+  TimetableEditHistoryDialog,
+} from "./sharedInformationChangeView";
 import { NoteDetailDialog } from "./noteDetailView";
 import {
   formatSchoolDate as formatUiSchoolDate,
+  formatRelativeTime,
   formatTaskDueLabel,
   targetScopeLabel,
   type TargetScopeDisplayContext,
@@ -624,8 +627,9 @@ function App() {
     useState<TimetableLayerDialog | null>(null);
   const [timetableHistoryDialog, setTimetableHistoryDialog] =
     useState<TimetableHistoryDialog | null>(null);
-  const timetableChangeDetailRoute = dialogFlowSnapshot.routes.findLast(
-    (route) => route.kind === "timetable-change-detail",
+  const sharedInformationChangeDetailRoute =
+    dialogFlowSnapshot.routes.findLast(
+    (route) => route.kind === "shared-information-change-detail",
   );
   const taskEditHistoryResource = useTaskEditHistoryResource(
     taskHistoryDialog
@@ -655,12 +659,12 @@ function App() {
   );
   const sharedInformationChangeDetailResource =
     useSharedInformationChangeDetailResource(
-    timetableHistoryDialog &&
-      timetableChangeDetailRoute?.kind === "timetable-change-detail"
+      sharedInformationChangeDetailRoute?.kind ===
+          "shared-information-change-detail"
       ? {
-          routeInstanceId: timetableChangeDetailRoute.instanceId,
+          routeInstanceId: sharedInformationChangeDetailRoute.instanceId,
           sharedInformationChangeId:
-            timetableChangeDetailRoute.sharedInformationChangeId,
+            sharedInformationChangeDetailRoute.sharedInformationChangeId,
         }
       : null,
     );
@@ -1523,8 +1527,10 @@ function App() {
           timetableHistoryDialog.changeDate === route.schoolDate &&
           timetableHistoryDialog.periodNumber === route.periodNumber &&
           timetableHistoryDialog.targetScopeType === route.targetScopeType;
-      case "timetable-change-detail":
-        return Boolean(timetableHistoryDialog);
+      case "shared-information-change-detail":
+        return Boolean(
+          timetableHistoryDialog || taskHistoryDialog || noteHistoryDialog,
+        );
       case "reference-picker":
       case "change-content":
         return true;
@@ -1597,7 +1603,7 @@ function App() {
         )?.focus();
         return;
       }
-      if (target.kind === "timetable-history-entry") {
+      if (target.kind === "shared-information-history-entry") {
         document.querySelector<HTMLElement>(
           `[data-change-id="${target.sharedInformationChangeId}"]`,
         )?.focus();
@@ -3111,13 +3117,13 @@ function App() {
     sharedInformationChangeId: string,
   ) {
     if (
-      topDialogRoute?.kind !== "timetable-change-detail" ||
+      topDialogRoute?.kind !== "shared-information-change-detail" ||
       topDialogRoute.sharedInformationChangeId !== sharedInformationChangeId
     ) {
-      const transition = dialogFlow.openTimetableChangeDetail({
+      const transition = dialogFlow.openSharedInformationChangeDetail({
         sharedInformationChangeId,
         returnFocus: {
-          kind: "timetable-history-entry",
+          kind: "shared-information-history-entry",
           sharedInformationChangeId,
         },
       });
@@ -4924,7 +4930,6 @@ function App() {
             <TaskEditHistoryDialog
               taskTitle={taskHistoryDialog.task.title}
               targetScopeContext={targetScopeContext}
-              referenceSchoolDate={selectedSchoolDate}
               state={taskEditHistoryResource.state}
               active={
                 topDialogRouteIs("task-history") &&
@@ -4933,6 +4938,7 @@ function App() {
               onBack={goBackFromTaskHistory}
               onClose={requestDialogCloseAll}
               onRetry={taskEditHistoryResource.retry}
+              onOpenChange={openSharedInformationChangeDetail}
             />
           ) : null}
 
@@ -4947,17 +4953,17 @@ function App() {
               onBack={goBackFromNoteHistory}
               onClose={requestDialogCloseAll}
               onRetry={noteEditHistoryResource.retry}
+              onOpenChange={openSharedInformationChangeDetail}
             />
           ) : null}
 
           {timetableHistoryDialog &&
             dialogRouteExists("timetable-history") ? (
-            <ReadOnlyDialog
+            <TimetableEditHistoryDialog
               active={
                 topDialogRouteIs("timetable-history") &&
                 dialogFlowSnapshot.overlay === null
               }
-              title="編集履歴"
               subtitle={`${formatUiSchoolDate(
                 timetableHistoryDialog.changeDate,
                 { referenceSchoolDate: selectedSchoolDate },
@@ -4965,120 +4971,29 @@ function App() {
                 timetableHistoryDialog.targetScopeType,
                 targetScopeContext,
               )}`}
-              size="standard"
-              bodyLayout="compact"
-              backLabel="変更状況に戻る"
+              targetScopeContext={targetScopeContext}
+              state={timetableEditHistoryResource.state}
               onBack={goBackInTimetableHistoryDialog}
               onClose={requestDialogCloseAll}
-            >
-
-                {timetableEditHistoryResource.state.status === "idle" ||
-                timetableEditHistoryResource.state.status === "loading" ? (
-                  <p className="layer-dialog-status" aria-live="polite">
-                    編集履歴を読み込んでいます。
-                  </p>
-                ) : timetableEditHistoryResource.state.status === "error" ? (
-                  <div className="layer-dialog-status" role="alert">
-                    <p>編集履歴を読み込めませんでした。</p>
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={timetableEditHistoryResource.retry}
-                    >
-                      再読み込み
-                    </button>
-                  </div>
-                ) : timetableEditHistoryResource.state.value.entries.length ===
-                0 ? (
-                  <p className="history-empty-state">
-                    この日・時限・変更適用範囲には編集履歴がありません。
-                  </p>
-                ) : (
-                  <div className="history-list" aria-label="編集履歴">
-                    {timetableEditHistoryResource.state.value.entries.map(
-                      (entry) => (
-                      <button
-                        className="history-row"
-                        type="button"
-                        key={entry.sharedInformationChangeId}
-                        data-change-id={entry.sharedInformationChangeId}
-                        onClick={() => openSharedInformationChangeDetail(
-                          entry.sharedInformationChangeId,
-                        )}
-                      >
-                        <span className={`history-kind history-kind-${entry.changeKind}`}>
-                          {changeKindLabel(entry.changeKind)}
-                        </span>
-                        <strong>{storedTransitionLabel(entry)}</strong>
-                        <span>{entry.sourceType === "direct"
-                          ? "直接反映"
-                          : "提案による変更"}</span>
-                        <span>{entry.primaryActorDisplayName}</span>
-                        <time dateTime={new Date(entry.changedAt).toISOString()}>
-                          {formatRelativeTime(entry.changedAt)}
-                        </time>
-                        <span aria-hidden="true">›</span>
-                      </button>
-                      )
-                    )}
-                  </div>
-                )}
-            </ReadOnlyDialog>
+              onRetry={timetableEditHistoryResource.retry}
+              onOpenChange={openSharedInformationChangeDetail}
+            />
           ) : null}
 
-          {timetableHistoryDialog &&
-            timetableChangeDetailRoute?.kind === "timetable-change-detail" &&
-            dialogRouteExists("timetable-change-detail") ? (
-            <ReadOnlyDialog
+          {sharedInformationChangeDetailRoute?.kind ===
+              "shared-information-change-detail" &&
+            dialogRouteExists("shared-information-change-detail") ? (
+            <SharedInformationChangeDetailDialog
               active={
-                topDialogRouteIs("timetable-change-detail") &&
+                topDialogRouteIs("shared-information-change-detail") &&
                 dialogFlowSnapshot.overlay === null
               }
-              title="変更の詳細"
-              subtitle={`${formatUiSchoolDate(
-                timetableHistoryDialog.changeDate,
-                { referenceSchoolDate: selectedSchoolDate },
-              )}・${timetableHistoryDialog.periodNumber}限・${scopeLabel(
-                timetableHistoryDialog.targetScopeType,
-                targetScopeContext,
-              )}`}
-              size="standard"
-              bodyLayout="compact"
-              backLabel="編集履歴に戻る"
+              state={sharedInformationChangeDetailResource.state}
+              targetScopeContext={targetScopeContext}
               onBack={requestDialogBack}
               onClose={requestDialogCloseAll}
-            >
-
-                {sharedInformationChangeDetailResource.state.status === "idle" ||
-                sharedInformationChangeDetailResource.state.status === "loading" ? (
-                  <p className="layer-dialog-status" aria-live="polite">
-                    変更内容を読み込んでいます…
-                  </p>
-                ) : sharedInformationChangeDetailResource.state.status ===
-                  "error" ? (
-                  <div className="layer-dialog-status" role="alert">
-                    <p>変更内容を読み込めませんでした。</p>
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={sharedInformationChangeDetailResource.retry}
-                    >
-                      再読み込み
-                    </button>
-                  </div>
-                ) : sharedInformationChangeDetailResource.state.value.kind !==
-                  "timetable_change" ? (
-                  <p className="layer-dialog-status" role="alert">
-                    変更内容を読み込めませんでした。
-                  </p>
-                ) : (
-                  <TimetableSharedInformationChangeDetailView
-                    detail={sharedInformationChangeDetailResource.state.value}
-                    targetScopeContext={targetScopeContext}
-                    referenceSchoolDate={selectedSchoolDate}
-                  />
-                )}
-            </ReadOnlyDialog>
+              onRetry={sharedInformationChangeDetailResource.retry}
+            />
           ) : null}
 
           {timetableLayerDialog && dialogRouteExists("timetable-layer") ? (
@@ -6423,112 +6338,6 @@ function PeriodWheelPicker({
       ) : null}
     </div>
   );
-}
-
-function TimetableSharedInformationChangeDetailView({
-  detail,
-  targetScopeContext,
-  referenceSchoolDate,
-}: {
-  detail: TimetableSharedInformationChangeDetail;
-  targetScopeContext?: TargetScopeDisplayContext;
-  referenceSchoolDate: string;
-}) {
-  return (
-    <div className="shared-information-change-detail">
-      <dl className="history-detail-grid">
-        <div><dt>変更内容</dt><dd>{changeKindLabel(detail.changeKind)}</dd></div>
-        <div>
-          <dt>反映方法</dt>
-          <dd>{detail.source.type === "direct"
-            ? "直接反映"
-            : "提案による変更"}</dd>
-        </div>
-        {detail.source.type === "direct" ? (
-          <div>
-            <dt>変更者</dt>
-            <dd>{detail.source.primaryActorDisplayName}</dd>
-          </div>
-        ) : null}
-        <div>
-          <dt>日時</dt>
-          <dd><time dateTime={new Date(detail.changedAt).toISOString()}>
-            {formatExactTimestamp(detail.changedAt)}
-          </time></dd>
-        </div>
-        <div>
-          <dt>変更対象</dt>
-          <dd>{scopeLabel(detail.targetScope.type, targetScopeContext)}</dd>
-        </div>
-        <div><dt>変更対象日</dt><dd>{formatUiSchoolDate(
-          detail.changeDate,
-          { referenceSchoolDate },
-        )}</dd></div>
-        <div><dt>時限</dt><dd>{detail.periodNumber}限</dd></div>
-      </dl>
-      <div className="stored-transition-detail">
-        {detail.before ? (
-          <section>
-            <span>{detail.changeKind === "remove" ? "削除前" : "変更前"}</span>
-            <strong>{replacementLabel(detail.before)}</strong>
-            {isStoredReference(detail.before) ? (
-              <small>保存時の時間割参照</small>
-            ) : null}
-          </section>
-        ) : null}
-        {detail.before && detail.after ? (
-          <span className="transition-arrow" aria-hidden="true">→</span>
-        ) : null}
-        {detail.after ? (
-          <section>
-            <span>{detail.changeKind === "add" ? "追加後" : "変更後"}</span>
-            <strong>{replacementLabel(detail.after)}</strong>
-            {isStoredReference(detail.after) ? (
-              <small>保存時の時間割参照</small>
-            ) : null}
-          </section>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function storedTransitionLabel(entry: TimetableChangeHistoryEntry) {
-  if (entry.changeKind === "add") {
-    return `追加 → ${entry.after ? replacementLabel(entry.after) : "空欄"}`;
-  }
-  if (entry.changeKind === "remove") {
-    return `${entry.before ? replacementLabel(entry.before) : "空欄"} → 削除`;
-  }
-  return `${entry.before ? replacementLabel(entry.before) : "空欄"} → ${
-    entry.after ? replacementLabel(entry.after) : "空欄"
-  }`;
-}
-
-function changeKindLabel(changeKind: TimetableChangeHistoryEntry["changeKind"]) {
-  return { add: "追加", update: "更新", remove: "削除" }[changeKind];
-}
-
-function formatExactTimestamp(timestamp: number) {
-  return new Intl.DateTimeFormat("ja-JP", {
-    dateStyle: "medium",
-    timeStyle: "medium",
-  }).format(new Date(timestamp));
-}
-
-function isStoredReference(replacement: TimetableReplacement) {
-  return replacement.type === "period_reference" ||
-    replacement.type === "floating_lesson_reference";
-}
-
-function formatRelativeTime(timestamp: number) {
-  const elapsed = Math.max(0, Date.now() - timestamp);
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 1) return "たった今";
-  if (minutes < 60) return `${minutes}分前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}時間前`;
-  return `${Math.floor(hours / 24)}日前`;
 }
 
 function editableTask(task: DailyPlanTaskForCache) {

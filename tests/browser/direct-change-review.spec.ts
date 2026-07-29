@@ -349,7 +349,7 @@ test.describe('authenticated Direct Change review', () => {
       .toBeFocused()
   })
 
-  test('cancels drafts consistently from the Daily Plan and each kind editor', async ({
+  test('keeps cancellation off the Daily Plan and cancels from each kind editor', async ({
     page,
   }) => {
     await page.goto('/')
@@ -357,25 +357,18 @@ test.describe('authenticated Direct Change review', () => {
 
     const groupedTitle = `daily-cancel-group-${Date.now()}`
     await saveTaskWithNotes(page, groupedTitle, 1)
-    const groupedDraft = page.getByRole('group', {
-      name: `${groupedTitle}の下書き操作`,
-    })
-    const groupedCancel = groupedDraft.getByRole('button', {
+    await expect(page.locator('[data-draft-cancellation-id]')).toHaveCount(0)
+    await expect(page.getByRole('button', {
+      name: '下書きの操作メニュー',
+    })).toHaveCount(0)
+    await expect(page.getByRole('button', {
       name: '下書きを取り消す',
-    }).last()
-    await groupedCancel.focus()
-    await page.keyboard.press('Enter')
-    await expect(page.getByText(groupedTitle)).toHaveCount(0)
-    await expect(page.getByRole('status').filter({
-      hasText: '下書きと関連するノート1件を取り消しました。',
-    })).toBeVisible()
+    })).toHaveCount(0)
 
-    const taskTitle = `task-editor-cancel-${Date.now()}`
-    await saveTaskWithNotes(page, taskTitle, 0)
-    await page.getByRole('button', { name: new RegExp(taskTitle) }).click()
+    await page.getByRole('button', { name: new RegExp(groupedTitle) }).click()
     const taskEditor = page.getByRole('dialog', { name: 'タスクを追加' })
     await taskEditor.getByRole('textbox', { name: 'タイトル' })
-      .fill(`${taskTitle}-未保存`)
+      .fill(`${groupedTitle}-未保存`)
     await taskEditor.getByRole('button', {
       name: '下書きを取り消す',
     }).click()
@@ -383,7 +376,10 @@ test.describe('authenticated Direct Change review', () => {
     await expect(page.getByRole('alertdialog', {
       name: '入力内容を破棄しますか？',
     })).toHaveCount(0)
-    await expect(page.getByText(taskTitle)).toHaveCount(0)
+    await expect(page.getByText(groupedTitle)).toHaveCount(0)
+    await expect(page.getByRole('status').filter({
+      hasText: '下書きと関連するノート1件を取り消しました。',
+    })).toBeVisible()
 
     const noteBody = `note-editor-cancel-${Date.now()}`
     await page.getByRole('button', { name: 'ノートを追加' }).click()
@@ -392,6 +388,10 @@ test.describe('authenticated Direct Change review', () => {
     await noteAdd.getByRole('combobox', { name: '変更適用範囲' })
       .selectOption('class')
     await noteAdd.getByRole('button', { name: '下書きを保存' }).click()
+    await expect(page.locator('[data-draft-cancellation-id]')).toHaveCount(0)
+    await expect(page.getByRole('button', {
+      name: '下書きを取り消す',
+    })).toHaveCount(0)
     await page.getByRole('button', { name: new RegExp(noteBody) }).click()
     const noteEditor = page.getByRole('dialog', { name: 'ノートを編集' })
     await noteEditor.getByRole('textbox', { name: '本文' })
@@ -436,9 +436,11 @@ test.describe('authenticated Direct Change review', () => {
       name: '下書きを保存',
     }).click()
     await layer.getByRole('button', { name: '3組のメニュー' }).click()
-    await layer.getByRole('menuitem', {
+    const cancellationMenuItem = layer.getByRole('menuitem', {
       name: '下書きを取り消す',
-    }).click()
+    })
+    await expect(cancellationMenuItem).toHaveCSS('white-space', 'nowrap')
+    await cancellationMenuItem.click()
     await expect(layer.getByText('下書きの内容')).toHaveCount(0)
   })
 
@@ -456,6 +458,9 @@ test.describe('authenticated Direct Change review', () => {
     await page.getByRole('button', { name: '変更を反映（2）' }).click()
 
     const review = page.getByRole('dialog', { name: '変更を反映' })
+    await expect(review.getByRole('button', {
+      name: '下書きの操作メニュー',
+    })).toHaveCount(0)
     const row = review.getByRole('group', {
       name: '下書きの操作',
     }).filter({ hasText: title })
@@ -470,23 +475,12 @@ test.describe('authenticated Direct Change review', () => {
     const otherEdit = otherRow.getByRole('button', {
       name: new RegExp(otherTitle),
     })
-    const touchMenu = row.getByRole('button', {
-      name: '下書きの操作メニュー',
-    })
-
-    await touchMenu.tap()
-    await expect(touchMenu).toHaveAttribute('aria-expanded', 'true')
-    await expect(cancel).toHaveCSS('opacity', '1')
-    await otherEdit.tap()
-    await expect(touchMenu).toHaveAttribute('aria-expanded', 'false')
-    await expect(page.getByRole('dialog', { name: 'タスクを追加' }))
-      .toHaveCount(0)
 
     await dispatchTouchPointer(row, [
       { x: 220, y: 80 },
       { x: 200, y: 83 },
     ])
-    await expect(touchMenu).toHaveAttribute('aria-expanded', 'false')
+    await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
 
     await edit.tap()
     const draftEditor = page.getByRole('dialog', { name: 'タスクを追加' })
@@ -499,7 +493,7 @@ test.describe('authenticated Direct Change review', () => {
       { x: 216, y: 120 },
     ])
     expect(verticalMovePrevented).toBe(false)
-    await expect(touchMenu).toHaveAttribute('aria-expanded', 'false')
+    await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
 
     await dispatchTouchPointerEvent(row, 'pointerdown', { x: 220, y: 80 })
     const diagonalMovePrevented = await dispatchTouchPointerEvent(
@@ -516,11 +510,11 @@ test.describe('authenticated Direct Change review', () => {
     await expect.poll(async () => (await cancel.boundingBox())?.width)
       .toBeCloseTo(50, 0)
     await dispatchTouchPointerEvent(row, 'pointerup', { x: 170, y: 135 })
-    await expect(touchMenu).toHaveAttribute('aria-expanded', 'true')
+    await expect(row).toHaveAttribute('data-cancellation-open', 'true')
     await expect(cancel).toHaveAttribute('aria-label', '下書きを取り消す')
 
     await otherEdit.tap()
-    await expect(touchMenu).toHaveAttribute('aria-expanded', 'false')
+    await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
     await expect(page.getByRole('dialog', { name: 'タスクを追加' }))
       .toHaveCount(0)
 
@@ -529,9 +523,9 @@ test.describe('authenticated Direct Change review', () => {
       { x: 211, y: 93 },
       { x: 170, y: 105 },
     ])
-    await expect(touchMenu).toHaveAttribute('aria-expanded', 'true')
+    await expect(row).toHaveAttribute('data-cancellation-open', 'true')
     await edit.tap()
-    await expect(touchMenu).toHaveAttribute('aria-expanded', 'false')
+    await expect(row).not.toHaveAttribute('data-cancellation-open', 'true')
     await expect(page.getByRole('dialog', { name: 'タスクを追加' }))
       .toHaveCount(0)
 

@@ -41,6 +41,7 @@ type DraftCancellationRowProps = {
   anotherRowOpen: boolean
   accessibleLabel?: string
   disabled?: boolean
+  showMenuButton?: boolean
   onInteractionStart: () => void
   onOpenChange: (open: boolean) => void
   onCancel: () => void
@@ -56,6 +57,7 @@ export const DraftCancellationRow = forwardRef<
   anotherRowOpen,
   accessibleLabel = '下書きの操作',
   disabled = false,
+  showMenuButton = false,
   onInteractionStart,
   onOpenChange,
   onCancel,
@@ -220,19 +222,21 @@ export const DraftCancellationRow = forwardRef<
       <div ref={contentRef} className="draft-cancellation-content">
         {children}
       </div>
-      <button
-        className="draft-cancellation-menu-button"
-        type="button"
-        aria-label="下書きの操作メニュー"
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={(event) => {
-          event.stopPropagation()
-          onOpenChange(!open)
-        }}
-      >
-        ⋮
-      </button>
+      {showMenuButton ? (
+        <button
+          className="draft-cancellation-menu-button"
+          type="button"
+          aria-label="下書きの操作メニュー"
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={(event) => {
+            event.stopPropagation()
+            onOpenChange(!open)
+          }}
+        >
+          ⋮
+        </button>
+      ) : null}
       <button
         className="draft-cancellation-action"
         type="button"

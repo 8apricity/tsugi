@@ -2181,6 +2181,7 @@ function App() {
     onCancel: () => void,
     content: ReactNode,
     accessibleLabel?: string,
+    showMenuButton = false,
   ) {
     const rowIndex = draftCancellationRenderIndex++;
     const registrationKey = `${rowIndex}:${draftId}`;
@@ -2199,6 +2200,7 @@ function App() {
         }}
         draftId={draftId}
         accessibleLabel={accessibleLabel}
+        showMenuButton={showMenuButton}
         open={revealedDraftCancellationId === registrationKey}
         disabled={timetableEditor.submitting}
         anotherRowOpen={
@@ -2960,10 +2962,12 @@ function App() {
           draft: true,
           changeKind: note.changeKind,
           conflicted: note.conflicted,
-          onCancelDraft: () => cancelListDraft({
-            kind: "note",
-            sourceId: note.sourceId,
-          }),
+          onCancelDraft: notesOpenDetail
+            ? () => cancelListDraft({
+                kind: "note",
+                sourceId: note.sourceId,
+              })
+            : undefined,
           onOpen: notesOpenDetail
             ? () => item.activeNote
               ? openTaskNoteEditor(
@@ -3011,8 +3015,16 @@ function App() {
         notes={items}
         presentation={presentation}
         onOpenRelatedNote={onOpenRelatedNote}
-        wrapDraftCancellation={(note, content) =>
-          cancellationRow(note.noteId, note.onCancelDraft!, content)}
+        wrapDraftCancellation={presentation === "detail"
+          ? (note, content) =>
+              cancellationRow(
+                note.noteId,
+                note.onCancelDraft!,
+                content,
+                undefined,
+                true,
+              )
+          : undefined}
       />
     );
   }
@@ -3122,10 +3134,12 @@ function App() {
           draft: true,
           changeKind: note.changeKind,
           conflicted: note.conflicted,
-          onCancelDraft: () => cancelListDraft({
-            kind: "note",
-            sourceId: note.sourceId,
-          }),
+          onCancelDraft: notesOpenDetail
+            ? () => cancelListDraft({
+                kind: "note",
+                sourceId: note.sourceId,
+              })
+            : undefined,
           onOpen: notesOpenDetail
             ? () => openNoteDraftEditor(
                 note,
@@ -3162,8 +3176,16 @@ function App() {
         className={className}
         presentation={notesOpenDetail ? "detail" : "related"}
         onOpenRelatedNote={onOpenRelatedNote}
-        wrapDraftCancellation={(note, content) =>
-          cancellationRow(note.noteId, note.onCancelDraft!, content)}
+        wrapDraftCancellation={notesOpenDetail
+          ? (note, content) =>
+              cancellationRow(
+                note.noteId,
+                note.onCancelDraft!,
+                content,
+                undefined,
+                true,
+              )
+          : undefined}
       />
     );
   }
@@ -4394,7 +4416,7 @@ function App() {
                           ? "削除予定のタスク"
                           : `削除予定のタスク。関連するノート${task.notes.length}件も削除予定です`
                         : undefined;
-                      const taskCard = (
+                      return (
                       <article
                         aria-label={taskRemovalLabel}
                         className={`task-entry ${
@@ -4454,17 +4476,6 @@ function App() {
                         ) : null}
                       </article>
                       );
-                      return item.type === "draft"
-                        ? cancellationRow(
-                            item.draft.sourceId,
-                            () => cancelListDraft({
-                              kind: "task",
-                              sourceId: item.draft.sourceId,
-                            }),
-                            taskCard,
-                            `${task.title}の下書き操作`,
-                          )
-                        : taskCard;
                     })}
                     {visibleTasks.length === 0 ? (
                       <p className="empty-state">タスクはありません。</p>
@@ -4505,13 +4516,9 @@ function App() {
                       return visibleNotes.map((item) => {
                         if (item.type === "draft") {
                           const note = item.draft;
-                          return cancellationRow(
-                            note.sourceId,
-                            () => cancelListDraft({
-                              kind: "note",
-                              sourceId: note.sourceId,
-                            }),
+                          return (
                             <NoteCard
+                              key={note.sourceId}
                               noteId={note.sourceId}
                               body={note.body}
                               targetScopeLabel={scopeLabel(
@@ -4528,7 +4535,7 @@ function App() {
                                   ? { activeNote: item.activeNote }
                                   : undefined,
                               )}
-                            />,
+                            />
                           );
                         }
                         const note = item.note;

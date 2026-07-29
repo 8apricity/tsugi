@@ -1888,6 +1888,7 @@ body.page-scroll-locked {
   top: calc(100% + 6px);
   right: 0;
   display: grid;
+  width: max-content;
   min-width: 132px;
   padding: 6px;
   border: 1px solid var(--color-border);
@@ -1904,6 +1905,7 @@ body.page-scroll-locked {
   color: var(--color-text);
   font: inherit;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
 }
 

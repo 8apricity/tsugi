@@ -34,7 +34,9 @@ describe('Task detail dialog', () => {
     expect(markup).toContain('更新予定')
     expect(markup).toContain('関連ノート')
     expect(markup).toContain('編集')
-    expect(markup).toContain('下書きを取り消す')
+    expect(markup).toContain(
+      'class="button-danger" type="button">下書きを取り消す</button>',
+    )
   })
 
   it('uses the Task detail surface for direct editing and repeatable new Notes', () => {
@@ -81,6 +83,8 @@ describe('Task detail dialog', () => {
         onRemovalPlannedChange={() => undefined}
         onAddNote={() => undefined}
         onOpenHistory={() => undefined}
+        onCancelDraft={() => undefined}
+        cancelDraftDisabled
       />,
     )
 
@@ -99,5 +103,8 @@ describe('Task detail dialog', () => {
     expect(markup).toContain('削除予定にする')
     expect(markup).toContain('type="checkbox"')
     expect(markup).not.toContain('checked=""')
+    expect(markup).toContain(
+      'class="button-danger" type="button" disabled="">下書きを取り消す</button>',
+    )
   })
 })

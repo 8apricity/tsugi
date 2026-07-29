@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { NoteCard } from './noteCard'
 import { taskRemovalCascadeDetails } from './taskNoteCopy'
 import { ConfirmationDialog } from './dialogFoundation'
@@ -20,27 +21,38 @@ export function TaskNoteList({
   notes,
   presentation = 'daily-plan',
   onOpenRelatedNote,
+  wrapDraftCancellation,
 }: {
   notes: TaskNoteListItem[]
   presentation?: 'daily-plan' | 'detail'
   onOpenRelatedNote?: () => void
+  wrapDraftCancellation?: (
+    note: TaskNoteListItem,
+    content: ReactNode,
+  ) => ReactNode
 }) {
   if (notes.length === 0) return null
   return (
     <div className={`task-note-list${
       presentation === 'detail' ? ' task-note-detail-list' : ''
     }`}>
-      {notes.map((note) => (
-        <NoteCard
+      {notes.map((note) => {
+        const card = (
+          <NoteCard
           key={note.noteId}
           {...note}
+          onCancelDraft={wrapDraftCancellation ? undefined : note.onCancelDraft}
           presentation={presentation === 'daily-plan' ? 'related' : 'independent'}
           onOpen={note.removalReason === 'task-cascade'
             ? undefined
             : note.onOpen ?? onOpenRelatedNote}
           showChevron={presentation === 'detail' && Boolean(note.onOpen)}
         />
-      ))}
+        )
+        return note.draft && note.onCancelDraft && wrapDraftCancellation
+          ? wrapDraftCancellation(note, card)
+          : card
+      })}
     </div>
   )
 }

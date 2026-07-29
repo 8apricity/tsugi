@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { NoteCard } from './noteCard'
 
 export type DailyLessonNoteListItem = {
@@ -19,24 +20,35 @@ export function DailyLessonNoteList({
   className = 'daily-lesson-note-list',
   presentation = 'related',
   onOpenRelatedNote,
+  wrapDraftCancellation,
 }: {
   notes: DailyLessonNoteListItem[]
   className?: string
   presentation?: 'related' | 'detail'
   onOpenRelatedNote?: () => void
+  wrapDraftCancellation?: (
+    note: DailyLessonNoteListItem,
+    content: ReactNode,
+  ) => ReactNode
 }) {
   if (notes.length === 0) return null
   return (
     <div className={className} aria-label="この時限のノート">
-      {notes.map((note) => (
-        <NoteCard
+      {notes.map((note) => {
+        const card = (
+          <NoteCard
           key={note.noteId}
           {...note}
+          onCancelDraft={wrapDraftCancellation ? undefined : note.onCancelDraft}
           presentation={presentation === 'related' ? 'related' : 'independent'}
           onOpen={note.onOpen ?? onOpenRelatedNote}
           showChevron={presentation === 'detail' && Boolean(note.onOpen)}
         />
-      ))}
+        )
+        return note.draft && note.onCancelDraft && wrapDraftCancellation
+          ? wrapDraftCancellation(note, card)
+          : card
+      })}
     </div>
   )
 }

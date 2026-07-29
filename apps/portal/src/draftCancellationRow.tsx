@@ -22,14 +22,25 @@ type Gesture = {
   mode: 'pending' | 'horizontal' | 'vertical'
 }
 
+function comesFromNestedCancellationRow(
+  target: EventTarget,
+  currentTarget: HTMLDivElement,
+) {
+  return target instanceof Element &&
+    target.closest('.draft-cancellation-row') !== currentTarget
+}
+
 export type DraftCancellationRowHandle = {
   focusEditControl: () => void
+  getElement: () => HTMLDivElement | null
 }
 
 type DraftCancellationRowProps = {
   draftId: string
   open: boolean
   anotherRowOpen: boolean
+  accessibleLabel?: string
+  disabled?: boolean
   onInteractionStart: () => void
   onOpenChange: (open: boolean) => void
   onCancel: () => void
@@ -43,6 +54,8 @@ export const DraftCancellationRow = forwardRef<
   draftId,
   open,
   anotherRowOpen,
+  accessibleLabel = '下書きの操作',
+  disabled = false,
   onInteractionStart,
   onOpenChange,
   onCancel,
@@ -59,6 +72,9 @@ export const DraftCancellationRow = forwardRef<
       contentRef.current?.querySelector<HTMLElement>(
         ':scope > button, [role="button"], button',
       )?.focus()
+    },
+    getElement() {
+      return contentRef.current?.parentElement as HTMLDivElement | null
     },
   }), [])
 
@@ -99,11 +115,18 @@ export const DraftCancellationRow = forwardRef<
       className={`draft-cancellation-row${
         dragOffset !== null ? ' draft-cancellation-dragging' : ''
       }${open ? ' draft-cancellation-open' : ''}`}
+      role="group"
+      aria-label={accessibleLabel}
       data-draft-cancellation-id={draftId}
       data-cancellation-open={open ? 'true' : 'false'}
       style={style}
-      onFocusCapture={onInteractionStart}
+      onFocusCapture={(event) => {
+        if (comesFromNestedCancellationRow(event.target, event.currentTarget)) return
+        onInteractionStart()
+      }}
       onPointerDownCapture={(event) => {
+        if (disabled) return
+        if (comesFromNestedCancellationRow(event.target, event.currentTarget)) return
         if (
           event.target instanceof Element &&
           event.target.closest('.draft-cancellation-action')
@@ -180,6 +203,7 @@ export const DraftCancellationRow = forwardRef<
         if (gesture.mode === 'vertical') onOpenChange(false)
       }}
       onClickCapture={(event) => {
+        if (comesFromNestedCancellationRow(event.target, event.currentTarget)) return
         if (
           event.target instanceof Element &&
           event.target.closest('.draft-cancellation-action')
@@ -197,9 +221,23 @@ export const DraftCancellationRow = forwardRef<
         {children}
       </div>
       <button
+        className="draft-cancellation-menu-button"
+        type="button"
+        aria-label="下書きの操作メニュー"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={(event) => {
+          event.stopPropagation()
+          onOpenChange(!open)
+        }}
+      >
+        ⋮
+      </button>
+      <button
         className="draft-cancellation-action"
         type="button"
         aria-label="下書きを取り消す"
+        disabled={disabled}
         onClick={(event) => {
           event.stopPropagation()
           onCancel()

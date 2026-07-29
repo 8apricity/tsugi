@@ -27,6 +27,19 @@ export type TimetableLayerKey = {
   periodNumber: number
 }
 
+export type DraftCancellationTarget =
+  | ({
+      kind: 'timetable'
+    } & TimetableLayerKey)
+  | {
+      kind: 'task'
+      sourceId: string
+    }
+  | {
+      kind: 'note'
+      sourceId: string
+    }
+
 type TimetableChangeDraftBase = TimetableLayerKey & {
   sourceId: string
 }
@@ -572,6 +585,7 @@ export function createSharedInformationEditorClient({
     for (const sourceId of draft.suspendedDependentNoteConflictSourceIds ?? []) {
       if (restoredSourceIds.has(sourceId)) noteConflictSourceIds.add(sourceId)
     }
+    return draftsToRestore.length
   }
 
   function commitPayload(
@@ -1554,6 +1568,63 @@ export function createSharedInformationEditorClient({
       }
       publish()
       return { status: 'removed' as const }
+    },
+    cancelDraft(target: DraftCancellationTarget) {
+      if (submitting) return { status: 'submission-in-progress' as const }
+      if (target.kind === 'timetable') {
+        const key = draftKey(target)
+        if (!removeDraftByKey(key)) {
+          publish()
+          return { status: 'already-cancelled' as const }
+        }
+        conflictKeys.delete(key)
+        stickyConflictKeys.delete(key)
+        reconciledKeys.delete(key)
+        publish()
+        return {
+          status: 'cancelled' as const,
+          cancelledDraftCount: 1,
+          restoredDraftCount: 0,
+        }
+      }
+      if (target.kind === 'task') {
+        const removedDraft = taskDrafts.find(
+          (draft) => draft.sourceId === target.sourceId,
+        )
+        if (!removedDraft) {
+          publish()
+          return { status: 'already-cancelled' as const }
+        }
+        taskDrafts = taskDrafts.filter(
+          (draft) => draft.sourceId !== target.sourceId,
+        )
+        taskConflictSourceIds.delete(target.sourceId)
+        const dependentDrafts = removedDraft.changeKind === 'add'
+          ? removeDependentNoteDrafts(target.sourceId).dependentDrafts
+          : []
+        const restoredDraftCount = removedDraft.changeKind === 'remove'
+          ? restoreDependentNoteDrafts(removedDraft)
+          : 0
+        publish()
+        return {
+          status: 'cancelled' as const,
+          cancelledDraftCount: 1 + dependentDrafts.length,
+          restoredDraftCount,
+        }
+      }
+      const next = noteDrafts.filter((draft) => draft.sourceId !== target.sourceId)
+      if (next.length === noteDrafts.length) {
+        publish()
+        return { status: 'already-cancelled' as const }
+      }
+      noteDrafts = next
+      noteConflictSourceIds.delete(target.sourceId)
+      publish()
+      return {
+        status: 'cancelled' as const,
+        cancelledDraftCount: 1,
+        restoredDraftCount: 0,
+      }
     },
     removeNoteDraft(sourceId: string) {
       if (submitting) return { status: 'submission-in-progress' as const }

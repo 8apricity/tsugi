@@ -19,6 +19,8 @@ type NoteDetailDialogProps = {
   onClose(): void
   onSave(): void
   onOpenHistory?: () => void
+  onCancelDraft?: () => void
+  cancelDraftDisabled?: boolean
 }
 
 export function NoteDetailDialog(props: NoteDetailDialogProps) {
@@ -65,6 +67,18 @@ export function NoteDetailDialog(props: NoteDetailDialogProps) {
             />
             <span>削除予定にする</span>
           </label>
+          {props.onCancelDraft ? (
+            <div className="editor-dialog-actions">
+              <button
+                className="button-danger"
+                type="button"
+                disabled={props.cancelDraftDisabled}
+                onClick={props.onCancelDraft}
+              >
+                下書きを取り消す
+              </button>
+            </div>
+          ) : null}
         </form>
       </EditorDialog>
     )

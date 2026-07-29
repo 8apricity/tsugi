@@ -170,7 +170,7 @@ export function NoteCard({
           <button
             className="button-link"
             type="button"
-            aria-label="ノートの下書きを取り消す"
+            aria-label="下書きを取り消す"
             onClick={onCancelDraft}
           >
             取り消す

@@ -26,6 +26,7 @@ export function TaskDetailDialog({
   onAddNote,
   onEdit,
   onCancelDraft,
+  cancelDraftDisabled = false,
   onRemove,
 }: {
   task: VisibleTask
@@ -51,6 +52,7 @@ export function TaskDetailDialog({
   onAddNote?: () => void
   onEdit?: () => void
   onCancelDraft?: () => void
+  cancelDraftDisabled?: boolean
   onRemove?: () => void
 }) {
   const removalCheckboxRef = useRef<HTMLInputElement>(null)
@@ -87,6 +89,18 @@ export function TaskDetailDialog({
                 onClick={onOpenHistory}
               >
                 編集履歴
+              </button>
+            </div>
+          ) : null}
+          {onCancelDraft ? (
+            <div className="editor-dialog-actions">
+              <button
+                className="button-danger"
+                type="button"
+                disabled={cancelDraftDisabled}
+                onClick={onCancelDraft}
+              >
+                下書きを取り消す
               </button>
             </div>
           ) : null}
@@ -160,7 +174,12 @@ export function TaskDetailDialog({
           </button>
         ) : null}
         {onCancelDraft ? (
-          <button className="button-secondary" type="button" onClick={onCancelDraft}>
+          <button
+            className="button-danger"
+            type="button"
+            disabled={cancelDraftDisabled}
+            onClick={onCancelDraft}
+          >
             下書きを取り消す
           </button>
         ) : null}

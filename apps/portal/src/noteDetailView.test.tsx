@@ -87,6 +87,8 @@ describe('Note detail view', () => {
         onClose={() => undefined}
         onSave={() => undefined}
         onOpenHistory={() => undefined}
+        onCancelDraft={() => undefined}
+        cancelDraftDisabled
       />,
     )
 
@@ -108,5 +110,8 @@ describe('Note detail view', () => {
     expect(markup).toContain('aria-label="下書きを保存"')
     expect(markup).toContain('編集履歴')
     expect(markup).not.toContain('<select')
+    expect(markup).toContain(
+      'class="button-danger" type="button" disabled="">下書きを取り消す</button>',
+    )
   })
 })

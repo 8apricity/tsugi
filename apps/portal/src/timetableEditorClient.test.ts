@@ -62,6 +62,304 @@ function layerState(
 }
 
 describe('Shared Information editor client', () => {
+  it('cancels one Note draft through the shared draft cancellation operation', () => {
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => '33000000-0000-4000-8000-000000000201',
+    })
+    const saved = editor.saveNoteDraft({
+      body: '取り消すノート',
+      schoolDate: '2026-07-10',
+      targetScopeType: 'track',
+    })
+    if (saved.status !== 'saved') throw new Error('Note draft was not saved')
+
+    expect(editor.cancelDraft({
+      kind: 'note',
+      sourceId: saved.sourceId,
+    })).toEqual({
+      status: 'cancelled',
+      cancelledDraftCount: 1,
+      restoredDraftCount: 0,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 0,
+      noteDrafts: [],
+    })
+    expect(editor.cancelDraft({
+      kind: 'note',
+      sourceId: saved.sourceId,
+    })).toEqual({ status: 'already-cancelled' })
+  })
+
+  it('cancels dependent Note drafts with their added Task draft', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000202',
+      '33000000-0000-4000-8000-000000000203',
+    ]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+    })
+    const task = editor.saveTaskDraft({
+      title: '追加タスク',
+      dueDate: null,
+      relatedLessonName: null,
+      targetScopeType: 'track',
+    })
+    if (task.status !== 'saved') throw new Error('Task draft was not saved')
+    expect(editor.saveTaskNoteDraft({
+      taskId: task.sourceId,
+      targetScopeType: 'track',
+    }, '従属ノート')).toMatchObject({ status: 'saved' })
+
+    expect(editor.cancelDraft({
+      kind: 'task',
+      sourceId: task.sourceId,
+    })).toEqual({
+      status: 'cancelled',
+      cancelledDraftCount: 2,
+      restoredDraftCount: 0,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 0,
+      taskDrafts: [],
+      noteDrafts: [],
+    })
+  })
+
+  it('cancels a Task update without cancelling its dependent Note drafts', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000207',
+      '33000000-0000-4000-8000-000000000208',
+    ]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+    })
+    const activeTask = {
+      taskId: '33000000-0000-4000-8000-000000000209',
+      latestChangeId: 'task-change',
+      title: '変更前タスク',
+      dueDate: null,
+      relatedLessonName: null,
+      targetScopeType: 'track' as const,
+    }
+    expect(editor.saveTaskNoteDraft(
+      activeTask,
+      '残すノート',
+    )).toMatchObject({ status: 'saved' })
+    const update = editor.saveTaskUpdateDraft(activeTask, {
+      title: '変更後タスク',
+      dueDate: null,
+      relatedLessonName: null,
+    })
+    if (update.status !== 'saved') throw new Error('Task update was not saved')
+
+    expect(editor.cancelDraft({
+      kind: 'task',
+      sourceId: update.sourceId,
+    })).toEqual({
+      status: 'cancelled',
+      cancelledDraftCount: 1,
+      restoredDraftCount: 0,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 1,
+      taskDrafts: [],
+      noteDrafts: [{ body: '残すノート' }],
+    })
+  })
+
+  it('restores suspended Note drafts when a Task removal draft is cancelled', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000204',
+      '33000000-0000-4000-8000-000000000205',
+    ]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+    })
+    const taskId = '33000000-0000-4000-8000-000000000206'
+    expect(editor.saveTaskNoteDraft({
+      taskId,
+      targetScopeType: 'track',
+    }, '復元するノート')).toMatchObject({ status: 'saved' })
+    const removal = editor.saveTaskRemoveDraft({
+      taskId,
+      latestChangeId: 'task-change',
+      title: '削除予定タスク',
+      dueDate: null,
+      relatedLessonName: null,
+      targetScopeType: 'track',
+    })
+    if (removal.status !== 'saved') throw new Error('Task removal was not saved')
+
+    expect(editor.cancelDraft({
+      kind: 'task',
+      sourceId: removal.sourceId,
+    })).toEqual({
+      status: 'cancelled',
+      cancelledDraftCount: 1,
+      restoredDraftCount: 1,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 1,
+      taskDrafts: [],
+      noteDrafts: [{ body: '復元するノート' }],
+    })
+  })
+
+  it('cancels Note update/removal and Timetable update/removal variants', () => {
+    const ids = [
+      '33000000-0000-4000-8000-000000000210',
+      '33000000-0000-4000-8000-000000000211',
+    ]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+    })
+    const activeNote = {
+      noteId: '33000000-0000-4000-8000-000000000212',
+      latestChangeId: 'note-change',
+      body: '変更前ノート',
+      schoolDate: '2026-07-10',
+      targetScopeType: 'track' as const,
+    }
+    const noteUpdate = editor.saveNoteUpdateDraft(activeNote, '変更後ノート')
+    if (noteUpdate.status !== 'saved') throw new Error('Note update was not saved')
+    expect(editor.cancelDraft({
+      kind: 'note',
+      sourceId: noteUpdate.sourceId,
+    })).toMatchObject({ status: 'cancelled' })
+    const noteRemoval = editor.saveNoteRemoveDraft(activeNote)
+    if (noteRemoval.status !== 'saved') {
+      throw new Error('Note removal was not saved')
+    }
+    expect(editor.cancelDraft({
+      kind: 'note',
+      sourceId: noteRemoval.sourceId,
+    })).toMatchObject({ status: 'cancelled' })
+
+    editor.reconcileLayerState(layerState([{
+      targetScopeType: 'track',
+      state: 'active',
+      sharedInformationItemId: 'timetable-item',
+      latestChangeId: 'timetable-change',
+      replacement: { type: 'lesson_name', lessonName: '数学' },
+      changedAt: 1,
+    }]))
+    const key = {
+      targetScopeType: 'track' as const,
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+    }
+    expect(editor.setDesiredState({
+      ...key,
+      replacement: { type: 'lesson_name', lessonName: '英語' },
+    })).toMatchObject({ status: 'saved' })
+    expect(editor.cancelDraft({
+      kind: 'timetable',
+      ...key,
+    })).toMatchObject({ status: 'cancelled' })
+    expect(editor.removeDesiredState(key)).toMatchObject({ status: 'saved' })
+    expect(editor.cancelDraft({
+      kind: 'timetable',
+      ...key,
+    })).toMatchObject({ status: 'cancelled' })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 0,
+      drafts: [],
+      noteDrafts: [],
+    })
+  })
+
+  it('cancels conflicted drafts across Shared Information Kinds', async () => {
+    const taskSourceId = '33000000-0000-4000-8000-000000000213'
+    const noteSourceId = '33000000-0000-4000-8000-000000000214'
+    const timetableKey = {
+      targetScopeType: 'track' as const,
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+    }
+    const ids = [taskSourceId, noteSourceId]
+    const editor = createTimetableEditorClient({
+      storage: memoryStorage(),
+      createId: () => ids.shift()!,
+      submitDirectTimetableChanges: async () => ({
+        status: 'remote-conflict',
+        conflictingKeys: [timetableKey],
+        conflictingSourceIds: [taskSourceId, noteSourceId],
+      }),
+    })
+    expect(editor.saveTaskDraft({
+      title: '競合タスク',
+      dueDate: null,
+      relatedLessonName: null,
+      targetScopeType: 'track',
+    })).toMatchObject({ status: 'saved', sourceId: taskSourceId })
+    expect(editor.saveNoteDraft({
+      body: '競合ノート',
+      schoolDate: '2026-07-10',
+      targetScopeType: 'track',
+    })).toMatchObject({ status: 'saved', sourceId: noteSourceId })
+    expect(editor.setDesiredState({
+      ...timetableKey,
+      replacement: { type: 'cancelled' },
+    })).toMatchObject({ status: 'saved' })
+
+    await expect(editor.submitCurrentBatch({
+      confirmSubmission: () => true,
+      applyFreshness: () => 'refreshed',
+    })).resolves.toMatchObject({ status: 'remote-conflict' })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 3,
+      conflictCount: 3,
+    })
+
+    expect(editor.cancelDraft({
+      kind: 'task',
+      sourceId: taskSourceId,
+    })).toMatchObject({ status: 'cancelled' })
+    expect(editor.cancelDraft({
+      kind: 'note',
+      sourceId: noteSourceId,
+    })).toMatchObject({ status: 'cancelled' })
+    expect(editor.cancelDraft({
+      kind: 'timetable',
+      ...timetableKey,
+    })).toMatchObject({ status: 'cancelled' })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 0,
+      conflictCount: 0,
+    })
+  })
+
+  it('cancels one Timetable Change draft through the shared operation', () => {
+    const editor = createTimetableEditorClient({ storage: memoryStorage() })
+    expect(editor.setDesiredState({
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+      replacement: { type: 'cancelled' },
+    })).toMatchObject({ status: 'saved' })
+
+    expect(editor.cancelDraft({
+      kind: 'timetable',
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
+    })).toEqual({
+      status: 'cancelled',
+      cancelledDraftCount: 1,
+      restoredDraftCount: 0,
+    })
+    expect(editor.getSnapshot()).toMatchObject({
+      draftCount: 0,
+      drafts: [],
+    })
+  })
+
   it('restores the editing session and drafts after reload', () => {
     const storage = memoryStorage()
     const editor = createTimetableEditorClient({ storage })
@@ -1767,6 +2065,12 @@ describe('Shared Information editor client', () => {
       changeDate: '2026-07-11',
       periodNumber: 3,
       replacement: { type: 'cancelled' },
+    })).toEqual({ status: 'submission-in-progress' })
+    expect(editor.cancelDraft({
+      kind: 'timetable',
+      targetScopeType: 'track',
+      changeDate: '2026-07-10',
+      periodNumber: 2,
     })).toEqual({ status: 'submission-in-progress' })
     expect(editor.discard()).toEqual({ status: 'submission-in-progress' })
     await expect(editor.submitCurrentBatch({

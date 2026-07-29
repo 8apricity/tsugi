@@ -42,6 +42,7 @@ import {
   createSharedInformationEditorClient,
   normalizeDirectLessonReplacement,
   type ActiveTaskForEditing,
+  type DraftCancellationTarget,
   type NewTaskDraftForm,
   type NewNoteDraftForm,
   type NoteDraft,
@@ -287,6 +288,7 @@ type PendingChangeContentTimetable = Pick<
 
 type PendingDraftCancellationFocus = {
   cancelledIndex: number;
+  dialog: HTMLDialogElement | null;
 };
 
 type DraftCancellationRowRegistration = {
@@ -1948,12 +1950,24 @@ function App() {
 
   let draftCancellationRenderIndex = 0;
 
+  function draftCancellationRowsForSurface(
+    dialog: HTMLDialogElement | null,
+  ) {
+    return [...draftCancellationRowHandlesRef.current.values()]
+      .filter((row) => {
+        const element = row.handle.getElement();
+        return dialog
+          ? Boolean(element && dialog.contains(element))
+          : !element?.closest("dialog");
+      })
+      .sort((left, right) => left.index - right.index);
+  }
+
   useLayoutEffect(() => {
     const pendingFocus = pendingDraftCancellationFocusRef.current;
     pendingDraftCancellationFocusRef.current = null;
     if (pendingFocus === null) return;
-    const rows = [...draftCancellationRowHandlesRef.current.values()]
-      .sort((left, right) => left.index - right.index);
+    const rows = draftCancellationRowsForSurface(pendingFocus.dialog);
     const focusRow =
       rows[pendingFocus.cancelledIndex] ?? rows.at(-1);
     if (!focusRow) {
@@ -1966,29 +1980,196 @@ function App() {
     focusRow.handle.focusEditControl();
   });
 
-  function cancelChangeContentDraft(
+  function draftCancellationTarget(
     item:
       | ChangeContentTimetableItem
       | ChangeContentTaskItem
       | Extract<ChangeContentNoteItem, { source: "draft" }>,
-  ) {
-    pendingDraftCancellationFocusRef.current = {
-      cancelledIndex:
-        draftCancellationRowHandlesRef.current.get(item.sourceId!)?.index ?? 0,
+  ): DraftCancellationTarget {
+    if (item.kind === "timetable") {
+      return {
+        kind: "timetable",
+        targetScopeType: item.targetScopeType,
+        changeDate: item.changeDate,
+        periodNumber: item.periodNumber,
+      };
+    }
+    return {
+      kind: item.kind,
+      sourceId: item.sourceId!,
     };
-    const result = item.kind === "timetable"
-      ? timetableEditorClient.restoreServerState(
-          item.targetScopeType,
-          item.changeDate,
-          item.periodNumber,
+  }
+
+  function cancelSharedInformationDraft(
+    target: DraftCancellationTarget,
+    onCancelled?: () => void,
+  ) {
+    const result = timetableEditorClient.cancelDraft(target);
+    if (result.status === "submission-in-progress") return false;
+    if (result.status === "already-cancelled") {
+      resynchronizeCancelledDraftView(target);
+      setTimetableEditorMessage("この下書きは既に取り消されています。");
+      return false;
+    }
+    const relatedCancelled = result.cancelledDraftCount - 1;
+    setTimetableEditorMessage(
+      relatedCancelled > 0
+        ? `下書きと関連するノート${relatedCancelled}件を取り消しました。`
+        : "下書きを取り消しました。",
+    );
+    onCancelled?.();
+    return true;
+  }
+
+  function resynchronizeCancelledDraftView(
+    target: DraftCancellationTarget,
+  ) {
+    if (target.kind === "timetable") {
+      setTimetableEditorForm((current) => {
+        if (
+          !current ||
+          current.targetScopeType !== target.targetScopeType ||
+          current.changeDate !== target.changeDate ||
+          current.periodNumber !== target.periodNumber
+        ) {
+          return current;
+        }
+        const serverLayer = timetableLayerDialog?.state.status === "ready"
+          ? timetableLayerDialog.state.layers.find(
+              (layer) => layer.targetScopeType === target.targetScopeType,
+            )
+          : undefined;
+        return serverLayer?.state === "active"
+          ? {
+              ...current,
+              sourceId: undefined,
+              includeTimetableChange: true,
+              removalPlanned: false,
+              noteBodies: [],
+              replacement: serverLayer.replacement,
+            }
+          : {
+              ...current,
+              sourceId: undefined,
+              includeTimetableChange: false,
+              removalPlanned: false,
+              noteBodies: [],
+              replacement: { type: "lesson_name", lessonName: "" },
+            };
+      });
+      return;
+    }
+    if (target.kind === "note") {
+      setNoteEditorForm((current) => {
+        if (current?.editingDraft?.sourceId !== target.sourceId) return current;
+        if (!current.editingNote) {
+          return {
+            ...current,
+            body: "",
+            editingDraft: null,
+            removalPlanned: false,
+          };
+        }
+        return {
+          ...current,
+          body: current.editingNote.body,
+          schoolDate: noteSchoolDate(current.editingNote),
+          periodNumber: notePeriodNumber(current.editingNote),
+          targetScopeType: current.editingNote.targetScopeType,
+          editingDraft: null,
+          removalPlanned: false,
+        };
+      });
+      return;
+    }
+    const matchingDetail = taskDetail?.type === "draft" &&
+      taskDetail.draft.sourceId === target.sourceId
+      ? taskDetail
+      : null;
+    setTaskEditorForm((current) => {
+      if (current?.editingDraft?.sourceId === target.sourceId) {
+        const initial = createNewTaskDraftForm(selectedSchoolDate);
+        return {
+          title: initial.title,
+          dueDate: initial.dueDate,
+          targetScopeType: initial.targetScopeType,
+          relatedLessonInput: "",
+          noteBodies: [],
+          removalPlanned: false,
+          editingTask: null,
+          editingDraft: null,
+        };
+      }
+      if (!current?.editingTask || !matchingDetail) return current;
+      const activeTask = current.editingTask;
+      const noteBodies = timetableEditorClient.getSnapshot().noteDrafts
+        .filter(
+          (draft) =>
+            draft.changeKind === "add" &&
+            draft.relatedTaskItemId === activeTask.taskId,
         )
-      : item.kind === "task"
-        ? timetableEditorClient.removeTaskDraft(item.sourceId!)
-        : timetableEditorClient.removeNoteDraft(item.sourceId);
-    if (
-      result.status !== "removed" &&
-      result.status !== "removed-noop"
-    ) {
+        .map((draft) => draft.body);
+      return {
+        ...current,
+        title: activeTask.title,
+        dueDate: activeTask.dueDate,
+        targetScopeType: activeTask.targetScopeType,
+        relatedLessonInput: activeTask.relatedLessonName?.lessonName ?? "",
+        noteBodies,
+        removalPlanned: false,
+        editingDraft: null,
+      };
+    });
+    resynchronizeTaskDetail(target.sourceId);
+  }
+
+  function resynchronizeTaskDetail(sourceId: string) {
+    setTaskDetail((current) => {
+      if (
+        !current ||
+        current.type !== "draft" ||
+        current.draft.sourceId !== sourceId
+      ) {
+        return current;
+      }
+      if (current.activeTask) {
+        return { type: "active", task: current.activeTask };
+      }
+      if (!current.editingTask) return current;
+      const task = current.editingTask;
+      return {
+        type: "active",
+        task: {
+          taskId: task.taskId,
+          latestChangeId: task.latestChangeId,
+          title: task.title,
+          dueDate: task.dueDate,
+          ...(task.relatedLessonName
+            ? {
+                relatedLessonName: task.relatedLessonName.lessonName,
+                ...(task.relatedLessonName.registeredLessonNameId
+                  ? {
+                      registeredRelatedLessonNameId:
+                        task.relatedLessonName.registeredLessonNameId,
+                    }
+                  : {}),
+              }
+            : {}),
+          targetScopeType: task.targetScopeType,
+          createdAt: 0,
+          notes: task.notes ?? [],
+        },
+      };
+    });
+  }
+
+  function finishTaskDraftCancellation(sourceId: string) {
+    resynchronizeTaskDetail(sourceId);
+    applyDialogFlowResult(dialogFlow.completeCurrent());
+  }
+
+  function cancelListDraft(target: DraftCancellationTarget) {
+    if (!cancelSharedInformationDraft(target)) {
       pendingDraftCancellationFocusRef.current = null;
       return;
     }
@@ -1999,36 +2180,54 @@ function App() {
     draftId: string,
     onCancel: () => void,
     content: ReactNode,
+    accessibleLabel?: string,
   ) {
     const rowIndex = draftCancellationRenderIndex++;
+    const registrationKey = `${rowIndex}:${draftId}`;
     return (
       <DraftCancellationRow
         key={draftId}
         ref={(handle) => {
           if (handle) {
-            draftCancellationRowHandlesRef.current.set(draftId, {
+            draftCancellationRowHandlesRef.current.set(registrationKey, {
               handle,
               index: rowIndex,
             });
           } else {
-            draftCancellationRowHandlesRef.current.delete(draftId);
+            draftCancellationRowHandlesRef.current.delete(registrationKey);
           }
         }}
         draftId={draftId}
-        open={revealedDraftCancellationId === draftId}
+        accessibleLabel={accessibleLabel}
+        open={revealedDraftCancellationId === registrationKey}
+        disabled={timetableEditor.submitting}
         anotherRowOpen={
           revealedDraftCancellationId !== null &&
-          revealedDraftCancellationId !== draftId
+          revealedDraftCancellationId !== registrationKey
         }
         onInteractionStart={() => {
           setRevealedDraftCancellationId((current) =>
-            current === draftId ? current : null
+            current === registrationKey ? current : null
           );
         }}
         onOpenChange={(open) =>
-          setRevealedDraftCancellationId(open ? draftId : null)
+          setRevealedDraftCancellationId(open ? registrationKey : null)
         }
-        onCancel={onCancel}
+        onCancel={() => {
+          const registration =
+            draftCancellationRowHandlesRef.current.get(registrationKey);
+          const element = registration?.handle.getElement() ?? null;
+          const dialog = element?.closest("dialog") ?? null;
+          const surfaceRows = draftCancellationRowsForSurface(dialog);
+          pendingDraftCancellationFocusRef.current = {
+            cancelledIndex: Math.max(
+              0,
+              surfaceRows.findIndex((row) => row === registration),
+            ),
+            dialog,
+          };
+          onCancel();
+        }}
       >
         {content}
       </DraftCancellationRow>
@@ -2076,7 +2275,7 @@ function App() {
     return draft
       ? cancellationRow(
           item.sourceId,
-          () => cancelChangeContentDraft(item),
+          () => cancelListDraft(draftCancellationTarget(item)),
           card,
         )
       : card;
@@ -2087,7 +2286,7 @@ function App() {
     const removed = item.changeKind === "remove";
     return cancellationRow(
       item.sourceId,
-      () => cancelChangeContentDraft(item),
+      () => cancelListDraft(draftCancellationTarget(item)),
       <article
         aria-label={removed ? "時間割変更の削除予定" : undefined}
         className={`task-entry task-draft change-content-preview-card${
@@ -2225,7 +2424,7 @@ function App() {
           {item.draft ? (
             cancellationRow(
               item.sourceId!,
-              () => cancelChangeContentDraft(item),
+              () => cancelListDraft(draftCancellationTarget(item)),
               <button
                 className="task-item"
                 type="button"
@@ -2761,6 +2960,10 @@ function App() {
           draft: true,
           changeKind: note.changeKind,
           conflicted: note.conflicted,
+          onCancelDraft: () => cancelListDraft({
+            kind: "note",
+            sourceId: note.sourceId,
+          }),
           onOpen: notesOpenDetail
             ? () => item.activeNote
               ? openTaskNoteEditor(
@@ -2808,6 +3011,8 @@ function App() {
         notes={items}
         presentation={presentation}
         onOpenRelatedNote={onOpenRelatedNote}
+        wrapDraftCancellation={(note, content) =>
+          cancellationRow(note.noteId, note.onCancelDraft!, content)}
       />
     );
   }
@@ -2917,6 +3122,10 @@ function App() {
           draft: true,
           changeKind: note.changeKind,
           conflicted: note.conflicted,
+          onCancelDraft: () => cancelListDraft({
+            kind: "note",
+            sourceId: note.sourceId,
+          }),
           onOpen: notesOpenDetail
             ? () => openNoteDraftEditor(
                 note,
@@ -2953,6 +3162,8 @@ function App() {
         className={className}
         presentation={notesOpenDetail ? "detail" : "related"}
         onOpenRelatedNote={onOpenRelatedNote}
+        wrapDraftCancellation={(note, content) =>
+          cancellationRow(note.noteId, note.onCancelDraft!, content)}
       />
     );
   }
@@ -4059,7 +4270,7 @@ function App() {
                           : effectiveDailyLessonAccessibleLabel(period)
                         : period.lessonName || "空欄";
                       return (
-                      <article
+                        <article
                         className={`period-row inspectable ${
                           timetableDraftPresentation
                         } ${timetableEditor.editing ? "editable" : ""}`}
@@ -4149,7 +4360,7 @@ function App() {
                             },
                           )}
                         </div>
-                      </article>
+                        </article>
                       );
                     })}
                   </div>
@@ -4183,7 +4394,7 @@ function App() {
                           ? "削除予定のタスク"
                           : `削除予定のタスク。関連するノート${task.notes.length}件も削除予定です`
                         : undefined;
-                      return (
+                      const taskCard = (
                       <article
                         aria-label={taskRemovalLabel}
                         className={`task-entry ${
@@ -4243,6 +4454,17 @@ function App() {
                         ) : null}
                       </article>
                       );
+                      return item.type === "draft"
+                        ? cancellationRow(
+                            item.draft.sourceId,
+                            () => cancelListDraft({
+                              kind: "task",
+                              sourceId: item.draft.sourceId,
+                            }),
+                            taskCard,
+                            `${task.title}の下書き操作`,
+                          )
+                        : taskCard;
                     })}
                     {visibleTasks.length === 0 ? (
                       <p className="empty-state">タスクはありません。</p>
@@ -4283,26 +4505,30 @@ function App() {
                       return visibleNotes.map((item) => {
                         if (item.type === "draft") {
                           const note = item.draft;
-                          return (
-                        <NoteCard
-                          key={note.sourceId}
-                          noteId={note.sourceId}
-                          body={note.body}
-                          targetScopeLabel={scopeLabel(
-                            note.targetScopeType,
-                            targetScopeContext,
-                          )}
-                          draft
-                          changeKind={note.changeKind}
-                          conflicted={note.conflicted}
-                          showChevron
-                          onOpen={() => openNoteDraftEditor(
-                            note,
-                            item.activeNote
-                              ? { activeNote: item.activeNote }
-                              : undefined,
-                          )}
-                        />
+                          return cancellationRow(
+                            note.sourceId,
+                            () => cancelListDraft({
+                              kind: "note",
+                              sourceId: note.sourceId,
+                            }),
+                            <NoteCard
+                              noteId={note.sourceId}
+                              body={note.body}
+                              targetScopeLabel={scopeLabel(
+                                note.targetScopeType,
+                                targetScopeContext,
+                              )}
+                              draft
+                              changeKind={note.changeKind}
+                              conflicted={note.conflicted}
+                              showChevron
+                              onOpen={() => openNoteDraftEditor(
+                                note,
+                                item.activeNote
+                                  ? { activeNote: item.activeNote }
+                                  : undefined,
+                              )}
+                            />,
                           );
                         }
                         const note = item.note;
@@ -4586,6 +4812,16 @@ function App() {
               onOpenHistory={noteEditorForm.editingNote
                 ? () => openNoteHistory(noteEditorForm.editingNote!)
                 : undefined}
+              onCancelDraft={noteEditorForm.editingDraft
+                ? () => cancelSharedInformationDraft(
+                    {
+                      kind: "note",
+                      sourceId: noteEditorForm.editingDraft!.sourceId,
+                    },
+                    closeNoteEditorFlow,
+                  )
+                : undefined}
+              cancelDraftDisabled={timetableEditor.submitting}
             />
           ) : noteEditorForm && dialogRouteExists("note-editor") ? (
             <EditorDialog
@@ -4777,19 +5013,21 @@ function App() {
                       </label>
                     </ImmutableFieldNotice>
                   )}
-                  {noteEditorForm.editingDraft?.changeKind === "remove" ? (
+                  {noteEditorForm.editingDraft ? (
                     <div className="editor-dialog-actions">
                       <button
-                        className="button-secondary"
+                        className="button-danger"
                         type="button"
-                        onClick={() => {
-                          timetableEditorClient.removeNoteDraft(
-                            noteEditorForm.editingDraft!.sourceId,
-                          );
-                          closeNoteEditorFlow();
-                        }}
+                        disabled={timetableEditor.submitting}
+                        onClick={() => cancelSharedInformationDraft(
+                          {
+                            kind: "note",
+                            sourceId: noteEditorForm.editingDraft!.sourceId,
+                          },
+                          closeNoteEditorFlow,
+                        )}
                       >
-                        削除予定を取り消す
+                        下書きを取り消す
                       </button>
                     </div>
                   ) : null}
@@ -4818,6 +5056,24 @@ function App() {
                     onBodyChange={updateTaskNoteBody}
                     onAddNote={addTaskNoteBody}
                   />
+                  {taskEditorForm.editingDraft ? (
+                    <div className="editor-dialog-actions">
+                      <button
+                        className="button-danger"
+                        type="button"
+                        disabled={timetableEditor.submitting}
+                        onClick={() => cancelSharedInformationDraft(
+                          {
+                            kind: "task",
+                            sourceId: taskEditorForm.editingDraft!.sourceId,
+                          },
+                          closeTaskEditorFlow,
+                        )}
+                      >
+                        下書きを取り消す
+                      </button>
+                    </div>
+                  ) : null}
                 </form>
             </EditorDialog>
           ) : null}
@@ -4909,11 +5165,17 @@ function App() {
                 : undefined}
               onCancelDraft={timetableEditor.editing &&
                 taskDetail.type === "draft"
-                ? () => {
-                  timetableEditorClient.removeTaskDraft(taskDetail.draft.sourceId);
-                  applyDialogFlowResult(dialogFlow.completeCurrent());
-                }
+                ? () => cancelSharedInformationDraft(
+                    {
+                      kind: "task",
+                      sourceId: taskDetail.draft.sourceId,
+                    },
+                    () => finishTaskDraftCancellation(
+                      taskDetail.draft.sourceId,
+                    ),
+                  )
                 : undefined}
+              cancelDraftDisabled={timetableEditor.submitting}
             />
           ) : null}
 
@@ -5183,6 +5445,17 @@ function App() {
                             : undefined
                         }
                         menuActions={[
+                          ...(existingDraft ? [{
+                            label: "下書きを取り消す",
+                            danger: true,
+                            onClick: () => cancelSharedInformationDraft({
+                              kind: "timetable",
+                              targetScopeType: layer.targetScopeType,
+                              changeDate: timetableLayerDialog.schoolDate,
+                              periodNumber: timetableLayerDialog.periodNumber,
+                            }),
+                            disabled: timetableEditor.submitting,
+                          }] : []),
                           ...(timetableEditor.editing &&
                             !timetableEditor.submitting ? [{
                             label: serverLayer?.state === "active"
@@ -5562,17 +5835,19 @@ function App() {
                       timetableEditorForm.periodNumber,
                     ) ? (
                       <button
-                        className="button-secondary"
+                        className="button-danger"
                         type="button"
                         disabled={timetableEditor.submitting}
-                        onClick={() => {
-                          timetableEditorClient.restoreServerState(
-                            timetableEditorForm.targetScopeType,
-                            timetableEditorForm.changeDate,
-                            timetableEditorForm.periodNumber,
-                          );
-                          closeTimetableFormAfterDraftSave();
-                        }}
+                        onClick={() => cancelSharedInformationDraft(
+                          {
+                            kind: "timetable",
+                            targetScopeType:
+                              timetableEditorForm.targetScopeType,
+                            changeDate: timetableEditorForm.changeDate,
+                            periodNumber: timetableEditorForm.periodNumber,
+                          },
+                          closeTimetableFormAfterDraftSave,
+                        )}
                       >
                         下書きを取り消す
                       </button>
@@ -5836,6 +6111,7 @@ function LayerRow({
     label: string;
     onClick: () => void;
     disabled?: boolean;
+    danger?: boolean;
   }>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -5893,6 +6169,7 @@ function LayerRow({
                     type="button"
                     role="menuitem"
                     key={action.label}
+                    className={action.danger ? "danger" : undefined}
                     disabled={action.disabled}
                     onClick={() => {
                       setMenuOpen(false);

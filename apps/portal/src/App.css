@@ -1213,6 +1213,35 @@ body.page-scroll-locked {
   stroke-width: 1.8;
 }
 
+.draft-cancellation-menu-button {
+  display: none;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .draft-cancellation-menu-button {
+    position: absolute;
+    z-index: 4;
+    top: 50%;
+    right: 4px;
+    display: grid;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    place-items: center;
+    transform: translateY(-50%);
+    border: 0;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 88%);
+    color: var(--color-muted);
+    font-size: 22px;
+  }
+
+  .draft-cancellation-open > .draft-cancellation-menu-button {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 .draft-cancellation-open > .draft-cancellation-action,
 .draft-cancellation-action:focus-visible {
   width: var(--draft-cancellation-action-max-width);
@@ -1523,6 +1552,12 @@ body.page-scroll-locked {
 .button-danger:focus-visible,
 .button-danger:active:not(:disabled) {
   background: var(--color-danger-bg);
+}
+
+.button-danger:disabled {
+  border-color: var(--color-border);
+  color: var(--color-muted);
+  cursor: not-allowed;
 }
 
 .field-warning {
@@ -1874,6 +1909,16 @@ body.page-scroll-locked {
 
 .layer-kebab-menu button:focus-visible {
   background: var(--color-accent-soft);
+}
+
+.layer-kebab-menu button.danger {
+  color: #8f1d14;
+  font-weight: 700;
+}
+
+.layer-kebab-menu button.danger:focus-visible,
+.layer-kebab-menu button.danger:active {
+  background: var(--color-danger-bg);
 }
 
 .layer-kebab-menu button:active {

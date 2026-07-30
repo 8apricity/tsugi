@@ -48,6 +48,22 @@ describe('touch gesture intent', () => {
 
     expect(gesture.move({ x: 116, y: 180, time: 32 }).intent).toBe('horizontal')
   })
+
+  it('classifies and commits one complete swipe trajectory', () => {
+    const gesture = createTouchGestureIntent()
+
+    gesture.start({ x: 300, y: 200, time: 0 })
+    gesture.move({ x: 282, y: 226, time: 16 })
+    gesture.move({ x: 240, y: 230, time: 48 })
+    const result = gesture.finish({ x: 190, y: 232, time: 80 })
+
+    expect(result.intent).toBe('horizontal')
+    expect(shouldCommitHorizontalSwipe({
+      deltaX: result.deltaX,
+      velocityX: result.velocityX,
+      viewportWidth: 360,
+    })).toBe(true)
+  })
 })
 
 describe('horizontal swipe completion', () => {

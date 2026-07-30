@@ -105,6 +105,38 @@ export function createTouchGestureIntent() {
   return { start, move, finish, cancel }
 }
 
+export function moveTouchGestureFromPointerEvent(
+  gesture: ReturnType<typeof createTouchGestureIntent>,
+  event: PointerEvent,
+) {
+  const coalescedEvents = event.getCoalescedEvents?.() ?? []
+  const points = coalescedEvents.length > 0
+    ? [...coalescedEvents, event]
+    : [event]
+  let latest: TouchGestureSnapshot | null = null
+  for (const point of points) {
+    latest = gesture.move({
+      x: point.clientX,
+      y: point.clientY,
+      time: point.timeStamp,
+    })
+  }
+  return latest!
+}
+
+export function releasePointerCapture(
+  target: Element,
+  pointerId: number,
+) {
+  try {
+    if (target.hasPointerCapture(pointerId)) {
+      target.releasePointerCapture(pointerId)
+    }
+  } catch {
+    // Synthetic browser-test pointers are not registered with pointer capture.
+  }
+}
+
 export function shouldCommitHorizontalSwipe({
   deltaX,
   velocityX,

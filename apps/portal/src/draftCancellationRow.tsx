@@ -9,6 +9,8 @@ import {
 } from 'react'
 import {
   createTouchGestureIntent,
+  moveTouchGestureFromPointerEvent,
+  releasePointerCapture,
   shouldCommitHorizontalSwipe,
   type TouchGestureSnapshot,
 } from './touchGestureIntent'
@@ -80,16 +82,6 @@ export const DraftCancellationRow = forwardRef<
     },
   }), [])
 
-  function releasePointer(event: ReactPointerEvent<HTMLDivElement>) {
-    try {
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId)
-      }
-    } catch {
-      // Synthetic browser-test pointers are not registered with pointer capture.
-    }
-  }
-
   function finishGesture(event: ReactPointerEvent<HTMLDivElement>) {
     const gesture = gestureRef.current
     if (!gesture || gesture.pointerId !== event.pointerId) return
@@ -99,7 +91,7 @@ export const DraftCancellationRow = forwardRef<
       time: event.timeStamp,
     })
     gestureRef.current = null
-    releasePointer(event)
+    releasePointerCapture(event.currentTarget, event.pointerId)
     if (result.intent === 'horizontal') {
       suppressActivationRef.current = true
       globalThis.setTimeout(() => {
@@ -177,17 +169,10 @@ export const DraftCancellationRow = forwardRef<
       onPointerMove={(event) => {
         const gesture = gestureRef.current
         if (!gesture || gesture.pointerId !== event.pointerId) return
-        const coalescedEvents = event.nativeEvent.getCoalescedEvents?.() ?? []
-        const points = coalescedEvents.length > 0
-          ? coalescedEvents
-          : [event.nativeEvent]
-        for (const point of points) {
-          gesture.latest = gesture.intent.move({
-            x: point.clientX,
-            y: point.clientY,
-            time: point.timeStamp,
-          })
-        }
+        gesture.latest = moveTouchGestureFromPointerEvent(
+          gesture.intent,
+          event.nativeEvent,
+        )
         if (gesture.latest.intent === 'vertical') {
           if (open) onOpenChange(false)
           setDragOffset(null)
@@ -209,7 +194,7 @@ export const DraftCancellationRow = forwardRef<
         if (!gesture || gesture.pointerId !== event.pointerId) return
         gestureRef.current = null
         gesture.intent.cancel()
-        releasePointer(event)
+        releasePointerCapture(event.currentTarget, event.pointerId)
         setDragOffset(null)
         if (gesture.latest.intent === 'vertical') onOpenChange(false)
       }}

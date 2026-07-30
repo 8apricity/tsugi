@@ -4,11 +4,12 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
 import {
   createTouchGestureIntent,
+  moveTouchGestureFromPointerEvent,
+  releasePointerCapture,
   shouldCommitHorizontalSwipe,
   type TouchGestureSnapshot,
 } from './touchGestureIntent'
@@ -98,16 +99,6 @@ export function DailyPlanSwipeFrame({
     })
   }
 
-  function releasePointer(event: ReactPointerEvent<HTMLDivElement>) {
-    try {
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId)
-      }
-    } catch {
-      // Synthetic browser-test pointers are not registered with pointer capture.
-    }
-  }
-
   useEffect(() => {
     if (motion.kind !== 'settling') return
     const timeoutId = globalThis.setTimeout(
@@ -167,17 +158,10 @@ export function DailyPlanSwipeFrame({
       onPointerMove={(event) => {
         const active = pointerRef.current
         if (!active || active.pointerId !== event.pointerId) return
-        const coalescedEvents = event.nativeEvent.getCoalescedEvents?.() ?? []
-        const points = coalescedEvents.length > 0
-          ? coalescedEvents
-          : [event.nativeEvent]
-        for (const point of points) {
-          active.latest = active.intent.move({
-            x: point.clientX,
-            y: point.clientY,
-            time: point.timeStamp,
-          })
-        }
+        active.latest = moveTouchGestureFromPointerEvent(
+          active.intent,
+          event.nativeEvent,
+        )
         if (active.latest.intent !== 'horizontal') return
 
         event.preventDefault()
@@ -206,7 +190,7 @@ export function DailyPlanSwipeFrame({
           time: event.timeStamp,
         })
         pointerRef.current = null
-        releasePointer(event)
+        releasePointerCapture(event.currentTarget, event.pointerId)
         if (result.intent !== 'horizontal') {
           setMotion(idleMotion)
           return
@@ -231,7 +215,7 @@ export function DailyPlanSwipeFrame({
         if (!active || active.pointerId !== event.pointerId) return
         active.intent.cancel()
         pointerRef.current = null
-        releasePointer(event)
+        releasePointerCapture(event.currentTarget, event.pointerId)
         if (motionRef.current.kind === 'dragging') settleTo(null)
       }}
       onClickCapture={(event) => {

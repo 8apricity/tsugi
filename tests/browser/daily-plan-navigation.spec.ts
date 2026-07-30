@@ -18,6 +18,22 @@ test.describe('Daily Plan date navigation', () => {
     await expect(title).not.toHaveText(initialTitle ?? '')
   })
 
+  test('reduced motion keeps desktop navigation without settling animation', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name === 'webkit-iphone')
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.goto('/')
+
+    const title = page.getByRole('heading', { level: 1 })
+    const initialTitle = await title.textContent()
+    await page.getByRole('button', { name: '次の日' }).click()
+
+    await expect(page.locator('.daily-plan-swipe-frame'))
+      .toHaveAttribute('data-motion', 'idle')
+    await expect(title).not.toHaveText(initialTitle ?? '')
+  })
+
   test('mobile vertical scrolling wins before a deliberate horizontal swipe', async ({
     page,
   }, testInfo) => {
@@ -38,11 +54,27 @@ test.describe('Daily Plan date navigation', () => {
     await pointer(surface, 'pointerup', 256, 300)
     await expect(title).toHaveText(initialTitle ?? '')
 
+    await pointer(surface, 'pointerdown', 12, 260)
+    await pointer(surface, 'pointermove', 150, 258)
+    await pointer(surface, 'pointerup', 200, 258)
+    await expect(title).toHaveText(initialTitle ?? '')
+
+    await pointer(surface, 'pointerdown', 300, 260)
+    await pointer(surface, 'pointermove', 280, 258)
+    await page.waitForTimeout(120)
+    await pointer(surface, 'pointerup', 280, 258)
+    await expect(surface).toHaveAttribute('data-motion', 'settling')
+    await expect(surface).toHaveAttribute('data-motion', 'idle')
+    await expect(title).toHaveText(initialTitle ?? '')
+
     await pointer(surface, 'pointerdown', 300, 260)
     await page.waitForTimeout(16)
-    await pointer(surface, 'pointermove', 286, 258)
+    await pointer(surface, 'pointermove', 282, 286)
     await page.waitForTimeout(20)
     await pointer(surface, 'pointermove', 250, 256)
+    await expect(surface).toHaveAttribute('data-motion', 'dragging')
+    await expect(surface.locator('.daily-plan-swipe-preview .panel').first())
+      .toBeAttached()
     await page.waitForTimeout(20)
     await pointer(surface, 'pointermove', 170, 254)
     await pointer(surface, 'pointerup', 150, 254)
@@ -54,16 +86,28 @@ test.describe('Daily Plan date navigation', () => {
   }) => {
     await page.goto('/')
 
+    const period = page.locator('.period-inspect-button').first()
+    const initialDate = await period.getAttribute('data-school-date')
+    expect(initialDate).not.toBeNull()
     await page.getByRole('button', { name: /^1限/ }).click()
-    const dialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+    let dialog = page.getByRole('dialog', { name: '時間割の変更状況' })
+    const surface = page.locator('.daily-plan-swipe-frame')
+
+    await pointer(surface, 'pointerdown', 300, 260)
+    await pointer(surface, 'pointermove', 160, 258)
+    await pointer(surface, 'pointerup', 140, 258)
+    await dialog.getByRole('button', { name: '閉じる' }).click()
+    await expect(period).toHaveAttribute('data-school-date', initialDate!)
+
+    await page.getByRole('button', { name: /^1限/ }).click()
+    dialog = page.getByRole('dialog', { name: '時間割の変更状況' })
     const date = dialog.getByRole('textbox', { name: '変更対象日' })
     const targetDate = shiftDate(await date.inputValue(), 2)
 
     await date.fill(targetDate)
-    await dialog.getByRole('button', { name: '閉じる' }).click()
+    await page.goBack()
 
-    await expect(page.locator('.period-inspect-button').first())
-      .toHaveAttribute('data-school-date', targetDate)
+    await expect(period).toHaveAttribute('data-school-date', targetDate)
   })
 
   test('saved Task and Note date changes return to their new Daily Plans', async ({

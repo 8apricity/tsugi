@@ -8,6 +8,7 @@ import {
 } from 'react'
 import {
   createTouchGestureIntent,
+  installHorizontalTouchScrollLock,
   moveTouchGestureFromPointerEvent,
   releasePointerCapture,
   shouldCommitHorizontalSwipe,
@@ -112,6 +113,23 @@ export function DailyPlanSwipeFrame({
     if (!disabled) return
     pointerRef.current?.intent.cancel()
     pointerRef.current = null
+  }, [disabled])
+
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!frame) return
+    return installHorizontalTouchScrollLock(frame, (event) => {
+      const touch = event.touches[0]
+      return (
+        !disabled &&
+        motionRef.current.kind === 'idle' &&
+        globalThis.matchMedia?.(
+          '(hover: none) and (pointer: coarse)',
+        ).matches === true &&
+        touch.clientX > SCREEN_EDGE_EXCLUSION_PX &&
+        touch.clientX < globalThis.innerWidth - SCREEN_EDGE_EXCLUSION_PX
+      )
+    })
   }, [disabled])
 
   const style = {

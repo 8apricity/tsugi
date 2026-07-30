@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useRef,
   useState,
@@ -9,6 +10,7 @@ import {
 } from 'react'
 import {
   createTouchGestureIntent,
+  installHorizontalTouchScrollLock,
   moveTouchGestureFromPointerEvent,
   releasePointerCapture,
   shouldCommitHorizontalSwipe,
@@ -25,7 +27,7 @@ type Gesture = {
 }
 
 function comesFromNestedCancellationRow(
-  target: EventTarget,
+  target: EventTarget | null,
   currentTarget: HTMLDivElement,
 ) {
   return target instanceof Element &&
@@ -66,6 +68,7 @@ export const DraftCancellationRow = forwardRef<
   children,
 }, forwardedRef) {
   const contentRef = useRef<HTMLDivElement>(null)
+  const rowRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
   const offsetRef = useRef(open ? -ACTION_WIDTH_PX : 0)
   const suppressActivationRef = useRef(false)
@@ -78,9 +81,23 @@ export const DraftCancellationRow = forwardRef<
       )?.focus()
     },
     getElement() {
-      return contentRef.current?.parentElement as HTMLDivElement | null
+      return rowRef.current
     },
   }), [])
+
+  useEffect(() => {
+    const row = rowRef.current
+    if (!row) return
+    return installHorizontalTouchScrollLock(row, (event) => {
+      if (disabled) return false
+      const target = event.target
+      return !comesFromNestedCancellationRow(target, row) &&
+        !(
+          target instanceof Element &&
+          target.closest('.draft-cancellation-action')
+        )
+    })
+  }, [disabled])
 
   function finishGesture(event: ReactPointerEvent<HTMLDivElement>) {
     const gesture = gestureRef.current
@@ -122,6 +139,7 @@ export const DraftCancellationRow = forwardRef<
 
   return (
     <div
+      ref={rowRef}
       className={`draft-cancellation-row${
         dragOffset !== null ? ' draft-cancellation-dragging' : ''
       }${open ? ' draft-cancellation-open' : ''}`}

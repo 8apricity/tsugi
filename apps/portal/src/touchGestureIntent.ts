@@ -124,6 +124,68 @@ export function moveTouchGestureFromPointerEvent(
   return latest!
 }
 
+export function installHorizontalTouchScrollLock(
+  target: HTMLElement,
+  canStart: (event: TouchEvent) => boolean,
+) {
+  // PointerEvent cancellation cannot stop pan-y arbitration. Claim the first
+  // horizontal touchmove before the browser suppresses the pointer stream.
+  let gesture: ReturnType<typeof createTouchGestureIntent> | null = null
+
+  function pointFrom(event: TouchEvent) {
+    if (event.touches.length !== 1) return null
+    const touch = event.touches[0]
+    return {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: event.timeStamp,
+    }
+  }
+
+  function start(event: TouchEvent) {
+    const point = pointFrom(event)
+    if (!point || !canStart(event)) {
+      finish()
+      return
+    }
+    gesture = createTouchGestureIntent()
+    gesture.start(point)
+    target.addEventListener('touchmove', move, { passive: false })
+  }
+
+  function move(event: TouchEvent) {
+    const point = pointFrom(event)
+    if (!gesture || !point) {
+      gesture?.cancel()
+      gesture = null
+      return
+    }
+    const intent = gesture.move(point).intent
+    if (intent === 'horizontal' && event.cancelable) {
+      event.preventDefault()
+    } else if (intent === 'vertical') {
+      finish()
+    }
+  }
+
+  function finish() {
+    gesture?.cancel()
+    gesture = null
+    target.removeEventListener('touchmove', move)
+  }
+
+  target.addEventListener('touchstart', start, { passive: true })
+  target.addEventListener('touchend', finish, { passive: true })
+  target.addEventListener('touchcancel', finish, { passive: true })
+
+  return () => {
+    target.removeEventListener('touchstart', start)
+    finish()
+    target.removeEventListener('touchend', finish)
+    target.removeEventListener('touchcancel', finish)
+  }
+}
+
 export function releasePointerCapture(
   target: Element,
   pointerId: number,

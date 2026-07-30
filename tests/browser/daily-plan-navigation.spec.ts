@@ -1,4 +1,10 @@
-import { expect, test, type Locator } from '@playwright/test'
+import {
+  devices,
+  expect,
+  test,
+  type Browser,
+  type Locator,
+} from '@playwright/test'
 
 test.describe('Daily Plan date navigation', () => {
   test('desktop buttons animate one day at a time', async ({
@@ -79,6 +85,92 @@ test.describe('Daily Plan date navigation', () => {
     await pointer(surface, 'pointermove', 170, 254)
     await pointer(surface, 'pointerup', 150, 254)
     await expect(title).not.toHaveText(initialTitle ?? '')
+  })
+
+  test('real touch keeps Daily Plan horizontal after tracking starts', async ({
+    browser,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'chromium')
+    const realTouch = await createRealTouchPage(browser)
+    try {
+      await realTouch.page.locator('.period-inspect-button').first()
+        .waitFor()
+      const surface = realTouch.page.locator('.daily-plan-swipe-frame')
+      await watchPointerCancellation(realTouch.page)
+
+      await realTouch.touch('touchStart', 300, 260)
+      await realTouch.touch('touchMove', 286, 260)
+      await expect(surface).toHaveAttribute('data-motion', 'dragging')
+
+      await realTouch.touch('touchMove', 284, 280)
+      await realTouch.page.waitForTimeout(50)
+      await expect(surface).toHaveAttribute('data-motion', 'dragging')
+      expect(await pointerCancellationCount(realTouch.page)).toBe(0)
+
+      await realTouch.touch('touchEnd')
+      await expect(surface).toHaveAttribute('data-motion', 'idle')
+
+      const initialScrollY = await realTouch.page.evaluate<number>(
+        'globalThis.scrollY',
+      )
+      await watchPointerCancellation(realTouch.page)
+      await realTouch.touch('touchStart', 300, 520)
+      await realTouch.touch('touchMove', 298, 450)
+      await realTouch.page.waitForTimeout(50)
+      await realTouch.touch('touchEnd')
+      expect(await realTouch.page.evaluate<number>('globalThis.scrollY'))
+        .toBeGreaterThan(initialScrollY)
+      expect(await pointerCancellationCount(realTouch.page)).toBe(1)
+    } finally {
+      await realTouch.context.close()
+    }
+  })
+
+  test('real touch keeps cancellation row horizontal after tracking starts', async ({
+    browser,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'chromium')
+    const realTouch = await createRealTouchPage(browser)
+    try {
+      const suffix = Date.now()
+      await realTouch.page.getByRole('button', {
+        name: 'この日の予定を編集',
+      }).click()
+      await realTouch.page.getByRole('button', { name: 'タスクを追加' })
+        .click()
+      const taskDialog = realTouch.page.getByRole('dialog', {
+        name: 'タスクを追加',
+      })
+      await taskDialog.getByRole('textbox', { name: 'タイトル' })
+        .fill(`実タッチ-${suffix}`)
+      await taskDialog.getByLabel('変更適用範囲').selectOption('class')
+      await taskDialog.getByRole('button', { name: '下書きを保存' })
+        .click()
+      await realTouch.page.getByRole('button', {
+        name: /変更を反映（1）/,
+      }).click()
+
+      const row = realTouch.page.getByRole('dialog', { name: '変更を反映' })
+        .locator('.draft-cancellation-row').first()
+      const box = await row.boundingBox()
+      expect(box).not.toBeNull()
+      const startX = box!.x + box!.width * 0.75
+      const startY = box!.y + box!.height * 0.5
+      await watchPointerCancellation(realTouch.page)
+
+      await realTouch.touch('touchStart', startX, startY)
+      await realTouch.touch('touchMove', startX - 14, startY)
+      await expect(row).toHaveClass(/draft-cancellation-dragging/)
+
+      await realTouch.touch('touchMove', startX - 16, startY + 20)
+      await realTouch.page.waitForTimeout(50)
+      await expect(row).toHaveClass(/draft-cancellation-dragging/)
+      expect(await pointerCancellationCount(realTouch.page)).toBe(0)
+
+      await realTouch.touch('touchEnd')
+    } finally {
+      await realTouch.context.close()
+    }
   })
 
   test('closing the timetable dialog returns to its displayed date', async ({
@@ -229,4 +321,60 @@ function shiftDate(schoolDate: string, days: number) {
   const date = new Date(`${schoolDate}T00:00:00Z`)
   date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
+}
+
+async function createRealTouchPage(browser: Browser) {
+  const context = await browser.newContext({
+    ...devices['iPhone 13'],
+    storageState: 'test-results/playwright/auth/chromium.json',
+  })
+  const page = await context.newPage()
+  await page.goto('/')
+  const session = await context.newCDPSession(page)
+
+  return {
+    context,
+    page,
+    touch(
+      type: 'touchStart' | 'touchMove' | 'touchEnd',
+      x?: number,
+      y?: number,
+    ) {
+      return session.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: x === undefined || y === undefined
+          ? []
+          : [{
+              x,
+              y,
+              id: 1,
+              radiusX: 1,
+              radiusY: 1,
+              force: 1,
+            }],
+      })
+    },
+  }
+}
+
+async function watchPointerCancellation(page: Awaited<
+  ReturnType<typeof createRealTouchPage>
+>['page']) {
+  await page.evaluate(`
+    globalThis.__pointerCancellationCount = 0
+    if (!globalThis.__pointerCancellationWatcherInstalled) {
+      globalThis.__pointerCancellationWatcherInstalled = true
+      document.addEventListener('pointercancel', () => {
+        globalThis.__pointerCancellationCount += 1
+      }, true)
+    }
+  `)
+}
+
+function pointerCancellationCount(page: Awaited<
+  ReturnType<typeof createRealTouchPage>
+>['page']) {
+  return page.evaluate<number>(
+    'globalThis.__pointerCancellationCount',
+  )
 }

@@ -73,7 +73,80 @@
 .daily-plan-main {
   display: grid;
   gap: 16px;
-  touch-action: pan-y;
+}
+
+.daily-plan-swipe-frame {
+  min-width: 0;
+  touch-action: pan-y pinch-zoom;
+}
+
+.daily-plan-swipe-viewport {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.daily-plan-swipe-track {
+  display: grid;
+  grid-template-columns: repeat(3, 100%);
+  min-width: 0;
+  transform: translate3d(
+    calc(-100% + var(--daily-plan-swipe-offset)),
+    0,
+    0
+  );
+  will-change: transform;
+}
+
+.daily-plan-swipe-frame[data-motion="settling"] .daily-plan-swipe-track {
+  transition: transform 220ms cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+
+.daily-plan-swipe-current,
+.daily-plan-swipe-preview {
+  min-width: 0;
+}
+
+.daily-plan-swipe-preview {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.daily-plan-day-button {
+  position: fixed;
+  z-index: 8;
+  top: 50%;
+  display: none;
+  width: 68px;
+  height: 68px;
+  padding: 0;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 4px 14px rgb(35 50 77 / 12%);
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.daily-plan-day-button-previous {
+  left: 18px;
+}
+
+.daily-plan-day-button-next {
+  right: 18px;
+}
+
+.daily-plan-day-button:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
 .daily-plan-topbar {
@@ -1274,6 +1347,7 @@ body.page-scroll-locked {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .daily-plan-swipe-track,
   .draft-cancellation-content,
   .draft-cancellation-action {
     transition: none;
@@ -2923,6 +2997,15 @@ button.timetable-layer-row {
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .daily-plan-day-button {
+    display: grid;
+  }
+
+  .daily-plan-day-button:hover {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+  }
+
   .note-related.note-detail-target:hover {
     background: #f3f8f8;
   }

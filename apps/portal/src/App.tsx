@@ -7,10 +7,11 @@ import {
   useSyncExternalStore,
   type FocusEvent as ReactFocusEvent,
   type FormEvent,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import "./App.css";
+import { DailyPlanSwipeFrame } from "./DailyPlanSwipeFrame";
+import { DailyPlanSwipePreview } from "./DailyPlanSwipePreview";
 import { createDailyPlanClient } from "./dailyPlanClient";
 import { buildDateHeader, shiftSchoolDate } from "./dailyPlanView";
 import { lockPageScroll } from "./pageScrollLock";
@@ -146,7 +147,6 @@ function editorKindForDialogRoute(
 }
 
 const DATE_PICKER_RADIUS = 180;
-const DATE_SWIPE_THRESHOLD_PX = 48;
 const DATE_PICKER_SCALE_DISTANCE_PX = 78;
 const DAILY_PLAN_PREFETCH_RADIUS = 7;
 const NO_ACTIVE_TIMETABLE_CHANGE_MESSAGE =
@@ -512,7 +512,7 @@ function App() {
   const shouldCenterDatePickerRef = useRef(true);
   const centeredDateStripBoundsRef = useRef<[string, string] | null>(null);
   const suppressDatePickerScrollRef = useRef(false);
-  const swipeStartXRef = useRef<number | null>(null);
+  const pendingDailyPlanReturnDateRef = useRef<string | null>(null);
   const [timetableEditorClient] = useState(() =>
     createSharedInformationEditorClient({
       storage: window.localStorage,
@@ -1180,32 +1180,6 @@ function App() {
     centerDatePickerOnDate(schoolDate);
   }
 
-  function handleMainPointerDown(event: ReactPointerEvent<HTMLElement>) {
-    if (event.pointerType === "mouse" && event.button !== 0) {
-      return;
-    }
-
-    swipeStartXRef.current = event.clientX;
-  }
-
-  function handleMainPointerUp(event: ReactPointerEvent<HTMLElement>) {
-    const startX = swipeStartXRef.current;
-    swipeStartXRef.current = null;
-
-    if (startX === null || !schoolYearRange) {
-      return;
-    }
-
-    const deltaX = event.clientX - startX;
-
-    if (Math.abs(deltaX) < DATE_SWIPE_THRESHOLD_PX) {
-      return;
-    }
-
-    shouldCenterDatePickerRef.current = true;
-    void dailyPlanClient.shiftSelectedSchoolDate(deltaX < 0 ? 1 : -1);
-  }
-
   async function loadInitialSetup() {
     const response = await fetch("/api/auth/initial-setup");
 
@@ -1683,10 +1657,30 @@ function App() {
 
   function applyDialogFlowResult(result: DialogFlowResult) {
     if (result.status !== "changed") return;
+    const returnsToDailyPlan =
+      result.removedRoutes.length > 0 &&
+      dialogFlow.getSnapshot().routes.length === 0;
+    const timetableReturnDate = returnsToDailyPlan
+      ? [...result.removedRoutes].reverse().find(
+          (route) => route.kind === "timetable-layer",
+        )?.schoolDate
+      : undefined;
+    const dailyPlanReturnDate = returnsToDailyPlan
+      ? timetableReturnDate ?? pendingDailyPlanReturnDateRef.current
+      : null;
     const scrollTop = result.removedRoutes
       .map((route) => dialogScrollPositionsRef.current.get(route.instanceId))
       .find((position) => position !== undefined);
     [...result.removedRoutes].reverse().forEach(clearRemovedDialogRoute);
+    if (returnsToDailyPlan) {
+      pendingDailyPlanReturnDateRef.current = null;
+      if (
+        dailyPlanReturnDate &&
+        dailyPlanReturnDate !== selectedSchoolDate
+      ) {
+        selectSchoolDate(dailyPlanReturnDate, true);
+      }
+    }
     restoreDialogFocus(result.focusTarget, scrollTop);
     if (result.completedAction === "exit-editing") {
       requestDraftWorkspaceExit();
@@ -1765,6 +1759,19 @@ function App() {
 
   function closeNoteEditorFlow() {
     applyDialogFlowResult(dialogFlow.completeCurrent());
+  }
+
+  function rememberEditedDailyPlanReturnDate(
+    initialDate: string | null,
+    savedDate: string | null,
+  ) {
+    const openedFromChangeContent = dialogFlow.getSnapshot().routes.some(
+      (route) => route.kind === "change-content",
+    );
+    pendingDailyPlanReturnDateRef.current =
+      !openedFromChangeContent && savedDate && savedDate !== initialDate
+        ? savedDate
+        : null;
   }
 
   function requestTaskEditorClose() {
@@ -2755,6 +2762,10 @@ function App() {
       setTimetableEditorMessage("下書きは合計50件までです。");
       return;
     }
+    rememberEditedDailyPlanReturnDate(
+      editorInitialFormsRef.current.note?.schoolDate ?? null,
+      noteEditorForm.schoolDate,
+    );
     closeNoteEditorFlow();
     setTimetableEditorMessage(null);
   }
@@ -2918,6 +2929,10 @@ function App() {
       setTimetableEditorMessage("下書きは合計50件までです。");
       return;
     }
+    rememberEditedDailyPlanReturnDate(
+      editorInitialFormsRef.current.task?.dueDate ?? null,
+      taskEditorForm.dueDate,
+    );
     closeTaskEditorFlow();
     setTimetableEditorMessage(null);
   }
@@ -3690,12 +3705,13 @@ function App() {
 
   if (status === "authenticated" && studentAccount) {
     const dateHeader = buildDateHeader(selectedSchoolDate, currentSchoolDate);
+    const cachedDailyPlans = dailyPlanClient.getCachedDailyPlans();
     const visibleTasks = dailyPlanState.status === "ready"
       ? buildVisibleTaskList(
           dailyPlanState.dailyPlan.tasks,
           timetableEditor.taskDrafts,
           selectedSchoolDate,
-          dailyPlanClient.getCachedDailyPlans().flatMap((plan) => plan.tasks),
+          cachedDailyPlans.flatMap((plan) => plan.tasks),
         )
       : [];
     const changeContentItems = buildChangeContentList({
@@ -3837,6 +3853,24 @@ function App() {
     const referencePlanError =
       referenceScope !== null &&
       referenceDailyPlanResource.state.status === "error";
+    const previousSchoolDate = shiftSchoolDate(selectedSchoolDate, -1);
+    const nextSchoolDate = shiftSchoolDate(selectedSchoolDate, 1);
+    const canGoPrevious = Boolean(
+      schoolYearRange && selectedSchoolDate > schoolYearRange.startsOn,
+    );
+    const canGoNext = Boolean(
+      schoolYearRange && selectedSchoolDate < schoolYearRange.endsOn,
+    );
+    const previousDailyPlan = referenceScope
+      ? null
+      : cachedDailyPlans.find(
+          (plan) => plan.schoolDate === previousSchoolDate,
+        ) ?? null;
+    const nextDailyPlan = referenceScope
+      ? null
+      : cachedDailyPlans.find(
+          (plan) => plan.schoolDate === nextSchoolDate,
+        ) ?? null;
 
     const taskEditorFields = taskEditorForm ? (
       <>
@@ -4159,14 +4193,18 @@ function App() {
             </div>
           ) : null}
 
-          <div
-            className="daily-plan-main"
-            onPointerDown={handleMainPointerDown}
-            onPointerUp={handleMainPointerUp}
-            onPointerCancel={() => {
-              swipeStartXRef.current = null;
+          <DailyPlanSwipeFrame
+            previous={<DailyPlanSwipePreview plan={previousDailyPlan} />}
+            next={<DailyPlanSwipePreview plan={nextDailyPlan} />}
+            canGoPrevious={canGoPrevious}
+            canGoNext={canGoNext}
+            disabled={dialogFlowSnapshot.active}
+            onNavigate={(direction) => {
+              shouldCenterDatePickerRef.current = true;
+              void dailyPlanClient.shiftSelectedSchoolDate(direction);
             }}
           >
+          <div className="daily-plan-main">
             {referenceScope && !referencePlanReady && !referencePlanError ? (
               <div className="panel state-panel" aria-live="polite">
                 {referenceScope.label}の予定を読み込んでいます…
@@ -4559,6 +4597,7 @@ function App() {
               </>
             ) : null}
           </div>
+          </DailyPlanSwipeFrame>
 
           {schoolYearRange ? (
             <footer className="date-strip-footer">

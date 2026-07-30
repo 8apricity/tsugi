@@ -117,6 +117,46 @@ test.describe('Daily Plan date navigation', () => {
     await expect(title).not.toHaveText(initialTitle ?? '')
   })
 
+  test('mobile destination lesson names stay vertically aligned during swipe', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'webkit-iphone')
+    await page.goto('/')
+    const surface = page.locator('.daily-plan-swipe-frame')
+    await expect(
+      surface.locator('.daily-plan-swipe-current .period-row').first(),
+    ).toBeVisible()
+
+    await pointer(surface, 'pointerdown', 300, 260)
+    await pointer(surface, 'pointermove', 220, 260)
+    await expect(surface).toHaveAttribute('data-motion', 'dragging')
+
+    const offsets = await page.evaluate<{
+      current: number
+      destination: number
+    }>(`
+      (() => {
+        function lessonOffset(selector) {
+          const row = document.querySelector(selector)
+          const lesson = row?.querySelector('.lesson-name')
+          if (!row || !lesson) throw new Error('Lesson row is missing')
+          return lesson.getBoundingClientRect().top -
+            row.getBoundingClientRect().top
+        }
+        return {
+          current: lessonOffset(
+            '.daily-plan-swipe-current .period-row:first-child',
+          ),
+          destination: lessonOffset(
+            '.daily-plan-swipe-preview:last-child .period-row:first-child',
+          ),
+        }
+      })()
+    `)
+
+    expect(offsets.destination).toBeCloseTo(offsets.current, 1)
+  })
+
   test('real touch keeps Daily Plan horizontal after tracking starts', async ({
     browser,
   }, testInfo) => {

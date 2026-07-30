@@ -402,7 +402,9 @@ button.period-inspect-button:active {
   align-content: center;
   gap: 6px;
   padding: 8px 14px;
+  min-height: 48px;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 .lesson-line {

@@ -7,10 +7,10 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   backfillLegacyCustomLessonNameNormalization,
-  createD1PersistenceAdapters,
-  createInMemoryPersistenceAdapters,
+  D1PersistenceAdapters,
   type DirectChangeOperation,
   type DirectTimetableChangeOperation,
+  InMemoryPersistenceAdapters,
   type PersistenceAdapters,
   type StudentAffiliation,
   type TargetScope,
@@ -20,6 +20,101 @@ import {
   exchangeInteractiveTestLoginTicket,
   issueInteractiveTestLoginTicket,
 } from './studentAccountAccess'
+import {
+  expectChangeSourceIsolationContract,
+  expectDirectChangeApplicationContract,
+} from './directChange/applicationContract.testSupport'
+import {
+  createD1AtomicChangeExecutor,
+  createD1DirectChangeCatalog,
+} from './sharedInformationChange/d1AtomicChangeExecutor'
+import {
+  createInMemoryAtomicChangeExecutor,
+} from './sharedInformationChange/inMemoryAtomicChangeExecutor'
+
+async function commitTimetableTestOperations(
+  store: {
+    commitDirectChanges:
+      InMemoryPersistenceAdapters['commitDirectChangesForTest']
+  },
+  changes: DirectTimetableChangeOperation[],
+) {
+  const result = await store.commitDirectChanges(
+    changes.map((change) => ({
+      ...change,
+      kind: 'timetable_change' as const,
+    })),
+  )
+  if (result.status !== 'applied') return result
+  return {
+    status: 'applied' as const,
+    changes: result.changes.map((change) => {
+      const { kind, ...operation } = change
+      void kind
+      return operation as DirectTimetableChangeOperation
+    }),
+  }
+}
+
+type DirectChangeCommitStore = {
+  commitDirectChanges:
+    InMemoryPersistenceAdapters['commitDirectChangesForTest']
+}
+
+const directChangeCommitStores =
+  new WeakMap<PersistenceAdapters, DirectChangeCommitStore>()
+
+function directChangeCommitStore(adapters: PersistenceAdapters) {
+  const driver = directChangeCommitStores.get(adapters)
+  if (!driver) throw new Error('Missing Direct Change persistence test driver')
+  return driver
+}
+
+function createInMemoryPersistenceAdapters(): PersistenceAdapters {
+  const implementation = new InMemoryPersistenceAdapters()
+  const adapters: PersistenceAdapters = {
+    studentAccount: implementation,
+    studentAffiliation: implementation,
+    dailyPlan: implementation,
+    directChangeOptions: implementation,
+    directChangeCatalog: implementation,
+    atomicChangeExecutor: createInMemoryAtomicChangeExecutor(
+      implementation.atomicChangeState,
+      implementation,
+    ),
+    editHistory: implementation,
+    seed: implementation,
+  }
+  directChangeCommitStores.set(adapters, {
+    commitDirectChanges:
+      implementation.commitDirectChangesForTest.bind(implementation),
+  })
+  return adapters
+}
+
+function createD1PersistenceAdapters(db: D1Database): PersistenceAdapters {
+  const implementation = new D1PersistenceAdapters(db)
+  const adapters: PersistenceAdapters = {
+    studentAccount: implementation,
+    studentAffiliation: implementation,
+    dailyPlan: implementation,
+    directChangeOptions: implementation,
+    directChangeCatalog: createD1DirectChangeCatalog(implementation),
+    atomicChangeExecutor: createD1AtomicChangeExecutor({
+      loadSnapshot: (changes, affiliation) =>
+        implementation.loadAtomicExecutionSnapshot(changes, affiliation),
+      commit: (pending, affiliation) =>
+        implementation.commitAtomicChanges(pending, affiliation),
+    }),
+    editHistory: implementation,
+    seed: implementation,
+  }
+  directChangeCommitStores.set(adapters, {
+    commitDirectChanges:
+      implementation.commitDirectChangesForTest.bind(implementation),
+  })
+  return adapters
+}
 
 class SqliteD1Statement {
   private readonly database: DatabaseSync
@@ -109,6 +204,28 @@ function createTestDatabase(maximumMigration?: string) {
   }
   return database
 }
+
+describe('D1 DirectChangeApplication', () => {
+  it('satisfies the shared application contract', async () => {
+    const database = createTestDatabase()
+    await expectDirectChangeApplicationContract(
+      createD1PersistenceAdapters(
+        new SqliteD1Database(database) as unknown as D1Database,
+      ),
+      { seedSchoolStructure: false },
+    )
+  })
+
+  it('isolates Direct and Proposal sources with the same external ID', async () => {
+    const database = createTestDatabase()
+    await expectChangeSourceIsolationContract(
+      createD1PersistenceAdapters(
+        new SqliteD1Database(database) as unknown as D1Database,
+      ),
+      { seedSchoolStructure: false },
+    )
+  })
+})
 
 describe('Real Name purge migration', () => {
   it('clears stored Real Names while retaining the nullable columns', () => {
@@ -546,10 +663,10 @@ describe('D1 Direct Timetable Change persistence', () => {
     } satisfies DirectChangeOperation
 
     await expect(
-      adapters.directChange.commitDirectChanges([timetable, task, note]),
+      directChangeCommitStore(adapters).commitDirectChanges([timetable, task, note]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.directChange.commitDirectChanges([timetable, task, note]),
+      directChangeCommitStore(adapters).commitDirectChanges([timetable, task, note]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
       adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-10'),
@@ -591,7 +708,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       note_snapshot_id: `${note.sourceId}:snapshot`,
     })
     await expect(
-      adapters.directChange.commitDirectChanges([
+      directChangeCommitStore(adapters).commitDirectChanges([
         { ...note, body: 'changed retry payload' },
       ]),
     ).resolves.toMatchObject({
@@ -612,7 +729,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       changedAt: Date.parse('2026-07-09T05:00:00.000Z'),
     } satisfies DirectChangeOperation
     await expect(
-      adapters.directChange.commitDirectChanges([noteUpdate]),
+      directChangeCommitStore(adapters).commitDirectChanges([noteUpdate]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
       adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
@@ -655,7 +772,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       removalReason: 'student',
     } satisfies DirectChangeOperation
     await expect(
-      adapters.directChange.commitDirectChanges([noteRemove]),
+      directChangeCommitStore(adapters).commitDirectChanges([noteRemove]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
       adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
@@ -707,10 +824,10 @@ describe('D1 Direct Timetable Change persistence', () => {
       changedAt: Date.parse('2026-07-09T04:00:00.000Z'),
     } satisfies DirectChangeOperation
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([taskUpdate]),
+      directChangeCommitStore(adapters).commitDirectChanges([taskUpdate]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([taskUpdate]),
+      directChangeCommitStore(adapters).commitDirectChanges([taskUpdate]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
       adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-11'),
@@ -744,10 +861,10 @@ describe('D1 Direct Timetable Change persistence', () => {
       changedAt: Date.parse('2026-07-09T05:00:00.000Z'),
     } satisfies DirectChangeOperation
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([taskRemove]),
+      directChangeCommitStore(adapters).commitDirectChanges([taskRemove]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([taskRemove]),
+      directChangeCommitStore(adapters).commitDirectChanges([taskRemove]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
       adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-11'),
@@ -790,7 +907,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       expectedLatestChangeId: taskUpdate.latestChangeId,
     } satisfies DirectChangeOperation
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([
+      directChangeCommitStore(adapters).commitDirectChanges([
         mixedRollbackTimetable,
         staleTaskRemove,
       ]),
@@ -820,7 +937,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       title: '更新と同時のTask',
     } satisfies DirectChangeOperation
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([
+      directChangeCommitStore(adapters).commitDirectChanges([
         updateTimetable,
         taskBesideUpdate,
       ]),
@@ -856,7 +973,7 @@ describe('D1 Direct Timetable Change persistence', () => {
     ).run(`${updateTimetable.sourceId}:snapshot`)
 
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([
+      directChangeCommitStore(adapters).commitDirectChanges([
         timetable,
         { ...task, title: 'changed payload' },
       ]),
@@ -884,7 +1001,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       latestChangeId: '33888888-8888-4888-8888-888888888888:change',
     } satisfies DirectChangeOperation
     await expect(
-      adapters.directTimetableChange.commitDirectChanges([
+      directChangeCommitStore(adapters).commitDirectChanges([
         occupiedTimetable,
         rolledBackTask,
         rolledBackNote,
@@ -932,7 +1049,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       createdAt: Date.parse('2026-07-09T04:00:00.000Z'),
     } satisfies DirectChangeOperation
 
-    await expect(adapters.directChange.commitDirectChanges([note]))
+    await expect(directChangeCommitStore(adapters).commitDirectChanges([note]))
       .rejects.toThrow('missing Note schema')
   })
 
@@ -968,7 +1085,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       changedByStudentAccountId: 'task-note-student', changedAt: 2, createdAt: 2,
     } satisfies DirectChangeOperation
 
-    await expect(adapters.directChange.commitDirectChanges([
+    await expect(directChangeCommitStore(adapters).commitDirectChanges([
       task,
       {
         ...note,
@@ -984,7 +1101,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       where shared_information_item_id in (?, ?)
     `).get(taskId, noteId)).toEqual({ count: 0 })
 
-    await expect(adapters.directChange.commitDirectChanges([task, note]))
+    await expect(directChangeCommitStore(adapters).commitDirectChanges([task, note]))
       .resolves.toMatchObject({ status: 'applied' })
     expect(database.prepare(`
       select related_context_type, related_task_item_id
@@ -1001,7 +1118,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       expectedLatestChangeId: task.latestChangeId, targetScope,
       changedByStudentAccountId: 'task-note-student', changedAt: 3,
     } satisfies DirectChangeOperation
-    await expect(adapters.directChange.commitDirectChanges([
+    await expect(directChangeCommitStore(adapters).commitDirectChanges([
       removal,
       {
         kind: 'note', changeKind: 'update',
@@ -1019,9 +1136,9 @@ describe('D1 Direct Timetable Change persistence', () => {
       where shared_information_item_id = ?
     `).get(taskId)).toEqual({ removed_at: null })
 
-    await expect(adapters.directChange.commitDirectChanges([removal]))
+    await expect(directChangeCommitStore(adapters).commitDirectChanges([removal]))
       .resolves.toMatchObject({ status: 'applied' })
-    await expect(adapters.directChange.commitDirectChanges([removal]))
+    await expect(directChangeCommitStore(adapters).commitDirectChanges([removal]))
       .resolves.toMatchObject({ status: 'applied' })
 
     expect(database.prepare(`
@@ -1068,7 +1185,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       changedAt: 1,
       createdAt: 1,
     } satisfies DirectChangeOperation
-    await adapters.directTimetableChange.commitDirectChanges([add])
+    await directChangeCommitStore(adapters).commitDirectChanges([add])
 
     database.prepare(`
       insert into task_snapshots (
@@ -1129,7 +1246,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       changedAt: 3,
       createdAt: 3,
     } satisfies DirectChangeOperation
-    await adapters.directTimetableChange.commitDirectChanges([noteAdd])
+    await directChangeCommitStore(adapters).commitDirectChanges([noteAdd])
 
     database.prepare(`
       insert into note_snapshots (
@@ -1266,7 +1383,7 @@ describe('D1 Direct Timetable Change persistence', () => {
     })
 
     await expect(
-      adapters.directTimetableChange.commitDirectTimetableChanges([add]),
+      commitTimetableTestOperations(directChangeCommitStore(adapters), [add]),
     ).resolves.toMatchObject({ status: 'applied' })
     expect(database.prepare(
       `select normalized_custom_lesson_name
@@ -1291,10 +1408,10 @@ describe('D1 Direct Timetable Change persistence', () => {
       normalized_custom_lesson_name: 'special lesson',
     })
     await expect(
-      adapters.directTimetableChange.commitDirectTimetableChanges([remove]),
+      commitTimetableTestOperations(directChangeCommitStore(adapters), [remove]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.directTimetableChange.commitDirectTimetableChanges([remove]),
+      commitTimetableTestOperations(directChangeCommitStore(adapters), [remove]),
     ).resolves.toMatchObject({ status: 'applied' })
 
     expect(database.prepare(
@@ -1353,7 +1470,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       replacement: { type: 'cancelled' },
     })
     await expect(
-      adapters.directTimetableChange.commitDirectTimetableChanges([replacementAdd]),
+      commitTimetableTestOperations(directChangeCommitStore(adapters), [replacementAdd]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
       adapters.dailyPlan.listActiveTimetableChangesForStudent(
@@ -1386,7 +1503,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       expectedLatestChangeId: add.latestChangeId,
     })
     await expect(
-      adapters.directTimetableChange.commitDirectTimetableChanges([
+      commitTimetableTestOperations(directChangeCommitStore(adapters), [
         mixedAdd,
         staleRemove,
       ]),
@@ -1435,7 +1552,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       changeKind: 'add',
       replacement: { type: 'cancelled' },
     })
-    await adapters.directTimetableChange.commitDirectTimetableChanges([change])
+    await commitTimetableTestOperations(directChangeCommitStore(adapters), [change])
     database.prepare(`
       insert into target_scope_parts (
         target_scope_part_id, target_scope_id, scope_type, grade,
@@ -1521,7 +1638,7 @@ describe.each(targetScopeMembershipAdapterCases)(
       })
 
       await expect(
-        adapters.directTimetableChange.commitDirectTimetableChanges([change]),
+        commitTimetableTestOperations(directChangeCommitStore(adapters), [change]),
       ).resolves.toMatchObject({ status: 'applied' })
       await adapters.seed.saveRegisteredLessonName({
         registeredLessonNameId: 'geography',
@@ -1530,7 +1647,7 @@ describe.each(targetScopeMembershipAdapterCases)(
         normalizedFullLessonName: '地理総合',
       })
       await expect(
-        adapters.directTimetableChange.commitDirectTimetableChanges([change]),
+        commitTimetableTestOperations(directChangeCommitStore(adapters), [change]),
       ).resolves.toMatchObject({ status: 'applied' })
 
       await expect(
@@ -1630,11 +1747,11 @@ describe.each(targetScopeMembershipAdapterCases)(
         changedAt: 3,
       } satisfies DirectChangeOperation
 
-      await expect(adapters.directTimetableChange.commitDirectChanges([add]))
+      await expect(directChangeCommitStore(adapters).commitDirectChanges([add]))
         .resolves.toMatchObject({ status: 'applied' })
-      await expect(adapters.directTimetableChange.commitDirectChanges([update]))
+      await expect(directChangeCommitStore(adapters).commitDirectChanges([update]))
         .resolves.toMatchObject({ status: 'applied' })
-      await expect(adapters.directTimetableChange.commitDirectChanges([remove]))
+      await expect(directChangeCommitStore(adapters).commitDirectChanges([remove]))
         .resolves.toMatchObject({ status: 'applied' })
       await adapters.seed.saveRegisteredLessonName({
         registeredLessonNameId: 'task-history-geography',
@@ -1735,7 +1852,7 @@ describe.each(targetScopeMembershipAdapterCases)(
       } satisfies DirectChangeOperation
 
       await expect(
-        adapters.directChange.commitDirectChanges([add, timetable, note]),
+        directChangeCommitStore(adapters).commitDirectChanges([add, timetable, note]),
       )
         .resolves.toMatchObject({ status: 'applied' })
       for (const expected of [
@@ -1843,7 +1960,7 @@ describe.each(targetScopeMembershipAdapterCases)(
       ]
 
       await expect(
-        adapters.directTimetableChange.commitDirectTimetableChanges(changes),
+        commitTimetableTestOperations(directChangeCommitStore(adapters), changes),
       ).resolves.toMatchObject({ status: 'applied' })
 
       const visible =

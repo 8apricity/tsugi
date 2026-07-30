@@ -18,6 +18,10 @@ import {
   readDirectTimetableChangeOptions,
 } from "./directChange";
 import {
+  StorageUnavailableError,
+  storageUnavailableError,
+} from "./sharedInformationChange/storageError";
+import {
   readTimetableChangeLayerRange,
   readTimetableChangeLayers,
 } from "./timetableChangeLayers";
@@ -514,7 +518,6 @@ export default {
         url.pathname === "/api/timetable-changes/direct") &&
       request.method === "POST"
     ) {
-      const persistence = await getPersistenceAdapters(env);
       let body: { changes?: unknown };
 
       try {
@@ -523,13 +526,28 @@ export default {
         return Response.json({ status: "invalid-change" }, { status: 400 });
       }
 
-      const result = await applyDirectChanges({
-        sessionToken: readCookie(request, sessionCookieName),
-        drafts: body.changes,
-        now: Date.now(),
-        studentAccountStore: persistence.studentAccount,
-        store: persistence.directChange,
-      });
+      let result;
+      try {
+        const persistence = await getPersistenceAdapters(env);
+        result = await applyDirectChanges({
+          sessionToken: readCookie(request, sessionCookieName),
+          drafts: body.changes,
+          now: Date.now(),
+          studentAccountStore: persistence.studentAccount,
+          contextStore: persistence.directChangeOptions,
+          catalog: persistence.directChangeCatalog,
+          executor: persistence.atomicChangeExecutor,
+        });
+      } catch (error) {
+        const unavailable = storageUnavailableError(error);
+        if (unavailable instanceof StorageUnavailableError) {
+          return Response.json(
+            { status: "storage-unavailable" },
+            { status: 503 },
+          );
+        }
+        throw error;
+      }
 
       if (result.status === "unauthenticated") {
         return Response.json(result, { status: 401 });
@@ -796,7 +814,7 @@ export default {
         sessionToken: readCookie(request, sessionCookieName),
         now: Date.now(),
         studentAccountStore: persistence.studentAccount,
-        store: persistence.directTimetableChange,
+        store: persistence.directChangeOptions,
       });
       if (result.status === "unauthenticated") {
         return Response.json(result, { status: 401 });

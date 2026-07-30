@@ -28,6 +28,11 @@ export type StudentOperationalContextResult =
       currentSchoolYear: SchoolYearRecord
     }
 
+export type ReadyStudentOperationalContext = Extract<
+  StudentOperationalContextResult,
+  { status: 'ready' }
+>
+
 export async function resolveStudentOperationalContext({
   sessionToken,
   now,

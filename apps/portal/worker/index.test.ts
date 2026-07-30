@@ -2195,6 +2195,31 @@ describe('Unified Direct Change API', () => {
     vi.useRealTimers()
   })
 
+  it('returns 503 when D1 is unavailable before context resolution', async () => {
+    const env = {
+      ...createTestEnv(),
+      DB: {
+        prepare() {
+          throw new Error('D1_ERROR: Network connection lost.')
+        },
+      },
+    } as unknown as Env
+
+    const response = await addDirectChanges(env, '', [{
+      kind: 'note',
+      sourceId: '32000000-0000-4000-8000-000000000000',
+      changeKind: 'add',
+      targetScopeType: 'student',
+      schoolDate: null,
+      body: 'Storage must be available',
+    }])
+
+    expect(response.status).toBe(503)
+    await expect(response.json()).resolves.toEqual({
+      status: 'storage-unavailable',
+    })
+  })
+
   it('atomically adds every Shared Information Kind through the common endpoint', async () => {
     const env = createDailyPlanTestEnv()
     const cookie = await testLoginCookie(

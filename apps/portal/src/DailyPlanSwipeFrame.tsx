@@ -56,6 +56,7 @@ export function DailyPlanSwipeFrame({
   children: ReactNode
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
+  const trackRef = useRef<HTMLDivElement>(null)
   const pointerRef = useRef<ActivePointer | null>(null)
   const suppressClickRef = useRef(false)
   const motionRef = useRef<MotionState>(idleMotion)
@@ -69,6 +70,15 @@ export function DailyPlanSwipeFrame({
   function frameWidth() {
     return frameRef.current?.getBoundingClientRect().width ??
       globalThis.innerWidth
+  }
+
+  function dayStride() {
+    const previous = trackRef.current?.firstElementChild as HTMLElement | null
+    const current = previous?.nextElementSibling as HTMLElement | null
+    const stride = previous && current
+      ? current.offsetLeft - previous.offsetLeft
+      : 0
+    return stride > 0 ? stride : frameWidth()
   }
 
   function directionIsAvailable(direction: Direction) {
@@ -95,7 +105,7 @@ export function DailyPlanSwipeFrame({
     }
     setMotion({
       kind: 'settling',
-      offset: direction === null ? 0 : -direction * frameWidth(),
+      offset: direction === null ? 0 : -direction * dayStride(),
       navigation: direction,
     })
   }
@@ -192,10 +202,10 @@ export function DailyPlanSwipeFrame({
         const offset = directionIsAvailable(direction)
           ? active.latest.deltaX
           : active.latest.deltaX * 0.18
-        const width = frameWidth()
+        const stride = dayStride()
         setMotion({
           kind: 'dragging',
-          offset: Math.max(-width, Math.min(width, offset)),
+          offset: Math.max(-stride, Math.min(stride, offset)),
           navigation: null,
         })
       }}
@@ -245,6 +255,7 @@ export function DailyPlanSwipeFrame({
     >
       <div className="daily-plan-swipe-viewport">
         <div
+          ref={trackRef}
           className="daily-plan-swipe-track"
           onTransitionEnd={(event) => {
             if (

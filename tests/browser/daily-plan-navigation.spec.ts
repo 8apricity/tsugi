@@ -7,6 +7,36 @@ import {
 } from '@playwright/test'
 
 test.describe('Daily Plan date navigation', () => {
+  test('spaces adjacent days by twice the page edge padding', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await expect(page.locator('.daily-plan-swipe-track')).toBeAttached()
+
+    const spacing = await page.evaluate<{
+      dayGap: number
+      pageEdgePadding: number
+    }>(`
+      (() => {
+        const track = document.querySelector('.daily-plan-swipe-track')
+        const shell = document.querySelector('.daily-plan-shell')
+        const [previous, current] = Array.from(track?.children ?? [])
+        if (!previous || !current || !shell) {
+          throw new Error('Daily Plan swipe layout is incomplete')
+        }
+        return {
+          dayGap: current.offsetLeft - previous.offsetLeft -
+            previous.offsetWidth,
+          pageEdgePadding: Number.parseFloat(
+            getComputedStyle(shell).paddingLeft,
+          ),
+        }
+      })()
+    `)
+
+    expect(spacing.dayGap).toBe(spacing.pageEdgePadding * 2)
+  })
+
   test('desktop buttons animate one day at a time', async ({
     page,
   }, testInfo) => {

@@ -63,10 +63,15 @@
 }
 
 .daily-plan-shell {
+  --daily-plan-edge-padding: 16px;
+  --daily-plan-day-gap: calc(
+    var(--daily-plan-edge-padding) + var(--daily-plan-edge-padding)
+  );
+
   display: grid;
   gap: 16px;
   min-height: 100svh;
-  padding: 88px 16px 190px;
+  padding: 88px var(--daily-plan-edge-padding) 190px;
   box-sizing: border-box;
 }
 
@@ -88,9 +93,14 @@
 .daily-plan-swipe-track {
   display: grid;
   grid-template-columns: repeat(3, 100%);
+  column-gap: var(--daily-plan-day-gap);
   min-width: 0;
   transform: translate3d(
-    calc(-100% + var(--daily-plan-swipe-offset)),
+    calc(
+      -100%
+      - var(--daily-plan-day-gap)
+      + var(--daily-plan-swipe-offset)
+    ),
     0,
     0
   );
@@ -2968,7 +2978,9 @@ button.timetable-layer-row {
   }
 
   .daily-plan-shell {
-    padding: 82px 12px 144px;
+    --daily-plan-edge-padding: 12px;
+
+    padding: 82px var(--daily-plan-edge-padding) 144px;
   }
 
   .daily-plan-topbar {

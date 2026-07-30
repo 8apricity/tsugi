@@ -126,6 +126,31 @@ test.describe('Daily Plan date navigation', () => {
     }
   })
 
+  test('real touch favors a steep diagonal Daily Plan swipe', async ({
+    browser,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'chromium')
+    const realTouch = await createRealTouchPage(browser)
+    try {
+      await realTouch.page.locator('.period-inspect-button').first()
+        .waitFor()
+      const surface = realTouch.page.locator('.daily-plan-swipe-frame')
+      await watchPointerCancellation(realTouch.page)
+
+      await realTouch.touch('touchStart', 300, 260)
+      await realTouch.touch('touchMove', 290, 278)
+      await realTouch.page.waitForTimeout(50)
+
+      await expect(surface).toHaveAttribute('data-motion', 'dragging')
+      expect(await pointerCancellationCount(realTouch.page)).toBe(0)
+
+      await realTouch.touch('touchEnd')
+      await expect(surface).toHaveAttribute('data-motion', 'idle')
+    } finally {
+      await realTouch.context.close()
+    }
+  })
+
   test('real touch keeps cancellation row horizontal after tracking starts', async ({
     browser,
   }, testInfo) => {

@@ -40,6 +40,14 @@ describe('touch gesture intent', () => {
     expect(gesture.move({ x: 118, y: 126, time: 16 }).intent).toBe('horizontal')
   })
 
+  it('favors horizontal intent until movement is clearly vertical', () => {
+    const gesture = createTouchGestureIntent()
+
+    gesture.start({ x: 100, y: 100, time: 0 })
+
+    expect(gesture.move({ x: 110, y: 118, time: 16 }).intent).toBe('horizontal')
+  })
+
   it('does not reverse an established direction lock', () => {
     const gesture = createTouchGestureIntent()
 

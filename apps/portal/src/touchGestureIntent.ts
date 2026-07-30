@@ -20,7 +20,7 @@ type ActiveGesture = {
 }
 
 const TOUCH_SLOP_PX = 10
-const VERTICAL_LOCK_RATIO = 1.5
+const VERTICAL_LOCK_RATIO = 2
 const VELOCITY_WINDOW_MS = 80
 const FLING_MIN_DISTANCE_PX = 32
 const FLING_MIN_VELOCITY_PX_PER_MS = 0.55

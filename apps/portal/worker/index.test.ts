@@ -4300,13 +4300,32 @@ describe('verification code requests', () => {
       to: string[]
       subject: string
       text: string
+      html: string
     }
     expect(resendBody).toMatchObject({
       from: 'Tsugi <no-reply@jikanwari.is-a.dev>',
       to: ['110-12345678mkn@e.osakamanabi.jp'],
       subject: 'Tsugi 認証コード',
     })
-    expect(resendBody.text).toMatch(/[0-9]{6}/)
+    const verificationCode = resendBody.text.match(/\b[0-9]{6}\b/)?.[0]
+
+    expect(verificationCode).toBeDefined()
+    expect(resendBody.text).toContain('学校のメールを確認するため')
+    expect(resendBody.text).toContain('10分間有効')
+    expect(resendBody.text).toContain('誰にも共有しないでください')
+    expect(resendBody.text).toContain(
+      '心当たりがなければ、このメールを無視してください',
+    )
+    expect(resendBody.html).toContain('Tsugi')
+    expect(resendBody.html).toContain('確認コード')
+    expect(resendBody.html).toContain('学校のメールを確認するため')
+    expect(resendBody.html).toContain(verificationCode)
+    expect(resendBody.html).toContain('10分間有効')
+    expect(resendBody.html).toContain('誰にも共有しないでください')
+    expect(resendBody.html).toContain(
+      '心当たりがなければ、このメールを無視してください',
+    )
+    expect(resendBody.html).not.toMatch(/<(?:a|button)\b/)
   })
 
   it('rejects invalid School Email numbers without sending email', async () => {

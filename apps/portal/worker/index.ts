@@ -36,6 +36,7 @@ import {
   readTaskEditHistory,
   readTimetableChangeHistory,
 } from "./editHistory";
+import { renderVerificationCodeEmail } from "./verificationCodeEmail";
 
 const persistenceAdaptersByEnv = new WeakMap<Env, PersistenceAdapters>();
 const sessionCookieName = "tsugi_session";
@@ -143,6 +144,7 @@ async function sendVerificationCode(
   schoolEmail: string,
   code: string,
 ) {
+  const email = renderVerificationCodeEmail(code);
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -153,7 +155,8 @@ async function sendVerificationCode(
       from: "Tsugi <no-reply@jikanwari.is-a.dev>",
       to: [schoolEmail],
       subject: "Tsugi 認証コード",
-      text: `認証コード: ${code}`,
+      text: email.text,
+      html: email.html,
     }),
   });
 

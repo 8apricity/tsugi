@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import type {
   ReferenceDailyPlanContent,
+  ReferenceDailyPlanReadyResponse,
   ReferenceScopeOption,
 } from '../shared/referenceDailyPlan'
 import {
@@ -68,10 +69,7 @@ function referenceDailyPlanMatchesSelection(
     scopeType: ReferenceScopeOption['type']
     scopeValue: string
   },
-): value is ReferenceDailyPlanContent & {
-  status: 'ready'
-  referenceScope: { type: ReferenceScopeOption['type']; value: string }
-} {
+): value is ReferenceDailyPlanReadyResponse {
   if (!isRecord(value) || value.status !== 'ready') return false
   if (
     value.schoolDate !== selection.schoolDate ||

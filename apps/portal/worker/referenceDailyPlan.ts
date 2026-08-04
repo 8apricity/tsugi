@@ -8,6 +8,7 @@ import {
 } from './studentOperationalContext'
 import {
   createTargetScopePolicy,
+  targetScopeValue,
   type ReferenceTargetScope,
   type ReferenceTargetScopeAccess,
 } from './targetScopePolicy'
@@ -15,18 +16,13 @@ import { isValidSchoolDate } from './timetable'
 import type {
   ReferenceDailyPlanContent,
   ReferenceDailyPlanNote,
+  ReferenceDailyPlanReadyResponse,
   ReferenceScopeOption,
+  ReferenceScopeSelection,
 } from '../shared/referenceDailyPlan'
 
 export type ReferenceDailyPlanResult =
-  | {
-      status: 'ready'
-      schoolDate: string
-      referenceScope: ReferenceTargetScope
-      tasks: ReferenceDailyPlanContent['tasks']
-      periods: ReferenceDailyPlanContent['periods']
-      notes: ReferenceDailyPlanContent['notes']
-    }
+  | ReferenceDailyPlanReadyResponse
   | { status: 'unauthenticated' }
   | { status: 'invalid-reference-scope' }
   | { status: 'invalid-date' }
@@ -79,7 +75,7 @@ export async function readReferenceDailyPlan({
   return {
     status: 'ready',
     schoolDate: selectedSchoolDate,
-    referenceScope,
+    referenceScope: toReferenceScopeSelection(referenceScope),
     tasks: tasks.map((task) => ({
       taskId: task.sharedInformationItemId,
       ...toReferenceTaskFields(task, referenceScope.type),
@@ -124,7 +120,7 @@ export type ReferenceTasksResult =
   | {
       status: 'ready'
       schoolDate: string
-      referenceScope: ReferenceTargetScope
+      referenceScope: ReferenceScopeSelection
       tasks: Array<Omit<ReferenceDailyPlanContent['tasks'][number], 'notes'>>
     }
   | Exclude<ReferenceDailyPlanResult, { status: 'ready' }>
@@ -164,11 +160,20 @@ export async function readReferenceTasks({
   return {
     status: 'ready',
     schoolDate: selection.schoolDate,
-    referenceScope: selection.referenceScope,
+    referenceScope: toReferenceScopeSelection(selection.referenceScope),
     tasks: tasks.map((task) => ({
       taskId: task.sourceId,
       ...toReferenceTaskFields(task, selection.referenceScope.type),
     })),
+  }
+}
+
+function toReferenceScopeSelection(
+  targetScope: ReferenceTargetScope,
+): ReferenceScopeSelection {
+  return {
+    type: targetScope.type,
+    value: targetScopeValue(targetScope),
   }
 }
 

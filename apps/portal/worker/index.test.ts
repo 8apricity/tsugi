@@ -3670,8 +3670,13 @@ describe('Reference Scope Task read API', () => {
     )
     expect(response.status).toBe(200)
     const body = await response.json() as {
+      referenceScope: Record<string, unknown>
       tasks: Array<Record<string, unknown>>
     }
+    expect(body.referenceScope).toEqual({
+      type: 'class',
+      value: '2026-grade-2-class-4',
+    })
     expect(body.tasks).toEqual([expect.objectContaining({
       taskId: '33800000-0000-4000-8000-000000000001',
       title: '4組の提出物',
@@ -3790,8 +3795,13 @@ describe('Reference Scope Daily Plan read API', () => {
     )
     expect(response.status).toBe(200)
     const body = await response.json() as {
+      referenceScope: Record<string, unknown>
       notes: Array<Record<string, unknown>>
     }
+    expect(body.referenceScope).toEqual({
+      type: 'class',
+      value: '2026-grade-2-class-4',
+    })
     expect(body.notes).toEqual([
       expect.objectContaining({ body: '4組の当日ノート' }),
       expect.objectContaining({ body: '4組の常設ノート' }),

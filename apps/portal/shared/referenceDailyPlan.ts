@@ -6,6 +6,11 @@ export type ReferenceScopeOption = {
   label: string
 }
 
+export type ReferenceScopeSelection = Pick<
+  ReferenceScopeOption,
+  'type' | 'value'
+>
+
 export type ReferenceScopeOptions = {
   status: 'ready'
   options: ReferenceScopeOption[]
@@ -40,4 +45,9 @@ export type ReferenceDailyPlanContent = {
     notes: ReferenceDailyPlanNote[]
   }>
   notes: ReferenceDailyPlanNote[]
+}
+
+export type ReferenceDailyPlanReadyResponse = ReferenceDailyPlanContent & {
+  status: 'ready'
+  referenceScope: ReferenceScopeSelection
 }

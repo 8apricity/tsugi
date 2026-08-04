@@ -14,12 +14,14 @@ import {
 } from './actionMenuContext'
 
 const POINTER_MOVE_THRESHOLD_PX = 6
+const COMPATIBILITY_CLICK_TIMEOUT_MS = 1_000
 
 type PendingPointer = {
   pointerId: number
   startX: number
   startY: number
   moved: boolean
+  target: Node
   trigger: HTMLButtonElement | null
 }
 
@@ -29,6 +31,7 @@ export function ActionMenuProvider({ children }: { children: ReactNode }) {
   const registrationsRef = useRef(new Map<string, ActionMenuRegistration>())
   const pendingPointerRef = useRef<PendingPointer | null>(null)
   const clickToSuppressRef = useRef<{
+    target: Node
     trigger: HTMLButtonElement | null
     timeoutId: number
   } | null>(null)
@@ -75,6 +78,13 @@ export function ActionMenuProvider({ children }: { children: ReactNode }) {
     }
 
     function closeWhenPointerStartsOutside(event: PointerEvent) {
+      if (
+        event.isPrimary &&
+        (event.pointerType !== 'mouse' || event.button === 0)
+      ) {
+        clearSuppressedClick()
+      }
+
       const registration = activeRegistration()
       const target = event.target
       if (!registration || !(target instanceof Node)) return
@@ -86,12 +96,12 @@ export function ActionMenuProvider({ children }: { children: ReactNode }) {
       }
 
       markOutsideActionMenuPointer(event)
-      clearSuppressedClick()
       pendingPointerRef.current = {
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
         moved: false,
+        target,
         trigger: registration.trigger(),
       }
     }
@@ -119,8 +129,9 @@ export function ActionMenuProvider({ children }: { children: ReactNode }) {
         if (clickToSuppressRef.current?.timeoutId === timeoutId) {
           clickToSuppressRef.current = null
         }
-      }, 0)
+      }, COMPATIBILITY_CLICK_TIMEOUT_MS)
       clickToSuppressRef.current = {
+        target: pending.target,
         trigger: pending.trigger,
         timeoutId,
       }
@@ -129,6 +140,13 @@ export function ActionMenuProvider({ children }: { children: ReactNode }) {
     function suppressOutsideClick(event: MouseEvent) {
       const pending = clickToSuppressRef.current
       if (!pending) return
+      const target = event.target
+      if (
+        !(target instanceof Node) ||
+        !(pending.target.contains(target) || target.contains(pending.target))
+      ) {
+        return
+      }
       clearSuppressedClick()
       event.preventDefault()
       event.stopPropagation()

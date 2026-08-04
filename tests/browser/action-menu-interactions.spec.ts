@@ -37,6 +37,30 @@ test('an outside activation closes the header menu before opening a Daily Plan d
   ).toBeVisible()
 })
 
+test('a delayed mobile compatibility click cannot activate a control behind the menu', async ({
+  page,
+}) => {
+  await page.goto('/')
+
+  const menuButton = page.getByRole('button', { name: 'メニュー', exact: true })
+  await menuButton.click()
+
+  const uncoveredPeriod = page.getByRole('button', { name: /^7限/ })
+  await pointer(uncoveredPeriod, 'pointerdown', 200, 400)
+  await pointer(uncoveredPeriod, 'pointerup', 200, 400)
+  await page.waitForTimeout(50)
+  await uncoveredPeriod.dispatchEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    detail: 1,
+  })
+
+  await expect(
+    page.getByRole('dialog', { name: '時間割の変更状況' }),
+  ).toHaveCount(0)
+  await expect(menuButton).toBeFocused()
+})
+
 test('a different kebab requires a second activation before its menu opens', async ({
   page,
   isMobile,

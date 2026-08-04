@@ -1703,9 +1703,12 @@ describe('Shared Information editor client', () => {
     })
 
     expect(
-      editor.previewLayerState(server, (replacement) =>
-        replacement.type === 'period_reference' ? '化学' : null,
-      ),
+      editor.previewLayerState(server, {
+        periodReferences: [
+          { weekday: 1, periodNumber: 3, lessonName: '化学' },
+        ],
+        floatingLessonReferences: [],
+      }),
     ).toMatchObject({
       layers: [
         { targetScopeType: 'grade', desired: false, replacement: { lessonName: '体育' } },
@@ -1732,7 +1735,10 @@ describe('Shared Information editor client', () => {
       },
     })
 
-    expect(editor.previewLayerState(server, () => null).finalDailyLesson).toEqual({
+    expect(editor.previewLayerState(server, {
+      periodReferences: [],
+      floatingLessonReferences: [],
+    }).finalDailyLesson).toEqual({
       lessonName: 'エラー',
       lessonReference: {
         type: 'floating_lesson_reference',
@@ -1786,7 +1792,10 @@ describe('Shared Information editor client', () => {
       'replacement',
     )
 
-    expect(editor.previewLayerState(server, () => null)).toMatchObject({
+    expect(editor.previewLayerState(server, {
+      periodReferences: [],
+      floatingLessonReferences: [],
+    })).toMatchObject({
       layers: [
         { targetScopeType: 'grade', state: 'active', desired: false },
         { targetScopeType: 'class', state: 'unchanged', desired: false },

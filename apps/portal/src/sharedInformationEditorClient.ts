@@ -1,10 +1,12 @@
 import {
-  projectTimetableSlot,
+  previewTimetableProjection,
   timetableReplacementsEqual,
   type DesiredTimetableLayer,
   type ProjectedDailyLesson,
   type TargetScopeType as ProjectionTargetScopeType,
   type TimetableReference as ProjectionTimetableReference,
+  type TimetableReferenceCatalog,
+  type TimetableProjection,
   type TimetableReplacement as ProjectionTimetableReplacement,
 } from '../shared/timetableProjection'
 import { isTargetScopeType } from '../shared/targetScope'
@@ -1701,7 +1703,7 @@ export function createSharedInformationEditorClient({
     },
     previewLayerState(
       state: TimetableLayerState,
-      resolveReference: (reference: TimetableReference) => string | null,
+      referenceCatalog: TimetableReferenceCatalog,
     ) {
       const slotDrafts = drafts.filter(
         (draft) =>
@@ -1717,37 +1719,43 @@ export function createSharedInformationEditorClient({
               replacement: draft.replacement,
             },
       )
-      const projection = projectTimetableSlot({
-        standardTimetable: state.standardTimetable
-          ? {
-              type: 'selected',
-              lessonName: state.standardTimetable.lessonName,
-              periodReference: state.standardTimetable.periodReference,
-            }
-          : null,
-        activeLayers: state.layers.flatMap((layer) =>
-          layer.state === 'active'
-            ? [{
+      const activeProjection: TimetableProjection = {
+        schoolDate: state.schoolDate,
+        periodNumber: state.periodNumber,
+        standardTimetable: state.standardTimetable,
+        layers: state.layers.map((layer) => ({
+          targetScopeType: layer.targetScopeType,
+          active: layer.state === 'active'
+            ? {
                 targetScopeType: layer.targetScopeType,
+                sharedInformationItemId: layer.sharedInformationItemId,
+                latestChangeId: layer.latestChangeId,
                 replacement: layer.replacement,
-              }]
-            : [],
-        ),
+                changedAt: layer.changedAt,
+              }
+            : null,
+          desired: null,
+          projected: layer.state === 'active'
+            ? { state: 'active', replacement: layer.replacement }
+            : { state: 'unchanged' },
+        })),
+        finalDailyLesson: state.finalDailyLesson,
+      }
+      const projection = previewTimetableProjection({
+        activeProjection,
         desiredLayers,
-        resolveReference,
+        referenceCatalog,
       })
-      const projectedLayers = new Map(
-        projection.layers.map((layer) => [layer.targetScopeType, layer]),
-      )
       const layers = state.layers.map((layer) => {
         const draft = slotDrafts.find(
           (candidate) => candidate.targetScopeType === layer.targetScopeType,
         )
-        const projectedLayer = projectedLayers.get(layer.targetScopeType)
+        const projectedLayer = projection.layers.find(
+          (candidate) => candidate.targetScopeType === layer.targetScopeType,
+        )
         if (
-          projectedLayer?.state === 'unchanged' &&
-          'origin' in projectedLayer &&
-          projectedLayer.origin === 'desired' &&
+          projectedLayer?.projected.state === 'unchanged' &&
+          projectedLayer.desired?.change === 'remove' &&
           draft
         ) {
           return {
@@ -1759,19 +1767,11 @@ export function createSharedInformationEditorClient({
             conflicted: conflictKeys.has(draftKey(draft)),
           }
         }
-        if (projectedLayer?.state === 'active') {
-          const replacement = draft && draft.changeKind !== 'remove'
-            ? draft.replacement
-            : layer.state === 'active'
-              ? layer.replacement
-              : undefined
-          if (!replacement) {
-            return { ...layer, desired: false, conflicted: false }
-          }
+        if (projectedLayer?.projected.state === 'active') {
           return {
             ...layer,
             state: 'active' as const,
-            replacement,
+            replacement: projectedLayer.projected.replacement as TimetableReplacement,
             desired: !!draft,
             conflicted: draft ? conflictKeys.has(draftKey(draft)) : false,
           }

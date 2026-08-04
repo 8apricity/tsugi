@@ -24,6 +24,7 @@ import {
   expectChangeSourceIsolationContract,
   expectDirectChangeApplicationContract,
 } from './directChange/applicationContract.testSupport'
+import { expectTimetableProjectionContract } from './timetableProjectionContract.testSupport'
 import {
   createD1AtomicChangeExecutor,
   createD1DirectChangeCatalog,
@@ -224,6 +225,22 @@ describe('D1 DirectChangeApplication', () => {
       ),
       { seedSchoolStructure: false },
     )
+  })
+})
+
+describe('D1 Timetable Projection module', () => {
+  it('satisfies the Timetable Projection contract', async () => {
+    const adapters = createD1PersistenceAdapters(
+      new SqliteD1Database(createTestDatabase()) as unknown as D1Database,
+    )
+
+    await expectTimetableProjectionContract({
+      store: adapters.dailyPlan,
+      seed: adapters.seed,
+      commit: (changes) =>
+        directChangeCommitStore(adapters).commitDirectChanges(changes),
+      seedSchoolStructure: false,
+    })
   })
 })
 

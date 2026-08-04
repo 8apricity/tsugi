@@ -3745,8 +3745,7 @@ function App() {
     const layerPreview = loadedLayerState
       ? timetableEditorClient.previewLayerState(
           loadedLayerState,
-          (replacement) =>
-            resolveReplacementLessonName(replacement, timetableEditorOptions),
+          timetableReferenceCatalog(timetableEditorOptions),
         )
       : null;
     const lessonNameQuery =
@@ -4297,10 +4296,7 @@ function App() {
                       const projectedLesson = lifecycleDrafts.length > 0 && layerState
                         ? timetableEditorClient.previewLayerState(
                             layerState,
-                            (reference) => resolveReplacementLessonName(
-                              reference,
-                              timetableEditorOptions,
-                            ),
+                            timetableReferenceCatalog(timetableEditorOptions),
                           ).finalDailyLesson
                         : period;
                       const removalPlanned = lifecycleDrafts.some(
@@ -6790,29 +6786,13 @@ function dailyLessonTransitionAccessibleLabel(
   ].join("");
 }
 
-function resolveReplacementLessonName(
-  replacement: TimetableReference,
+function timetableReferenceCatalog(
   options: TimetableEditorOptions | null,
 ) {
-  if (replacement.type === "period_reference") {
-    return (
-      options?.periodReferences.find(
-        (reference) =>
-          reference.weekday === replacement.weekday &&
-          reference.periodNumber === replacement.periodNumber,
-      )?.lessonName ?? null
-    );
-  }
-  if (replacement.type === "floating_lesson_reference") {
-    return (
-      options?.floatingLessonReferenceLabels.find(
-        (reference) =>
-          reference.floatingLessonReferenceLabelId ===
-          replacement.floatingLessonReferenceLabelId,
-      )?.lessonName ?? null
-    );
-  }
-  return null;
+  return {
+    periodReferences: options?.periodReferences ?? [],
+    floatingLessonReferences: options?.floatingLessonReferenceLabels ?? [],
+  };
 }
 
 export default App;

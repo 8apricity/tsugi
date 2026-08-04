@@ -19,6 +19,13 @@ export type TimetableReplacement =
     }
   | { type: 'cancelled' }
 
+export type DisplayTimetableReplacement =
+  | Exclude<TimetableReplacement, { type: 'floating_lesson_reference' }>
+  | (Extract<
+      TimetableReplacement,
+      { type: 'floating_lesson_reference' }
+    > & { referenceLabel: string })
+
 export type TimetableReference = Extract<
   TimetableReplacement,
   { type: 'period_reference' | 'floating_lesson_reference' }
@@ -53,6 +60,152 @@ export type ProjectedDailyLesson = {
     | 'resolved'
     | 'cancelled'
     | 'unresolved-reference'
+}
+
+export type ActiveTimetableLayer = {
+  targetScopeType: TargetScopeType
+  sharedInformationItemId: string
+  latestChangeId: string
+  replacement: DisplayTimetableReplacement
+  changedAt: number
+}
+
+export type EffectiveTimetableLayer =
+  | { state: 'unchanged' }
+  | { state: 'active'; replacement: TimetableReplacement }
+
+export type TimetableProjectionLayer = {
+  targetScopeType: TargetScopeType
+  active: ActiveTimetableLayer | null
+  desired: DesiredTimetableLayer | null
+  projected: EffectiveTimetableLayer
+}
+
+export type TimetableProjection = {
+  schoolDate: string
+  periodNumber: number
+  standardTimetable: {
+    lessonName: string
+    periodReference: { weekday: number; periodNumber: number }
+  } | null
+  layers: TimetableProjectionLayer[]
+  finalDailyLesson: ProjectedDailyLesson
+}
+
+export type TimetableReferenceCatalog = {
+  periodReferences: readonly {
+    weekday: number
+    periodNumber: number
+    lessonName: string | null
+  }[]
+  floatingLessonReferences: readonly {
+    floatingLessonReferenceLabelId: string
+    referenceLabel: string
+    lessonName: string | null
+  }[]
+}
+
+export function previewTimetableProjection({
+  activeProjection,
+  desiredLayers,
+  referenceCatalog,
+}: {
+  activeProjection: TimetableProjection
+  desiredLayers: readonly DesiredTimetableLayer[]
+  referenceCatalog: TimetableReferenceCatalog
+}): TimetableProjection {
+  assertUniqueDesiredLayers(desiredLayers)
+  const desiredByScope = new Map(desiredLayers.map((layer) => [
+    layer.targetScopeType,
+    withReferenceLabel(layer, referenceCatalog),
+  ]))
+  const activeLayers = activeProjection.layers.flatMap((layer) =>
+    layer.active
+      ? [{
+          targetScopeType: layer.targetScopeType,
+          replacement: layer.active.replacement,
+        }]
+      : [],
+  )
+  const projected = projectTimetableSlot({
+    standardTimetable: activeProjection.standardTimetable
+      ? {
+          type: 'selected',
+          lessonName: activeProjection.standardTimetable.lessonName,
+          periodReference: activeProjection.standardTimetable.periodReference,
+        }
+      : null,
+    activeLayers,
+    desiredLayers: [...desiredByScope.values()],
+    resolveReference: (reference) => resolveFromCatalog(
+      reference,
+      referenceCatalog,
+    ),
+  })
+  const projectedByScope = new Map(
+    projected.layers.map((layer) => [layer.targetScopeType, layer]),
+  )
+  return {
+    ...activeProjection,
+    layers: activeProjection.layers.map((layer) => {
+      const effective = projectedByScope.get(layer.targetScopeType)
+      return {
+        ...layer,
+        desired: desiredByScope.get(layer.targetScopeType) ?? null,
+        projected: effective?.state === 'active'
+          ? { state: 'active', replacement: effective.replacement }
+          : { state: 'unchanged' },
+      }
+    }),
+    finalDailyLesson: projected.finalDailyLesson,
+  }
+}
+
+function resolveFromCatalog(
+  reference: TimetableReference,
+  catalog: TimetableReferenceCatalog,
+) {
+  if (reference.type === 'period_reference') {
+    return catalog.periodReferences.find((entry) =>
+      entry.weekday === reference.weekday &&
+      entry.periodNumber === reference.periodNumber)
+      ?.lessonName ?? null
+  }
+  return catalog.floatingLessonReferences.find((entry) =>
+    entry.floatingLessonReferenceLabelId ===
+      reference.floatingLessonReferenceLabelId)
+    ?.lessonName ?? null
+}
+
+function withReferenceLabel(
+  layer: DesiredTimetableLayer,
+  catalog: TimetableReferenceCatalog,
+): DesiredTimetableLayer {
+  if (
+    layer.change !== 'replace' ||
+    layer.replacement.type !== 'floating_lesson_reference'
+  ) return layer
+  const replacement = layer.replacement
+  return {
+    ...layer,
+    replacement: {
+      ...replacement,
+      referenceLabel: catalog.floatingLessonReferences.find((entry) =>
+        entry.floatingLessonReferenceLabelId ===
+          replacement.floatingLessonReferenceLabelId)
+        ?.referenceLabel ?? replacement.referenceLabel ?? '不明な参照',
+    },
+  }
+}
+
+function assertUniqueDesiredLayers(layers: readonly DesiredTimetableLayer[]) {
+  const scopes = new Set<TargetScopeType>()
+  for (const layer of layers) {
+    if (scopes.has(layer.targetScopeType)) {
+      throw new Error('Timetable Projection received duplicate desired layers')
+    }
+    scopes.add(layer.targetScopeType)
+  }
 }
 
 export type DesiredTimetableLayer =
@@ -114,6 +267,15 @@ export function projectTimetableSlot({
     reference: TimetableReference,
   ): string | null
 }) {
+  assertValidPeriodReference(standardTimetableInput?.periodReference)
+  for (const layer of activeLayers) {
+    assertValidReplacementReference(layer.replacement)
+  }
+  for (const layer of desiredLayers) {
+    if (layer.change === 'replace') {
+      assertValidReplacementReference(layer.replacement)
+    }
+  }
   const standardTimetable = selectStandardTimetable(standardTimetableInput)
   const activeLayersByScope = new Map(
     activeLayers.map((layer) => [layer.targetScopeType, layer]),
@@ -166,6 +328,25 @@ export function projectTimetableSlot({
     standardTimetable,
     layers,
     finalDailyLesson,
+  }
+}
+
+function assertValidReplacementReference(replacement: TimetableReplacement) {
+  if (replacement.type === 'period_reference') {
+    assertValidPeriodReference(replacement)
+  }
+}
+
+function assertValidPeriodReference(
+  reference: { periodNumber: number } | undefined,
+) {
+  if (
+    reference &&
+    (!Number.isInteger(reference.periodNumber) ||
+      reference.periodNumber < 1 ||
+      reference.periodNumber > 7)
+  ) {
+    throw new Error('Timetable Projection received an invalid Period Reference')
   }
 }
 

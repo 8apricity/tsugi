@@ -1,22 +1,18 @@
 import type {
-  ActiveTimetableChange,
   DailyPlanStore,
   StudentAccountAccessStore,
-  StudentAffiliation,
   TargetScopeType,
 } from './persistence'
 import {
-  projectTimetableSlot,
+  type DisplayTimetableReplacement,
   type ProjectedDailyLesson,
+  type TimetableProjection,
 } from '../shared/timetableProjection'
 import { resolveStudentOperationalContext } from './studentOperationalContext'
 import {
-  createTimetableReferenceResolver,
   isValidSchoolDate,
-  type DisplayTimetableReplacement,
-  withTimetableReferenceLabel,
-  weekdayForSchoolDate,
 } from './timetable'
+import { createTimetableProjectionModule } from './timetableProjection'
 
 type TimetableLayerReplacement = DisplayTimetableReplacement
 
@@ -119,23 +115,11 @@ export async function readTimetableChangeLayerRange({
   const schoolDates = Array.from({ length: dayCount }, (_, day) =>
     new Date(start.getTime() + day * 86_400_000).toISOString().slice(0, 10),
   )
-  const weekdays = [...new Set(schoolDates.map(weekdayForSchoolDate))]
-  const [standardEntriesByWeekday, activeChanges, activeNotesByDate] = await Promise.all([
-    Promise.all(
-      weekdays.map(async (weekday) => [
-        weekday,
-        await store.listStandardTimetableEntriesForWeekday(
-          affiliation.classId,
-          affiliation.trackId,
-          weekday,
-        ),
-      ] as const),
-    ).then((entries) => new Map(entries)),
-    store.listActiveTimetableChangesForStudent(
+  const [projections, activeNotesByDate] = await Promise.all([
+    createTimetableProjectionModule({ store }).project({
       affiliation,
-      startDate,
-      endDate,
-    ),
+      schoolDates,
+    }),
     Promise.all(
       schoolDates.map(async (schoolDate) => [
         schoolDate,
@@ -146,20 +130,16 @@ export async function readTimetableChangeLayerRange({
 
   const states: Array<Extract<TimetableChangeLayerResult, { status: 'ready' }>> = []
   for (const schoolDate of schoolDates) {
-    const weekday = weekdayForSchoolDate(schoolDate)
-    const standardEntries = standardEntriesByWeekday.get(weekday) ?? []
-    const dateChanges = activeChanges.filter(
-      (change) => change.changeDate === schoolDate,
-    )
     for (let periodNumber = 1; periodNumber <= 7; periodNumber += 1) {
-      states.push(await buildReadyLayerState({
+      const projection = projections.find((candidate) =>
+        candidate.schoolDate === schoolDate &&
+        candidate.periodNumber === periodNumber)
+      if (!projection) {
+        throw new Error('Timetable Projection did not return every requested slot')
+      }
+      states.push(buildReadyLayerState({
         schoolDate,
-        selectedPeriod: periodNumber,
-        weekday,
-        affiliation,
-        store,
-        standardEntries,
-        activeChanges: dateChanges,
+        projection,
         activeNotes: activeNotesByDate.get(schoolDate) ?? [],
       }))
     }
@@ -211,96 +191,41 @@ export async function readTimetableChangeLayers({
   }
   const affiliation = context.studentAffiliation
 
-  const weekday = weekdayForSchoolDate(schoolDate)
-  const [standardEntries, activeChanges, activeNotes] = await Promise.all([
-    store.listStandardTimetableEntriesForWeekday(
-      affiliation.classId,
-      affiliation.trackId,
-      weekday,
-    ),
-    store.listActiveTimetableChangesForStudent(
+  const [projections, activeNotes] = await Promise.all([
+    createTimetableProjectionModule({ store }).project({
       affiliation,
-      schoolDate,
-      schoolDate,
-    ),
+      schoolDates: [schoolDate],
+    }),
     store.listActiveNotesForStudent(affiliation, schoolDate),
   ])
+  const projection = projections.find(
+    (candidate) => candidate.periodNumber === selectedPeriod,
+  )
+  if (!projection) {
+    throw new Error('Timetable Projection did not return the requested slot')
+  }
   return buildReadyLayerState({
     schoolDate,
-    selectedPeriod,
-    weekday,
-    affiliation,
-    store,
-    standardEntries,
-    activeChanges,
+    projection,
     activeNotes,
   })
 }
 
-async function buildReadyLayerState({
+function buildReadyLayerState({
   schoolDate,
-  selectedPeriod,
-  weekday,
-  affiliation,
-  store,
-  standardEntries,
-  activeChanges,
+  projection,
   activeNotes,
 }: {
   schoolDate: string
-  selectedPeriod: number
-  weekday: number
-  affiliation: StudentAffiliation
-  store: DailyPlanStore
-  standardEntries: Awaited<
-    ReturnType<DailyPlanStore['listStandardTimetableEntriesForWeekday']>
-  >
-  activeChanges: ActiveTimetableChange[]
+  projection: TimetableProjection
   activeNotes: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>
-}): Promise<Extract<TimetableChangeLayerResult, { status: 'ready' }>> {
-  const changesByLayer = new Map(
-    activeChanges
-      .filter((change) => change.periodNumber === selectedPeriod)
-      .map((change) => [change.targetScope.type, change]),
-  )
-  const activeLayers = await Promise.all(
-    [...changesByLayer.values()].map(async (change) => ({
-      targetScopeType: change.targetScope.type,
-      replacement: await withTimetableReferenceLabel(
-        change.replacement,
-        affiliation,
-        store,
-      ),
-    })),
-  )
-  const activeLayerByScope = new Map(
-    activeLayers.map((layer) => [layer.targetScopeType, layer]),
-  )
-  const resolveReference = await createTimetableReferenceResolver(
-    activeLayers.map((layer) => layer.replacement),
-    affiliation,
-    store,
-  )
-  const projection = projectTimetableSlot({
-    standardTimetable: {
-      type: 'candidates',
-      selectedTrackId: affiliation.trackId,
-      periodReference: { weekday, periodNumber: selectedPeriod },
-      candidates: standardEntries.filter(
-        (entry) => entry.periodNumber === selectedPeriod,
-      ),
-    },
-    activeLayers,
-    resolveReference,
-  })
-
-  const layers = await Promise.all(
-    projection.layers.map(async (layer) => {
-      const change = changesByLayer.get(layer.targetScopeType)
+}): Extract<TimetableChangeLayerResult, { status: 'ready' }> {
+  const layers = projection.layers.map((layer) => {
+      const active = layer.active
       const notes = activeNotes
         .filter((note) =>
           note.schoolDate === schoolDate &&
-          note.periodNumber === selectedPeriod &&
+          note.periodNumber === projection.periodNumber &&
           note.targetScope.type === layer.targetScopeType)
         .map((note) => ({
           noteId: note.sharedInformationItemId,
@@ -308,20 +233,19 @@ async function buildReadyLayerState({
           body: note.body,
           targetScopeType: note.targetScope.type,
           relatedContext: {
-            type: 'daily-lesson' as const,
-            schoolDate,
-            periodNumber: selectedPeriod,
-          },
-        }))
-      return layer.state === 'active' && change
+              type: 'daily-lesson' as const,
+              schoolDate,
+              periodNumber: projection.periodNumber,
+            },
+          }))
+      return active
         ? {
             targetScopeType: layer.targetScopeType,
             state: 'active' as const,
-            sharedInformationItemId: change.sharedInformationItemId,
-            latestChangeId: change.latestChangeId,
-            replacement: activeLayerByScope.get(layer.targetScopeType)!
-              .replacement,
-            changedAt: change.changedAt,
+            sharedInformationItemId: active.sharedInformationItemId,
+            latestChangeId: active.latestChangeId,
+            replacement: active.replacement,
+            changedAt: active.changedAt,
             ...(notes.length > 0 ? { notes } : {}),
           }
         : {
@@ -329,19 +253,13 @@ async function buildReadyLayerState({
             state: 'unchanged' as const,
             ...(notes.length > 0 ? { notes } : {}),
           }
-    }),
-  )
+    })
 
   return {
     status: 'ready',
     schoolDate,
-    periodNumber: selectedPeriod,
-    standardTimetable: projection.standardTimetable
-      ? {
-          periodReference: { weekday, periodNumber: selectedPeriod },
-          lessonName: projection.standardTimetable.lessonName,
-        }
-      : null,
+    periodNumber: projection.periodNumber,
+    standardTimetable: projection.standardTimetable,
     layers,
     finalDailyLesson: projection.finalDailyLesson,
   }

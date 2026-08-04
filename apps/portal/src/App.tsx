@@ -134,6 +134,9 @@ import {
   DraftCancellationRow,
   type DraftCancellationRowHandle,
 } from "./draftCancellationRow";
+import { ActionMenuProvider } from "./actionMenu";
+import { startedOutsideActionMenu } from "./actionMenuContext";
+import { useActionMenu } from "./useActionMenu";
 
 function editorKindForDialogRoute(
   route: DialogRoute | undefined,
@@ -462,7 +465,13 @@ function App() {
   const [confirmedSetup, setConfirmedSetup] = useState(false);
   const [status, setStatus] = useState<RequestStatus>("checking");
   const [message, setMessage] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const {
+    close: closeHeaderMenu,
+    open: headerMenuOpen,
+    rootRef: headerMenuRootRef,
+    toggle: toggleHeaderMenu,
+    triggerRef: headerMenuTriggerRef,
+  } = useActionMenu();
   const [referencePickerScopeKey, setReferencePickerScopeKey] = useState("");
   const [referenceScope, setReferenceScope] =
     useState<ReferenceScopeOption | null>(null);
@@ -470,7 +479,6 @@ function App() {
     () => studentAccount ? crypto.randomUUID() : null,
     [studentAccount],
   );
-  const menuAreaRef = useRef<HTMLDivElement | null>(null);
   const [dailyPlanClient] = useState(() =>
     createDailyPlanClient({
       datePickerRadius: DATE_PICKER_RADIUS,
@@ -1014,28 +1022,6 @@ function App() {
   }, [dailyPlanState, timetableEditorClient]);
 
   useEffect(() => {
-    if (!menuOpen) {
-      return;
-    }
-
-    function closeMenuWhenOutside(event: PointerEvent) {
-      const target = event.target;
-
-      if (target instanceof Node && menuAreaRef.current?.contains(target)) {
-        return;
-      }
-
-      setMenuOpen(false);
-    }
-
-    document.addEventListener("pointerdown", closeMenuWhenOutside);
-
-    return () => {
-      document.removeEventListener("pointerdown", closeMenuWhenOutside);
-    };
-  }, [menuOpen]);
-
-  useEffect(() => {
     const dateStripBounds: [string, string] = [
       dateStrip[0]?.schoolDate ?? "",
       dateStrip.at(-1)?.schoolDate ?? "",
@@ -1293,7 +1279,7 @@ function App() {
   }
 
   function requestLogout() {
-    setMenuOpen(false);
+    closeHeaderMenu();
     if (timetableEditor.draftCount > 0) {
       dialogFlow.openLogoutConfirmation();
       return;
@@ -1324,7 +1310,7 @@ function App() {
     setTimetableEditorOptions(null);
     setReferencePickerScopeKey("");
     setReferenceScope(null);
-    setMenuOpen(false);
+    closeHeaderMenu();
     setTimetableEditorRefreshNeeded(false);
     pendingChangeContentTimetableRef.current = null;
     setStatus("idle");
@@ -2549,7 +2535,7 @@ function App() {
   }
 
   function openReferencePicker() {
-    setMenuOpen(false);
+    closeHeaderMenu();
     const transition = dialogFlow.openReferencePicker({
       returnFocus: {
         kind: "flow-trigger",
@@ -2589,7 +2575,7 @@ function App() {
 
   function leaveReferenceScope() {
     setReferenceScope(null);
-    setMenuOpen(false);
+    closeHeaderMenu();
   }
 
   function notePeriodNumber(note: DailyPlanNoteForCache) {
@@ -4098,17 +4084,18 @@ function App() {
           aria-labelledby="daily-plan-title"
         >
           <header className="daily-plan-topbar">
-            <div className="menu-area" ref={menuAreaRef}>
+            <div className="menu-area" ref={headerMenuRootRef}>
               <button
+                ref={headerMenuTriggerRef}
                 className="icon-button"
                 type="button"
                 aria-label="メニュー"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((open) => !open)}
+                aria-expanded={headerMenuOpen}
+                onClick={toggleHeaderMenu}
               >
                 <span aria-hidden="true">☰</span>
               </button>
-              {menuOpen ? (
+              {headerMenuOpen ? (
                 <div className="menu-popover">
                   <p className="menu-name">{studentAccount.displayName}</p>
                   {dailyPlanState.status === "ready" ? (
@@ -6156,7 +6143,13 @@ function LayerRow({
     danger?: boolean;
   }>;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const {
+    close: closeActionMenu,
+    open: actionMenuOpen,
+    rootRef: actionMenuRootRef,
+    toggle: toggleActionMenu,
+    triggerRef: actionMenuTriggerRef,
+  } = useActionMenu();
   const content = (
     <>
       <span className="timetable-layer-label">{label}</span>
@@ -6194,17 +6187,18 @@ function LayerRow({
           </div>
         )}
         {menuActions.length ? (
-          <div className="layer-kebab-area">
+          <div className="layer-kebab-area" ref={actionMenuRootRef}>
             <button
+              ref={actionMenuTriggerRef}
               className="layer-kebab-button"
               type="button"
               aria-label={`${label}のメニュー`}
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
+              aria-expanded={actionMenuOpen}
+              onClick={toggleActionMenu}
             >
               ⋮
             </button>
-            {menuOpen ? (
+            {actionMenuOpen ? (
               <div className="layer-kebab-menu" role="menu">
                 {menuActions.map((action) => (
                   <button
@@ -6214,7 +6208,7 @@ function LayerRow({
                     className={action.danger ? "danger" : undefined}
                     disabled={action.disabled}
                     onClick={() => {
-                      setMenuOpen(false);
+                      closeActionMenu();
                       action.onClick();
                     }}
                   >
@@ -6520,6 +6514,7 @@ function PeriodWheelPicker({
         aria-expanded={open}
         aria-controls={open ? "period-wheel-options" : undefined}
         onPointerDown={(event) => {
+          if (startedOutsideActionMenu(event.nativeEvent)) return;
           event.preventDefault();
           cancelSnapAnimation();
           interactionRef.current.beginTriggerContact();
@@ -6795,4 +6790,12 @@ function timetableReferenceCatalog(
   };
 }
 
-export default App;
+function AppRoot() {
+  return (
+    <ActionMenuProvider>
+      <App />
+    </ActionMenuProvider>
+  );
+}
+
+export default AppRoot;

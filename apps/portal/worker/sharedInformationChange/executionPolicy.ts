@@ -9,8 +9,7 @@ import {
   sourceId,
   type StudentAffiliationAssertion,
 } from './atomicProgram'
-import { targetScopeValue } from '../targetScopeBoundary'
-import { targetScopesEqual } from '../targetScopePolicy'
+import { targetScopesEqual, targetScopeValue } from '../targetScopePolicy'
 import { hasSameIdempotencySemantics } from './semanticFingerprint'
 
 export type AtomicExecutionSnapshot = {

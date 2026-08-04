@@ -6,10 +6,13 @@ import type {
 import { normalizeLessonName } from '../shared/lessonNames'
 import type { TaskHistorySnapshot } from '../shared/taskEditHistory'
 import type { NoteHistorySnapshot } from '../shared/noteEditHistory'
-import { targetScopeValue } from './targetScopeBoundary'
 import {
-  studentAffiliationIncludesTargetScope,
+  targetScopeReadAccessIncludes,
+  targetScopesForReadAccess,
+  targetScopeValue,
   targetScopesEqual,
+  type TargetScopeReadAccess,
+  type OwnTargetScopeAccess,
   type TargetScope,
   type TargetScopeType,
 } from './targetScopePolicy'
@@ -500,26 +503,20 @@ export type DailyPlanStore = StudentOperationalContextStore & {
     trackId: string,
     floatingLessonReferenceLabelId: string,
   ): Promise<FloatingStandardTimetableEntry | null>
-  listActiveTimetableChangesForStudent(
-    affiliation: StudentAffiliation,
+  listActiveTimetableChanges(
+    scopeAccess: TargetScopeReadAccess,
     start: string,
     end: string,
   ): Promise<ActiveTimetableChange[]>
-  listActiveTasksForStudent(
-    affiliation: StudentAffiliation,
-    schoolDate: string,
+  listActiveTasks(
+    scopeAccess: TargetScopeReadAccess,
+    start: string,
+    end: string,
   ): Promise<ActiveTask[]>
-  listActiveTasksForTargetScope(
-    targetScope: Exclude<TargetScope, { type: 'student' }>,
-    schoolDate: string,
-  ): Promise<ActiveTask[]>
-  listActiveNotesForStudent(
-    affiliation: StudentAffiliation,
-    schoolDate: string,
-  ): Promise<ActiveNote[]>
-  listActiveNotesForTargetScope(
-    targetScope: Exclude<TargetScope, { type: 'student' }>,
-    schoolDate: string,
+  listActiveNotes(
+    scopeAccess: TargetScopeReadAccess,
+    start: string,
+    end: string,
   ): Promise<ActiveNote[]>
 }
 
@@ -554,21 +551,24 @@ export type TimetableChangeHistoryStore = {
     targetScope: TargetScope
     changeDate: string
     periodNumber: number
-  }): Promise<HistoricalTimetableChange[]>
+  }, scopeAccess: OwnTargetScopeAccess): Promise<HistoricalTimetableChange[]>
   listTimetableChangeItemHistory(
     sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
   ): Promise<HistoricalTimetableChange[]>
 }
 
 export type TaskEditHistoryStore = {
   listTaskEditHistory(
     sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
   ): Promise<HistoricalTaskChange[]>
 }
 
 export type NoteEditHistoryStore = {
   listNoteEditHistory(
     sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
   ): Promise<HistoricalNoteChange[]>
 }
 
@@ -579,6 +579,7 @@ export type EditHistoryStore =
   & {
     findSharedInformationChange(
       sharedInformationChangeId: string,
+      scopeAccess: OwnTargetScopeAccess,
     ): Promise<{
       kind: 'timetable_change' | 'task' | 'note'
       sharedInformationItemId: string
@@ -1067,17 +1068,14 @@ export class InMemoryPersistenceAdapters
     return registeredLessonName
   }
 
-  async listActiveTimetableChangesForStudent(
-    affiliation: StudentAffiliation,
+  async listActiveTimetableChanges(
+    scopeAccess: TargetScopeReadAccess,
     start: string,
     end: string,
   ) {
     return this.activeTimetableChanges.filter((change) => {
       if (change.changeDate < start || change.changeDate > end) return false
-      return studentAffiliationIncludesTargetScope(
-        affiliation,
-        change.targetScope,
-      )
+      return targetScopeReadAccessIncludes(scopeAccess, change.targetScope)
     }).map((change) => ({
       ...change,
       replacement: change.replacement.type === 'lesson_name'
@@ -1086,14 +1084,16 @@ export class InMemoryPersistenceAdapters
     }))
   }
 
-  async listActiveTasksForStudent(
-    affiliation: StudentAffiliation,
-    schoolDate: string,
+  async listActiveTasks(
+    scopeAccess: TargetScopeReadAccess,
+    start: string,
+    end: string,
   ) {
     return this.activeTasks
       .filter((task) =>
-        (task.dueDate === null || task.dueDate === schoolDate) &&
-        studentAffiliationIncludesTargetScope(affiliation, task.targetScope),
+        (task.dueDate === null ||
+          (task.dueDate >= start && task.dueDate <= end)) &&
+        targetScopeReadAccessIncludes(scopeAccess, task.targetScope),
       )
       .map((task) => ({
         ...task,
@@ -1109,51 +1109,17 @@ export class InMemoryPersistenceAdapters
       .sort(compareActiveTasks)
   }
 
-  async listActiveTasksForTargetScope(
-    targetScope: Exclude<TargetScope, { type: 'student' }>,
-    schoolDate: string,
-  ) {
-    return this.activeTasks
-      .filter((task) =>
-        (task.dueDate === null || task.dueDate === schoolDate) &&
-        targetScopesEqual(task.targetScope, targetScope),
-      )
-      .map((task) => ({
-        ...task,
-        relatedLessonName: task.relatedLessonName?.registeredLessonNameId
-          ? {
-              ...task.relatedLessonName,
-              lessonName: this.requireRegisteredLessonName(
-                task.relatedLessonName.registeredLessonNameId,
-              ).shortLessonName,
-            }
-          : task.relatedLessonName,
-      }))
-      .sort(compareActiveTasks)
-  }
-
-  async listActiveNotesForStudent(
-    affiliation: StudentAffiliation,
-    schoolDate: string,
+  async listActiveNotes(
+    scopeAccess: TargetScopeReadAccess,
+    start: string,
+    end: string,
   ) {
     return this.activeNotes
       .filter((note) =>
         (note.relatedTaskItemId !== undefined ||
-          note.schoolDate === null || note.schoolDate === schoolDate) &&
-        studentAffiliationIncludesTargetScope(affiliation, note.targetScope),
-      )
-      .sort(compareActiveNotes)
-  }
-
-  async listActiveNotesForTargetScope(
-    targetScope: Exclude<TargetScope, { type: 'student' }>,
-    schoolDate: string,
-  ) {
-    return this.activeNotes
-      .filter((note) =>
-        (note.relatedTaskItemId !== undefined ||
-          note.schoolDate === null || note.schoolDate === schoolDate) &&
-        targetScopesEqual(note.targetScope, targetScope),
+          note.schoolDate === null ||
+          (note.schoolDate >= start && note.schoolDate <= end)) &&
+        targetScopeReadAccessIncludes(scopeAccess, note.targetScope),
       )
       .sort(compareActiveNotes)
   }
@@ -1178,7 +1144,8 @@ export class InMemoryPersistenceAdapters
     targetScope: TargetScope
     changeDate: string
     periodNumber: number
-  }) {
+  }, scopeAccess: OwnTargetScopeAccess) {
+    if (!targetScopeReadAccessIncludes(scopeAccess, input.targetScope)) return []
     return [...this.directTimetableChangeOperations.values()]
       .filter((change) =>
         targetScopesEqual(change.targetScope, input.targetScope) &&
@@ -1189,21 +1156,28 @@ export class InMemoryPersistenceAdapters
 
   async listTimetableChangeItemHistory(
     sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
   ) {
     return [...this.directTimetableChangeOperations.values()]
       .filter((change) =>
-        change.sharedInformationItemId === sharedInformationItemId)
+        change.sharedInformationItemId === sharedInformationItemId &&
+        targetScopeReadAccessIncludes(scopeAccess, change.targetScope))
       .map((change) => this.mapHistoricalTimetableChange(change))
   }
 
-  async findSharedInformationChange(sharedInformationChangeId: string) {
+  async findSharedInformationChange(
+    sharedInformationChangeId: string,
+    scopeAccess: OwnTargetScopeAccess,
+  ) {
     for (const [kind, changes] of [
       ['timetable_change', this.directTimetableChangeOperations],
       ['task', this.directTaskOperations],
       ['note', this.directNoteOperations],
     ] as const) {
       const selected = [...changes.values()].find(
-        (change) => change.latestChangeId === sharedInformationChangeId,
+        (change) =>
+          change.latestChangeId === sharedInformationChangeId &&
+          targetScopeReadAccessIncludes(scopeAccess, change.targetScope),
       )
       if (selected) {
         return {
@@ -1215,10 +1189,14 @@ export class InMemoryPersistenceAdapters
     return null
   }
 
-  async listTaskEditHistory(sharedInformationItemId: string) {
+  async listTaskEditHistory(
+    sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
+  ) {
     return [...this.directTaskOperations.values()]
       .filter((change) =>
-        change.sharedInformationItemId === sharedInformationItemId)
+        change.sharedInformationItemId === sharedInformationItemId &&
+        targetScopeReadAccessIncludes(scopeAccess, change.targetScope))
       .map((change): HistoricalTaskChange => ({
         sharedInformationChangeId: change.latestChangeId,
         sharedInformationItemId: change.sharedInformationItemId,
@@ -1245,7 +1223,10 @@ export class InMemoryPersistenceAdapters
       }))
   }
 
-  async listNoteEditHistory(sharedInformationItemId: string) {
+  async listNoteEditHistory(
+    sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
+  ) {
     const initial = [...this.directNoteOperations.values()].find(
       (
         change,
@@ -1254,6 +1235,7 @@ export class InMemoryPersistenceAdapters
         { kind: 'note'; changeKind: 'add' }
       > =>
         change.sharedInformationItemId === sharedInformationItemId &&
+        targetScopeReadAccessIncludes(scopeAccess, change.targetScope) &&
         change.changeKind === 'add',
     )
     const relatedContext = initial
@@ -1261,7 +1243,8 @@ export class InMemoryPersistenceAdapters
       : null
     return [...this.directNoteOperations.values()]
       .filter((change) =>
-        change.sharedInformationItemId === sharedInformationItemId)
+        change.sharedInformationItemId === sharedInformationItemId &&
+        targetScopeReadAccessIncludes(scopeAccess, change.targetScope))
       .map((change): HistoricalNoteChange => ({
         sharedInformationChangeId: change.latestChangeId,
         sharedInformationItemId: change.sharedInformationItemId,
@@ -2458,11 +2441,12 @@ export class D1PersistenceAdapters
     return row ? mapFloatingStandardTimetableEntryRow(row) : null
   }
 
-  async listActiveTimetableChangesForStudent(
-    affiliation: StudentAffiliation,
+  async listActiveTimetableChanges(
+    scopeAccess: TargetScopeReadAccess,
     start: string,
     end: string,
   ) {
+    const scopeQuery = targetScopeAccessQuery(scopeAccess)
     const { results } = await this.db
       .prepare(
         `select c.source_id, c.shared_information_change_id,
@@ -2484,35 +2468,26 @@ export class D1PersistenceAdapters
          left join registered_lesson_names registered_lesson
            on registered_lesson.registered_lesson_name_id =
              t.registered_lesson_name_id
-          join shared_information_changes c
-            on c.shared_information_change_id = i.latest_change_id
-          where i.kind = 'timetable_change' and i.removed_at is null
-            and (select count(*) from target_scope_parts scope_part_count
-                 where scope_part_count.target_scope_id = s.target_scope_id) = 1
-            and s.school_year = ? and t.change_date between ? and ?
-           and ((p.scope_type = 'grade' and p.grade = ?)
-             or (p.scope_type = 'class' and p.class_id = ?)
-             or (p.scope_type = 'track' and p.track_id = ?)
-             or (p.scope_type = 'student' and p.student_account_id = ?))`,
+         join shared_information_changes c
+           on c.shared_information_change_id = i.latest_change_id
+         where i.kind = 'timetable_change' and i.removed_at is null
+           and (select count(*) from target_scope_parts scope_part_count
+                where scope_part_count.target_scope_id = s.target_scope_id) = 1
+           and t.change_date between ? and ?
+           and (${scopeQuery.sql})`,
       )
-      .bind(
-        affiliation.schoolYear,
-        start,
-        end,
-        affiliation.grade,
-        affiliation.classId,
-        affiliation.trackId,
-        affiliation.studentAccountId,
-      )
+      .bind(start, end, ...scopeQuery.bindings)
       .all<ActiveTimetableChangeRow>()
 
     return results.map(mapActiveTimetableChangeRow)
   }
 
-  async listActiveTasksForStudent(
-    affiliation: StudentAffiliation,
-    schoolDate: string,
+  async listActiveTasks(
+    scopeAccess: TargetScopeReadAccess,
+    start: string,
+    end: string,
   ) {
+    const scopeQuery = targetScopeAccessQuery(scopeAccess)
     const { results } = await this.db
       .prepare(
         `select c.source_id, c.shared_information_change_id,
@@ -2534,76 +2509,28 @@ export class D1PersistenceAdapters
          join shared_information_changes c
            on c.shared_information_change_id = i.latest_change_id
          where i.kind = 'task' and i.removed_at is null
-           and (task.due_date is null or task.due_date = ?)
+           and (task.due_date is null or task.due_date between ? and ?)
            and (select count(*) from target_scope_parts scope_part_count
                 where scope_part_count.target_scope_id = s.target_scope_id) = 1
-           and s.school_year = ?
-           and ((p.scope_type = 'grade' and p.grade = ?)
-             or (p.scope_type = 'class' and p.class_id = ?)
-             or (p.scope_type = 'track' and p.track_id = ?)
-             or (p.scope_type = 'student' and p.student_account_id = ?))
+           and (${scopeQuery.sql})
          order by (task.due_date is null) asc, i.created_at desc,
                   i.shared_information_item_id desc`,
       )
       .bind(
-        schoolDate,
-        affiliation.schoolYear,
-        affiliation.grade,
-        affiliation.classId,
-        affiliation.trackId,
-        affiliation.studentAccountId,
+        start,
+        end,
+        ...scopeQuery.bindings,
       )
       .all<ActiveTaskRow>()
     return results.map(mapActiveTaskRow)
   }
 
-  async listActiveTasksForTargetScope(
-    targetScope: Exclude<TargetScope, { type: 'student' }>,
-    schoolDate: string,
+  async listActiveNotes(
+    scopeAccess: TargetScopeReadAccess,
+    start: string,
+    end: string,
   ) {
-    const { scopeColumn, scopeValue } = exactTargetScopeQuery(targetScope)
-    const { results } = await this.db
-      .prepare(
-        `select c.source_id, c.shared_information_change_id,
-                i.shared_information_item_id, s.school_year,
-                p.scope_type, p.grade, p.class_id, p.track_id,
-                p.student_account_id, task.title, task.due_date,
-                task.registered_related_lesson_name_id,
-                coalesce(registered_lesson.short_lesson_name,
-                         task.related_lesson_name) as related_lesson_name,
-                c.changed_by_student_account_id, c.changed_at, i.created_at
-         from shared_information_items i
-         join target_scopes s on s.target_scope_id = i.target_scope_id
-         join target_scope_parts p on p.target_scope_id = s.target_scope_id
-         join task_snapshots task
-           on task.task_snapshot_id = i.current_task_snapshot_id
-         left join registered_lesson_names registered_lesson
-           on registered_lesson.registered_lesson_name_id =
-              task.registered_related_lesson_name_id
-         join shared_information_changes c
-           on c.shared_information_change_id = i.latest_change_id
-         where i.kind = 'task' and i.removed_at is null
-           and (task.due_date is null or task.due_date = ?)
-           and (select count(*) from target_scope_parts scope_part_count
-                where scope_part_count.target_scope_id = s.target_scope_id) = 1
-           and s.school_year = ? and p.scope_type = ? and ${scopeColumn} = ?
-         order by (task.due_date is null) asc, i.created_at desc,
-                  i.shared_information_item_id desc`,
-      )
-      .bind(
-        schoolDate,
-        targetScope.schoolYear,
-        targetScope.type,
-        scopeValue,
-      )
-      .all<ActiveTaskRow>()
-    return results.map(mapActiveTaskRow)
-  }
-
-  async listActiveNotesForStudent(
-    affiliation: StudentAffiliation,
-    schoolDate: string,
-  ) {
+    const scopeQuery = targetScopeAccessQuery(scopeAccess)
     const { results } = await this.db
       .prepare(
         `select latest.source_id, latest.shared_information_change_id,
@@ -2623,67 +2550,18 @@ export class D1PersistenceAdapters
          where i.kind = 'note' and i.removed_at is null
            and (note.related_context_type in ('none', 'task')
              or (note.related_context_type in ('school_date', 'daily_lesson')
-               and note.related_school_date = ?))
+               and note.related_school_date between ? and ?))
            and (select count(*) from target_scope_parts scope_part_count
                 where scope_part_count.target_scope_id = s.target_scope_id) = 1
-           and s.school_year = ?
-           and ((p.scope_type = 'grade' and p.grade = ?)
-             or (p.scope_type = 'class' and p.class_id = ?)
-             or (p.scope_type = 'track' and p.track_id = ?)
-             or (p.scope_type = 'student' and p.student_account_id = ?))
+           and (${scopeQuery.sql})
          order by case when note.related_context_type = 'school_date'
                    then 0 else 1 end,
                   i.created_at desc, i.shared_information_item_id desc`,
       )
       .bind(
-        schoolDate,
-        affiliation.schoolYear,
-        affiliation.grade,
-        affiliation.classId,
-        affiliation.trackId,
-        affiliation.studentAccountId,
-      )
-      .all<ActiveNoteRow>()
-    return results.map(mapActiveNoteRow)
-  }
-
-  async listActiveNotesForTargetScope(
-    targetScope: Exclude<TargetScope, { type: 'student' }>,
-    schoolDate: string,
-  ) {
-    const { scopeColumn, scopeValue } = exactTargetScopeQuery(targetScope)
-    const { results } = await this.db
-      .prepare(
-        `select latest.source_id, latest.shared_information_change_id,
-                i.shared_information_item_id, s.school_year,
-                p.scope_type, p.grade, p.class_id, p.track_id,
-                p.student_account_id, note.body, note.related_school_date,
-                note.related_period_number, note.related_task_item_id,
-                latest.changed_by_student_account_id, latest.changed_at,
-                i.created_at
-         from shared_information_items i
-         join shared_information_changes latest
-           on latest.shared_information_change_id = i.latest_change_id
-         join target_scopes s on s.target_scope_id = i.target_scope_id
-         join target_scope_parts p on p.target_scope_id = s.target_scope_id
-         join note_snapshots note
-           on note.note_snapshot_id = i.current_note_snapshot_id
-         where i.kind = 'note' and i.removed_at is null
-           and (note.related_context_type in ('none', 'task')
-             or (note.related_context_type in ('school_date', 'daily_lesson')
-               and note.related_school_date = ?))
-           and (select count(*) from target_scope_parts scope_part_count
-                where scope_part_count.target_scope_id = s.target_scope_id) = 1
-           and s.school_year = ? and p.scope_type = ? and ${scopeColumn} = ?
-         order by case when note.related_context_type = 'school_date'
-                   then 0 else 1 end,
-                  i.created_at desc, i.shared_information_item_id desc`,
-      )
-      .bind(
-        schoolDate,
-        targetScope.schoolYear,
-        targetScope.type,
-        scopeValue,
+        start,
+        end,
+        ...scopeQuery.bindings,
       )
       .all<ActiveNoteRow>()
     return results.map(mapActiveNoteRow)
@@ -3213,7 +3091,8 @@ export class D1PersistenceAdapters
     targetScope: TargetScope
     changeDate: string
     periodNumber: number
-  }) {
+  }, scopeAccess: OwnTargetScopeAccess) {
+    if (!targetScopeReadAccessIncludes(scopeAccess, input.targetScope)) return []
     return this.queryTimetableChangeHistory(
       `s.school_year = ? and p.scope_type = ?
        and coalesce(cast(p.grade as text), p.class_id, p.track_id,
@@ -3231,23 +3110,34 @@ export class D1PersistenceAdapters
 
   async listTimetableChangeItemHistory(
     sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
   ) {
+    const scopeQuery = targetScopeAccessQuery(scopeAccess)
     return this.queryTimetableChangeHistory(
-      `i.shared_information_item_id = ?`,
-      [sharedInformationItemId],
+      `i.shared_information_item_id = ? and (${scopeQuery.sql})`,
+      [sharedInformationItemId, ...scopeQuery.bindings],
     )
   }
 
-  async findSharedInformationChange(sharedInformationChangeId: string) {
+  async findSharedInformationChange(
+    sharedInformationChangeId: string,
+    scopeAccess: OwnTargetScopeAccess,
+  ) {
+    const scopeQuery = targetScopeAccessQuery(scopeAccess)
     const row = await this.db
       .prepare(
         `select i.kind, c.shared_information_item_id
          from shared_information_changes c
          join shared_information_items i
            on i.shared_information_item_id = c.shared_information_item_id
-         where c.shared_information_change_id = ?`,
+         join target_scopes s on s.target_scope_id = i.target_scope_id
+         join target_scope_parts p on p.target_scope_id = s.target_scope_id
+         where c.shared_information_change_id = ?
+           and (select count(*) from target_scope_parts scope_part_count
+                where scope_part_count.target_scope_id = s.target_scope_id) = 1
+           and (${scopeQuery.sql})`,
       )
-      .bind(sharedInformationChangeId)
+      .bind(sharedInformationChangeId, ...scopeQuery.bindings)
       .first<{
         kind: 'timetable_change' | 'task' | 'note'
         shared_information_item_id: string
@@ -3260,7 +3150,11 @@ export class D1PersistenceAdapters
       : null
   }
 
-  async listTaskEditHistory(sharedInformationItemId: string) {
+  async listTaskEditHistory(
+    sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
+  ) {
+    const scopeQuery = targetScopeAccessQuery(scopeAccess)
     const { results } = await this.db
       .prepare(
         `select c.shared_information_change_id,
@@ -3284,14 +3178,19 @@ export class D1PersistenceAdapters
              task.registered_related_lesson_name_id
          where i.kind = 'task' and i.shared_information_item_id = ?
            and (select count(*) from target_scope_parts scope_part_count
-                where scope_part_count.target_scope_id = s.target_scope_id) = 1`,
+                where scope_part_count.target_scope_id = s.target_scope_id) = 1
+           and (${scopeQuery.sql})`,
       )
-      .bind(sharedInformationItemId)
+      .bind(sharedInformationItemId, ...scopeQuery.bindings)
       .all<HistoricalTaskChangeRow>()
     return results.map(mapHistoricalTaskChangeRow)
   }
 
-  async listNoteEditHistory(sharedInformationItemId: string) {
+  async listNoteEditHistory(
+    sharedInformationItemId: string,
+    scopeAccess: OwnTargetScopeAccess,
+  ) {
+    const scopeQuery = targetScopeAccessQuery(scopeAccess)
     const { results } = await this.db
       .prepare(
         `select c.shared_information_change_id,
@@ -3334,9 +3233,10 @@ export class D1PersistenceAdapters
            )
          where i.kind = 'note' and i.shared_information_item_id = ?
            and (select count(*) from target_scope_parts scope_part_count
-                where scope_part_count.target_scope_id = s.target_scope_id) = 1`,
+                where scope_part_count.target_scope_id = s.target_scope_id) = 1
+           and (${scopeQuery.sql})`,
       )
-      .bind(sharedInformationItemId)
+      .bind(sharedInformationItemId, ...scopeQuery.bindings)
       .all<HistoricalNoteChangeRow>()
     return results.map(mapHistoricalNoteChangeRow)
   }
@@ -4358,16 +4258,24 @@ function directNoteRelatedContext(
       }
 }
 
-function exactTargetScopeQuery(
-  targetScope: Exclude<TargetScope, { type: 'student' }>,
-) {
-  if (targetScope.type === 'grade') {
-    return { scopeColumn: 'p.grade', scopeValue: targetScope.grade }
-  }
-  if (targetScope.type === 'class') {
-    return { scopeColumn: 'p.class_id', scopeValue: targetScope.classId }
-  }
-  return { scopeColumn: 'p.track_id', scopeValue: targetScope.trackId }
+function targetScopeAccessQuery(scopeAccess: TargetScopeReadAccess) {
+  const bindings: Array<string | number> = []
+  const clauses = targetScopesForReadAccess(scopeAccess).map((targetScope) => {
+    bindings.push(
+      targetScope.schoolYear,
+      targetScope.type,
+      targetScopeValue(targetScope),
+    )
+    const scopeColumn = targetScope.type === 'grade'
+      ? 'p.grade'
+      : targetScope.type === 'class'
+        ? 'p.class_id'
+        : targetScope.type === 'track'
+          ? 'p.track_id'
+          : 'p.student_account_id'
+    return `(s.school_year = ? and p.scope_type = ? and ${scopeColumn} = ?)`
+  })
+  return { sql: clauses.join(' or '), bindings }
 }
 
 function atomicChangeSourceLookup(

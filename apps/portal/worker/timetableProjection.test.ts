@@ -8,6 +8,18 @@ import {
   type TimetableProjectionStore,
 } from './timetableProjection'
 import { expectTimetableProjectionContract } from './timetableProjectionContract.testSupport'
+import { createTargetScopePolicy } from './targetScopePolicy'
+
+const affiliation = {
+  studentAffiliationId: 'affiliation-1',
+  studentAccountId: 'student-1',
+  schoolYear: 2026,
+  grade: 2,
+  classId: 'class-1',
+  trackId: 'track-1',
+  selectedAt: 1,
+  endedAt: null,
+}
 
 describe('InMemory Timetable Projection module', () => {
   it('satisfies the Timetable Projection contract', async () => {
@@ -29,16 +41,7 @@ describe('InMemory Timetable Projection module', () => {
     })
 
     await expect(projection.project({
-      affiliation: {
-        studentAffiliationId: 'affiliation-1',
-        studentAccountId: 'student-1',
-        schoolYear: 2026,
-        grade: 2,
-        classId: 'class-1',
-        trackId: 'track-1',
-        selectedAt: 1,
-        endedAt: null,
-      },
+      scopePolicy: createTargetScopePolicy(affiliation),
       schoolDates: ['2026-07-06'],
     })).rejects.toThrow('duplicate active layers')
   })
@@ -49,16 +52,7 @@ describe('InMemory Timetable Projection module', () => {
     })
 
     await expect(projection.project({
-      affiliation: {
-        studentAffiliationId: 'affiliation-1',
-        studentAccountId: 'student-1',
-        schoolYear: 2026,
-        grade: 2,
-        classId: 'class-1',
-        trackId: 'track-1',
-        selectedAt: 1,
-        endedAt: null,
-      },
+      scopePolicy: createTargetScopePolicy(affiliation),
       schoolDates: ['2026-07-06'],
     })).rejects.toThrow('invalid period number')
   })
@@ -75,16 +69,7 @@ describe('InMemory Timetable Projection module', () => {
     })
 
     await expect(projection.project({
-      affiliation: {
-        studentAffiliationId: 'affiliation-1',
-        studentAccountId: 'student-1',
-        schoolYear: 2026,
-        grade: 2,
-        classId: 'class-1',
-        trackId: 'track-1',
-        selectedAt: 1,
-        endedAt: null,
-      },
+      scopePolicy: createTargetScopePolicy(affiliation),
       schoolDates: ['2026-07-06'],
     })).rejects.toThrow('invalid Period Reference')
   })
@@ -100,7 +85,7 @@ function projectionStoreWithChanges(
     async findStandardTimetableEntryForFloatingReferenceLabelId() {
       return null
     },
-    async listActiveTimetableChangesForStudent() {
+    async listActiveTimetableChanges() {
       return changes
     },
   }

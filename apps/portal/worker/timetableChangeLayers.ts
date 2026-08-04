@@ -13,6 +13,7 @@ import {
   isValidSchoolDate,
 } from './timetable'
 import { createTimetableProjectionModule } from './timetableProjection'
+import { createTargetScopePolicy } from './targetScopePolicy'
 
 type TimetableLayerReplacement = DisplayTimetableReplacement
 
@@ -115,17 +116,14 @@ export async function readTimetableChangeLayerRange({
   const schoolDates = Array.from({ length: dayCount }, (_, day) =>
     new Date(start.getTime() + day * 86_400_000).toISOString().slice(0, 10),
   )
-  const [projections, activeNotesByDate] = await Promise.all([
+  const scopePolicy = createTargetScopePolicy(affiliation)
+  const scopeAccess = scopePolicy.ownReadAccess
+  const [projections, activeNotes] = await Promise.all([
     createTimetableProjectionModule({ store }).project({
-      affiliation,
+      scopePolicy,
       schoolDates,
     }),
-    Promise.all(
-      schoolDates.map(async (schoolDate) => [
-        schoolDate,
-        await store.listActiveNotesForStudent(affiliation, schoolDate),
-      ] as const),
-    ).then((entries) => new Map(entries)),
+    store.listActiveNotes(scopeAccess, startDate, endDate),
   ])
 
   const states: Array<Extract<TimetableChangeLayerResult, { status: 'ready' }>> = []
@@ -140,7 +138,7 @@ export async function readTimetableChangeLayerRange({
       states.push(buildReadyLayerState({
         schoolDate,
         projection,
-        activeNotes: activeNotesByDate.get(schoolDate) ?? [],
+        activeNotes,
       }))
     }
   }
@@ -190,13 +188,15 @@ export async function readTimetableChangeLayers({
     return { status: context.status, schoolYear: schoolYear.schoolYear }
   }
   const affiliation = context.studentAffiliation
+  const scopePolicy = createTargetScopePolicy(affiliation)
+  const scopeAccess = scopePolicy.ownReadAccess
 
   const [projections, activeNotes] = await Promise.all([
     createTimetableProjectionModule({ store }).project({
-      affiliation,
+      scopePolicy,
       schoolDates: [schoolDate],
     }),
-    store.listActiveNotesForStudent(affiliation, schoolDate),
+    store.listActiveNotes(scopeAccess, schoolDate, schoolDate),
   ])
   const projection = projections.find(
     (candidate) => candidate.periodNumber === selectedPeriod,
@@ -218,7 +218,7 @@ function buildReadyLayerState({
 }: {
   schoolDate: string
   projection: TimetableProjection
-  activeNotes: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>
+  activeNotes: Awaited<ReturnType<DailyPlanStore['listActiveNotes']>>
 }): Extract<TimetableChangeLayerResult, { status: 'ready' }> {
   const layers = projection.layers.map((layer) => {
       const active = layer.active

@@ -8,6 +8,7 @@ import {
   createTimetableProjectionModule,
   type TimetableProjectionStore,
 } from './timetableProjection'
+import { createTargetScopePolicy } from './targetScopePolicy'
 
 const affiliation: StudentAffiliation = {
   studentAffiliationId: 'projection-contract-affiliation',
@@ -109,7 +110,7 @@ export async function expectTimetableProjectionContract({
   ])).resolves.toMatchObject({ status: 'applied' })
 
   const result = await createTimetableProjectionModule({ store }).project({
-    affiliation,
+    scopePolicy: createTargetScopePolicy(affiliation),
     schoolDates: ['2026-07-04'],
   })
 

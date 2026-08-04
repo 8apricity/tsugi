@@ -18,6 +18,7 @@ import {
   weekdayForSchoolDate,
 } from './timetable'
 import { createTimetableProjectionModule } from './timetableProjection'
+import { createTargetScopePolicy } from './targetScopePolicy'
 
 type DailyPlanTask = {
   taskId: string
@@ -198,12 +199,18 @@ export async function readDailyPlansRange({
     return sharedContext
   }
 
-  const timetableProjections = await createTimetableProjectionModule({
-    store: dailyPlanStore,
-  }).project({
-    affiliation: sharedContext.studentAffiliation,
-    schoolDates,
-  })
+  const scopePolicy = createTargetScopePolicy(
+    sharedContext.studentAffiliation,
+  )
+  const scopeAccess = scopePolicy.ownReadAccess
+  const [timetableProjections, tasks, notes] = await Promise.all([
+    createTimetableProjectionModule({ store: dailyPlanStore }).project({
+      scopePolicy,
+      schoolDates,
+    }),
+    dailyPlanStore.listActiveTasks(scopeAccess, resolvedStart, resolvedEnd),
+    dailyPlanStore.listActiveNotes(scopeAccess, resolvedStart, resolvedEnd),
+  ])
 
   const dailyPlans: Record<
     string,
@@ -211,21 +218,14 @@ export async function readDailyPlansRange({
   > = {}
 
   for (const date of schoolDates) {
-    const [tasks, notes] = await Promise.all([
-      dailyPlanStore.listActiveTasksForStudent(
-        sharedContext.studentAffiliation,
-        date,
-      ),
-      dailyPlanStore.listActiveNotesForStudent(
-        sharedContext.studentAffiliation,
-        date,
-      ),
-    ])
     dailyPlans[date] = buildReadyDailyPlan({
       schoolDate: date,
       sharedContext,
-      tasks,
-      notes,
+      tasks: tasks.filter((task) =>
+        task.dueDate === null || task.dueDate === date),
+      notes: notes.filter((note) =>
+        note.relatedTaskItemId !== undefined ||
+        note.schoolDate === null || note.schoolDate === date),
       projectedLessons: projectedLessonsForDate(timetableProjections, date),
     })
   }
@@ -259,19 +259,18 @@ async function readDailyPlanForAuthenticatedStudent({
     return sharedContext
   }
 
+  const scopePolicy = createTargetScopePolicy(
+    sharedContext.studentAffiliation,
+  )
+  const scopeAccess = scopePolicy.ownReadAccess
+
   const [timetableProjections, tasks, notes] = await Promise.all([
     createTimetableProjectionModule({ store }).project({
-      affiliation: sharedContext.studentAffiliation,
+      scopePolicy,
       schoolDates: [schoolDate],
     }),
-    store.listActiveTasksForStudent(
-      sharedContext.studentAffiliation,
-      schoolDate,
-    ),
-    store.listActiveNotesForStudent(
-      sharedContext.studentAffiliation,
-      schoolDate,
-    ),
+    store.listActiveTasks(scopeAccess, schoolDate, schoolDate),
+    store.listActiveNotes(scopeAccess, schoolDate, schoolDate),
   ])
 
   return buildReadyDailyPlan({
@@ -341,8 +340,8 @@ function buildReadyDailyPlan({
     { status: 'ready' }
   >
   projectedLessons: Map<number, ProjectedDailyLesson>
-  tasks: Awaited<ReturnType<DailyPlanStore['listActiveTasksForStudent']>>
-  notes: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>
+  tasks: Awaited<ReturnType<DailyPlanStore['listActiveTasks']>>
+  notes: Awaited<ReturnType<DailyPlanStore['listActiveNotes']>>
 }): Extract<DailyPlanResult, { status: 'ready' }> {
   const weekday = weekdayForSchoolDate(schoolDate)
   return {
@@ -415,7 +414,7 @@ function buildReadyDailyPlan({
 }
 
 function toDailyPlanNote(
-  note: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>[number],
+  note: Awaited<ReturnType<DailyPlanStore['listActiveNotes']>>[number],
 ): DailyPlanNote {
   return {
     noteId: note.sharedInformationItemId,
@@ -444,8 +443,8 @@ const targetScopeOrder = new Map([
 ])
 
 function compareDailyLessonNotes(
-  left: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>[number],
-  right: Awaited<ReturnType<DailyPlanStore['listActiveNotesForStudent']>>[number],
+  left: Awaited<ReturnType<DailyPlanStore['listActiveNotes']>>[number],
+  right: Awaited<ReturnType<DailyPlanStore['listActiveNotes']>>[number],
 ) {
   const scopeDifference =
     (targetScopeOrder.get(left.targetScope.type) ?? 4) -

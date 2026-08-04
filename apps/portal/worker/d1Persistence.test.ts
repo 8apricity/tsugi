@@ -32,6 +32,51 @@ import {
 import {
   createInMemoryAtomicChangeExecutor,
 } from './sharedInformationChange/inMemoryAtomicChangeExecutor'
+import {
+  createTargetScopePolicy,
+  targetScopeValue,
+} from './targetScopePolicy'
+
+function ownScopeAccess(affiliation: StudentAffiliation) {
+  return createTargetScopePolicy(affiliation).ownReadAccess
+}
+
+function ownScopeAccessFor(targetScope: TargetScope) {
+  return ownScopeAccess({
+    studentAffiliationId: 'scope-owner-affiliation',
+    studentAccountId: targetScope.type === 'student'
+      ? targetScope.studentAccountId
+      : 'scope-owner',
+    schoolYear: targetScope.schoolYear,
+    grade: targetScope.type === 'grade' ? targetScope.grade : -1,
+    classId: targetScope.type === 'class'
+      ? targetScope.classId
+      : 'scope-owner-class',
+    trackId: targetScope.type === 'track'
+      ? targetScope.trackId
+      : 'scope-owner-track',
+    selectedAt: 1,
+    endedAt: null,
+  })
+}
+
+async function exactReferenceScopeAccess(
+  store: PersistenceAdapters['dailyPlan'],
+  targetScope: Exclude<TargetScope, { type: 'student' }>,
+) {
+  const access = await createTargetScopePolicy({
+    studentAccountId: 'reference-viewer',
+    schoolYear: targetScope.schoolYear,
+    grade: -1,
+    classId: 'reference-viewer-class',
+    trackId: 'reference-viewer-track',
+  }).resolveReferenceScope(
+    { type: targetScope.type, value: targetScopeValue(targetScope) },
+    store,
+  )
+  if (!access) throw new Error('test Reference Scope must be selectable')
+  return access
+}
 
 async function commitTimetableTestOperations(
   store: {
@@ -686,7 +731,11 @@ describe('D1 Direct Timetable Change persistence', () => {
       directChangeCommitStore(adapters).commitDirectChanges([timetable, task, note]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-10'),
+      adapters.dailyPlan.listActiveTasks(
+        ownScopeAccess(affiliation),
+        '2026-07-10',
+        '2026-07-10',
+      ),
     ).resolves.toEqual([
       expect.objectContaining({
         title: '地理ワークを提出',
@@ -698,7 +747,11 @@ describe('D1 Direct Timetable Change persistence', () => {
       }),
     ])
     await expect(
-      adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
+      adapters.dailyPlan.listActiveNotes(
+        ownScopeAccess(affiliation),
+        '2026-07-10',
+        '2026-07-10',
+      ),
     ).resolves.toEqual([
       expect.objectContaining({
         body: '集合場所は視聴覚室です。\n上履きを持参してください。',
@@ -749,7 +802,11 @@ describe('D1 Direct Timetable Change persistence', () => {
       directChangeCommitStore(adapters).commitDirectChanges([noteUpdate]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
+      adapters.dailyPlan.listActiveNotes(
+        ownScopeAccess(affiliation),
+        '2026-07-10',
+        '2026-07-10',
+      ),
     ).resolves.toEqual([
       expect.objectContaining({
         body: noteUpdate.body,
@@ -759,8 +816,9 @@ describe('D1 Direct Timetable Change persistence', () => {
       }),
     ])
     await expect(
-      adapters.dailyPlan.listActiveNotesForTargetScope(
-        note.targetScope,
+      adapters.dailyPlan.listActiveNotes(
+        await exactReferenceScopeAccess(adapters.dailyPlan, note.targetScope),
+        '2026-07-10',
         '2026-07-10',
       ),
     ).resolves.toEqual([
@@ -770,8 +828,12 @@ describe('D1 Direct Timetable Change persistence', () => {
       }),
     ])
     await expect(
-      adapters.dailyPlan.listActiveNotesForTargetScope(
-        { type: 'grade', schoolYear: 2026, grade: 2 },
+      adapters.dailyPlan.listActiveNotes(
+        await exactReferenceScopeAccess(
+          adapters.dailyPlan,
+          { type: 'grade', schoolYear: 2026, grade: 2 },
+        ),
+        '2026-07-10',
         '2026-07-10',
       ),
     ).resolves.toEqual([])
@@ -792,10 +854,17 @@ describe('D1 Direct Timetable Change persistence', () => {
       directChangeCommitStore(adapters).commitDirectChanges([noteRemove]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.dailyPlan.listActiveNotesForStudent(affiliation, '2026-07-10'),
+      adapters.dailyPlan.listActiveNotes(
+        ownScopeAccess(affiliation),
+        '2026-07-10',
+        '2026-07-10',
+      ),
     ).resolves.toEqual([])
     await expect(
-      adapters.editHistory.listNoteEditHistory(note.sharedInformationItemId),
+      adapters.editHistory.listNoteEditHistory(
+        note.sharedInformationItemId,
+        ownScopeAccess(affiliation),
+      ),
     ).resolves.toEqual(expect.arrayContaining([
       { changeKind: 'add', snapshot: { body: note.body } },
       {
@@ -811,12 +880,13 @@ describe('D1 Direct Timetable Change persistence', () => {
       },
     ].map((entry) => expect.objectContaining(entry))))
     await expect(
-      adapters.dailyPlan.listActiveTasksForTargetScope(
-        {
+      adapters.dailyPlan.listActiveTasks(
+        await exactReferenceScopeAccess(adapters.dailyPlan, {
           type: 'track',
           schoolYear: 2026,
           trackId: 'task-track-1',
-        },
+        }),
+        '2026-07-10',
         '2026-07-10',
       ),
     ).resolves.toEqual([
@@ -847,7 +917,11 @@ describe('D1 Direct Timetable Change persistence', () => {
       directChangeCommitStore(adapters).commitDirectChanges([taskUpdate]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-11'),
+      adapters.dailyPlan.listActiveTasks(
+        ownScopeAccess(affiliation),
+        '2026-07-11',
+        '2026-07-11',
+      ),
     ).resolves.toEqual([
       expect.objectContaining({
         sharedInformationItemId: task.sharedInformationItemId,
@@ -884,7 +958,11 @@ describe('D1 Direct Timetable Change persistence', () => {
       directChangeCommitStore(adapters).commitDirectChanges([taskRemove]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.dailyPlan.listActiveTasksForStudent(affiliation, '2026-07-11'),
+      adapters.dailyPlan.listActiveTasks(
+        ownScopeAccess(affiliation),
+        '2026-07-11',
+        '2026-07-11',
+      ),
     ).resolves.toEqual([])
     expect(database.prepare(
       `select latest_change_id, current_task_snapshot_id,
@@ -960,8 +1038,8 @@ describe('D1 Direct Timetable Change persistence', () => {
       ]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.dailyPlan.listActiveTimetableChangesForStudent(
-        affiliation,
+      adapters.dailyPlan.listActiveTimetableChanges(
+        ownScopeAccess(affiliation),
         '2026-07-10',
         '2026-07-10',
       ),
@@ -976,6 +1054,7 @@ describe('D1 Direct Timetable Change persistence', () => {
     await expect(
       adapters.editHistory.listTimetableChangeItemHistory(
         timetable.sharedInformationItemId,
+        ownScopeAccess(affiliation),
       ),
     ).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1162,7 +1241,10 @@ describe('D1 Direct Timetable Change persistence', () => {
       select count(*) as count from shared_information_changes
       where shared_information_item_id = ? and change_kind = 'remove'
     `).get(noteId)).toEqual({ count: 1 })
-    await expect(adapters.editHistory.listNoteEditHistory(noteId))
+    await expect(adapters.editHistory.listNoteEditHistory(
+      noteId,
+      ownScopeAccessFor(note.targetScope),
+    ))
       .resolves.toEqual(expect.arrayContaining([
         expect.objectContaining({
           changeKind: 'remove',
@@ -1232,7 +1314,10 @@ describe('D1 Direct Timetable Change persistence', () => {
       where shared_information_item_id = ?
     `).run('proposal-history-change', 'proposal-history-snapshot', taskId)
 
-    const history = await adapters.editHistory.listTaskEditHistory(taskId)
+    const history = await adapters.editHistory.listTaskEditHistory(
+      taskId,
+      ownScopeAccessFor(add.targetScope),
+    )
     expect(history).toHaveLength(2)
     expect(history[0]).toMatchObject({
       sourceType: 'direct',
@@ -1299,7 +1384,10 @@ describe('D1 Direct Timetable Change persistence', () => {
       noteId,
     )
 
-    const noteHistory = await adapters.editHistory.listNoteEditHistory(noteId)
+    const noteHistory = await adapters.editHistory.listNoteEditHistory(
+      noteId,
+      ownScopeAccessFor(noteAdd.targetScope),
+    )
     expect(noteHistory).toHaveLength(2)
     expect(noteHistory[1]).toMatchObject({
       sourceType: 'proposal',
@@ -1463,7 +1551,7 @@ describe('D1 Direct Timetable Change persistence', () => {
       targetScope: { type: 'track', schoolYear: 2026, trackId: 'track-1' },
       changeDate: '2026-07-10',
       periodNumber: 1,
-    })).resolves.toEqual([
+    }, ownScopeAccess(affiliation))).resolves.toEqual([
       expect.objectContaining({
         sharedInformationChangeId: add.latestChangeId,
         changeKind: 'add',
@@ -1490,8 +1578,8 @@ describe('D1 Direct Timetable Change persistence', () => {
       commitTimetableTestOperations(directChangeCommitStore(adapters), [replacementAdd]),
     ).resolves.toMatchObject({ status: 'applied' })
     await expect(
-      adapters.dailyPlan.listActiveTimetableChangesForStudent(
-        affiliation,
+      adapters.dailyPlan.listActiveTimetableChanges(
+        ownScopeAccess(affiliation),
         '2026-07-10',
         '2026-07-10',
       ),
@@ -1581,8 +1669,8 @@ describe('D1 Direct Timetable Change persistence', () => {
     )
 
     await expect(
-      adapters.dailyPlan.listActiveTimetableChangesForStudent(
-        affiliation,
+      adapters.dailyPlan.listActiveTimetableChanges(
+        ownScopeAccess(affiliation),
         '2026-07-10',
         '2026-07-10',
       ),
@@ -1668,8 +1756,8 @@ describe.each(targetScopeMembershipAdapterCases)(
       ).resolves.toMatchObject({ status: 'applied' })
 
       await expect(
-        adapters.dailyPlan.listActiveTimetableChangesForStudent(
-          affiliation,
+        adapters.dailyPlan.listActiveTimetableChanges(
+          ownScopeAccess(affiliation),
           '2026-07-10',
           '2026-07-10',
         ),
@@ -1687,7 +1775,7 @@ describe.each(targetScopeMembershipAdapterCases)(
           targetScope: change.targetScope,
           changeDate: change.changeDate,
           periodNumber: change.periodNumber,
-        }),
+        }, ownScopeAccess(affiliation)),
       ).resolves.toEqual([
         expect.objectContaining({
           replacement: {
@@ -1777,7 +1865,10 @@ describe.each(targetScopeMembershipAdapterCases)(
         normalizedFullLessonName: '履歴地理総合',
       })
 
-      await expect(adapters.editHistory.listTaskEditHistory(taskId))
+      await expect(adapters.editHistory.listTaskEditHistory(
+        taskId,
+        ownScopeAccessFor(add.targetScope),
+      ))
         .resolves.toEqual([
           expect.objectContaining({
             sharedInformationChangeId: add.latestChangeId,
@@ -1890,15 +1981,35 @@ describe.each(targetScopeMembershipAdapterCases)(
         },
       ] as const) {
         await expect(
-          adapters.editHistory.findSharedInformationChange(expected.changeId),
+          adapters.editHistory.findSharedInformationChange(
+            expected.changeId,
+            ownScopeAccessFor(add.targetScope),
+          ),
         ).resolves.toEqual({
           kind: expected.kind,
           sharedInformationItemId: expected.itemId,
         })
       }
       await expect(
-        adapters.editHistory.findSharedInformationChange('unknown-change'),
+        adapters.editHistory.findSharedInformationChange(
+          'unknown-change',
+          ownScopeAccessFor(add.targetScope),
+        ),
       ).resolves.toBeNull()
+
+      const outsideAccess = ownScopeAccessFor({
+        type: 'student',
+        schoolYear: 2026,
+        studentAccountId: 'outside-student',
+      })
+      await expect(adapters.editHistory.findSharedInformationChange(
+        add.latestChangeId,
+        outsideAccess,
+      )).resolves.toBeNull()
+      await expect(adapters.editHistory.listTaskEditHistory(
+        taskId,
+        outsideAccess,
+      )).resolves.toEqual([])
     })
   },
 )
@@ -1981,8 +2092,8 @@ describe.each(targetScopeMembershipAdapterCases)(
       ).resolves.toMatchObject({ status: 'applied' })
 
       const visible =
-        await adapters.dailyPlan.listActiveTimetableChangesForStudent(
-          affiliation,
+        await adapters.dailyPlan.listActiveTimetableChanges(
+          createTargetScopePolicy(affiliation).ownReadAccess,
           '2026-07-10',
           '2026-07-10',
         )
@@ -1995,8 +2106,186 @@ describe.each(targetScopeMembershipAdapterCases)(
         })),
       )
     })
+
+    it('uses the same batched interface for own and exact Reference Scope reads', async () => {
+      const adapters = createAdapters()
+      const affiliation: StudentAffiliation = {
+        studentAffiliationId: 'scope-contract-affiliation',
+        studentAccountId: 'scope-contract-student',
+        schoolYear: 2026,
+        grade: 2,
+        classId: 'scope-contract-class',
+        trackId: 'scope-contract-track',
+        selectedAt: 1,
+        endedAt: null,
+      }
+      await adapters.seed.saveStudentAccount({
+        studentAccountId: affiliation.studentAccountId,
+        schoolEmail: 'scope-contract@example.invalid',
+        displayName: 'Scope Contract',
+      })
+      await adapters.seed.saveSchoolYearClass({
+        classId: affiliation.classId,
+        schoolYear: 2026,
+        grade: 2,
+        classNumber: 1,
+      })
+      await adapters.seed.saveTrack({
+        trackId: affiliation.trackId,
+        classId: affiliation.classId,
+        trackName: 'Own Track',
+      })
+      await adapters.seed.saveSchoolYearClass({
+        classId: 'scope-contract-reference-class',
+        schoolYear: 2026,
+        grade: 2,
+        classNumber: 2,
+      })
+      const ownTask = taskOperation({
+        sourceId: '48111111-1111-4111-8111-111111111111',
+        targetScope: {
+          type: 'student',
+          schoolYear: 2026,
+          studentAccountId: affiliation.studentAccountId,
+        },
+        title: 'Own Task',
+        dueDate: '2026-07-11',
+        studentAccountId: affiliation.studentAccountId,
+      })
+      const referenceTask = taskOperation({
+        sourceId: '48222222-2222-4222-8222-222222222222',
+        targetScope: {
+          type: 'class',
+          schoolYear: 2026,
+          classId: 'scope-contract-reference-class',
+        },
+        title: 'Reference Task',
+        dueDate: '2026-07-10',
+        studentAccountId: affiliation.studentAccountId,
+      })
+      const ownNote = noteOperation({
+        sourceId: '48333333-3333-4333-8333-333333333333',
+        targetScope: {
+          type: 'track',
+          schoolYear: 2026,
+          trackId: affiliation.trackId,
+        },
+        body: 'Own Note',
+        schoolDate: '2026-07-11',
+        studentAccountId: affiliation.studentAccountId,
+      })
+      const referenceNote = noteOperation({
+        sourceId: '48444444-4444-4444-8444-444444444444',
+        targetScope: referenceTask.targetScope,
+        body: 'Reference Note',
+        schoolDate: '2026-07-10',
+        studentAccountId: affiliation.studentAccountId,
+      })
+      await expect(directChangeCommitStore(adapters).commitDirectChanges([
+        ownTask,
+        referenceTask,
+        ownNote,
+        referenceNote,
+      ])).resolves.toMatchObject({ status: 'applied' })
+
+      const ownAccess = ownScopeAccess(affiliation)
+      await expect(adapters.dailyPlan.listActiveTasks(
+        ownAccess,
+        '2026-07-10',
+        '2026-07-11',
+      )).resolves.toEqual([
+        expect.objectContaining({ title: 'Own Task' }),
+      ])
+      await expect(adapters.dailyPlan.listActiveNotes(
+        ownAccess,
+        '2026-07-10',
+        '2026-07-11',
+      )).resolves.toEqual([
+        expect.objectContaining({ body: 'Own Note' }),
+      ])
+
+      if (referenceTask.targetScope.type === 'student') {
+        throw new Error('Reference Task must not use a Student Scope')
+      }
+      const referenceAccess = await exactReferenceScopeAccess(
+        adapters.dailyPlan,
+        referenceTask.targetScope,
+      )
+      await expect(adapters.dailyPlan.listActiveTasks(
+        referenceAccess,
+        '2026-07-10',
+        '2026-07-11',
+      )).resolves.toEqual([
+        expect.objectContaining({ title: 'Reference Task' }),
+      ])
+      await expect(adapters.dailyPlan.listActiveNotes(
+        referenceAccess,
+        '2026-07-10',
+        '2026-07-11',
+      )).resolves.toEqual([
+        expect.objectContaining({ body: 'Reference Note' }),
+      ])
+    })
   },
 )
+
+function taskOperation({
+  sourceId,
+  targetScope,
+  title,
+  dueDate,
+  studentAccountId,
+}: {
+  sourceId: string
+  targetScope: TargetScope
+  title: string
+  dueDate: string
+  studentAccountId: string
+}): DirectChangeOperation {
+  return {
+    kind: 'task',
+    changeKind: 'add',
+    sourceId,
+    sharedInformationItemId: sourceId,
+    latestChangeId: `${sourceId}:change`,
+    targetScope,
+    title,
+    dueDate,
+    relatedLessonName: null,
+    changedByStudentAccountId: studentAccountId,
+    changedAt: 1,
+    createdAt: 1,
+  }
+}
+
+function noteOperation({
+  sourceId,
+  targetScope,
+  body,
+  schoolDate,
+  studentAccountId,
+}: {
+  sourceId: string
+  targetScope: TargetScope
+  body: string
+  schoolDate: string
+  studentAccountId: string
+}): DirectChangeOperation {
+  return {
+    kind: 'note',
+    changeKind: 'add',
+    sourceId,
+    sharedInformationItemId: sourceId,
+    latestChangeId: `${sourceId}:change`,
+    targetScope,
+    schoolDate,
+    periodNumber: null,
+    body,
+    changedByStudentAccountId: studentAccountId,
+    changedAt: 1,
+    createdAt: 1,
+  }
+}
 
 type OperationOverrides =
   | {

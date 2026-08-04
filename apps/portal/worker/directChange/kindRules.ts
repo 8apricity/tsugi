@@ -10,8 +10,8 @@ import {
   type TimetableReplacementValue,
 } from '../sharedInformationChange/atomicProgram'
 import {
+  createTargetScopePolicy,
   isTargetScopeType,
-  targetScopeForStudentAffiliation,
   type TargetScopeType,
 } from '../targetScopePolicy'
 import { isValidSchoolDate } from '../timetable'
@@ -370,10 +370,8 @@ function directChangeBase<K extends DirectChangeKind>(
     source,
     sharedInformationItemId,
     persistenceIds: persistenceIds(source),
-    targetScope: targetScopeForStudentAffiliation(
-      context.studentAffiliation,
-      targetScopeType,
-    ),
+    targetScope: createTargetScopePolicy(context.studentAffiliation)
+      .creatorTargetScope(targetScopeType),
     changedByStudentAccountId: context.studentAccount.studentAccountId,
   }
 }

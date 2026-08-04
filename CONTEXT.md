@@ -42,7 +42,7 @@ The student's self-declared actual name. The initial release does not collect or
 _Avoid_: Display name, nickname
 
 **Named Attribution**:
-Showing a student's display name as the source of Tsugi activity in edit history. Ordinary shared-information views do not show attribution. Direct Change history shows the student who made the change to students inside the Target Scope; future Change Proposal history may also show the students who proposed, approved, or rejected it there. Reference Scope inspection does not expose those student names.
+Showing a student's display name as the source of Tsugi activity in edit history. Ordinary shared-information views do not show attribution. Direct Change history shows the student who made the change only to students currently inside the Target Scope under their current Student Affiliation; this check does not use affiliation at the time of the change. Future Change Proposal history may also show the students who proposed, approved, or rejected it under the same rule. Reference Scope inspection does not expose those student names.
 _Avoid_: Real-name attribution, anonymous identity, reputation
 
 **Edit History**:

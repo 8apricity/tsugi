@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { StudentAffiliation } from './persistence'
-import { targetScopeValue } from './targetScopeBoundary'
 import {
-  studentCanViewTargetScopeNamedAttribution,
+  createTargetScopePolicy,
   isTargetScopeType,
-  studentAffiliationIncludesTargetScope,
-  targetScopeForStudentAffiliation,
+  targetScopeReadAccessIncludes,
+  targetScopeValue,
   targetScopesEqual,
   type TargetScope,
   type TargetScopeType,
@@ -22,7 +21,95 @@ const affiliation: StudentAffiliation = {
   endedAt: null,
 }
 
+const schoolStructure = {
+  async listClassesForSchoolYear() {
+    return [
+      { classId: 'class-1', schoolYear: 2026, grade: 2, classNumber: 1 },
+      { classId: 'class-2', schoolYear: 2026, grade: 2, classNumber: 2 },
+      { classId: 'class-3', schoolYear: 2026, grade: 3, classNumber: 1 },
+    ]
+  },
+  async listTracksForSchoolYear() {
+    return [
+      { trackId: 'track-1', classId: 'class-1', trackName: '文系' },
+      { trackId: 'track-2', classId: 'class-1', trackName: '理系' },
+      { trackId: 'track-3', classId: 'class-2', trackName: '文系' },
+    ]
+  },
+}
+
 describe('Target Scope policy', () => {
+  it('materialises the current Student own Target Scopes once', () => {
+    const policy = createTargetScopePolicy(affiliation)
+
+    expect(policy.ownReadAccess.targetScopes).toEqual([
+      { type: 'grade', schoolYear: 2026, grade: 2 },
+      { type: 'class', schoolYear: 2026, classId: 'class-1' },
+      { type: 'track', schoolYear: 2026, trackId: 'track-1' },
+      {
+        type: 'student',
+        schoolYear: 2026,
+        studentAccountId: 'student-1',
+      },
+    ])
+  })
+
+  it('lists only selectable Reference Scopes from the current School Year', async () => {
+    const choices = await createTargetScopePolicy(affiliation)
+      .listReferenceScopes(schoolStructure)
+
+    expect(choices).toEqual([
+      {
+        targetScope: { type: 'grade', schoolYear: 2026, grade: 3 },
+      },
+      {
+        targetScope: { type: 'class', schoolYear: 2026, classId: 'class-2' },
+        grade: 2,
+        classNumber: 2,
+      },
+      {
+        targetScope: { type: 'class', schoolYear: 2026, classId: 'class-3' },
+        grade: 3,
+        classNumber: 1,
+      },
+      {
+        targetScope: { type: 'track', schoolYear: 2026, trackId: 'track-2' },
+        grade: 2,
+        classNumber: 1,
+        trackName: '理系',
+      },
+      {
+        targetScope: { type: 'track', schoolYear: 2026, trackId: 'track-3' },
+        grade: 2,
+        classNumber: 2,
+        trackName: '文系',
+      },
+    ])
+  })
+
+  it('resolves only an exact selectable Reference Scope', async () => {
+    const policy = createTargetScopePolicy(affiliation)
+    const selected = await policy.resolveReferenceScope(
+      { type: 'class', value: 'class-2' },
+      schoolStructure,
+    )
+
+    expect(selected).toMatchObject({
+      kind: 'reference',
+      targetScope: {
+        type: 'class',
+        schoolYear: 2026,
+        classId: 'class-2',
+      },
+    })
+    await expect(Promise.all([
+      policy.resolveReferenceScope({ type: 'class', value: 'class-1' }, schoolStructure),
+      policy.resolveReferenceScope({ type: 'student', value: 'student-2' }, schoolStructure),
+      policy.resolveReferenceScope({ type: 'track', value: 'missing' }, schoolStructure),
+      policy.resolveReferenceScope({ type: null, value: null }, schoolStructure),
+    ])).resolves.toEqual([null, null, null, null])
+  })
+
   it('recognises only current Target Scope types', () => {
     expect(
       ['grade', 'class', 'track', 'student', 'group', null].map(
@@ -56,7 +143,9 @@ describe('Target Scope policy', () => {
       },
     },
   ])('derives the Student $type Creator Scope', ({ type, expected }) => {
-    expect(targetScopeForStudentAffiliation(affiliation, type)).toEqual(expected)
+    expect(
+      createTargetScopePolicy(affiliation).creatorTargetScope(type),
+    ).toEqual(expected)
   })
 
   it.each<TargetScope>([
@@ -70,7 +159,10 @@ describe('Target Scope policy', () => {
     },
   ])('includes the Student in their $type Target Scope', (targetScope) => {
     expect(
-      studentAffiliationIncludesTargetScope(affiliation, targetScope),
+      targetScopeReadAccessIncludes(
+        createTargetScopePolicy(affiliation).ownReadAccess,
+        targetScope,
+      ),
     ).toBe(true)
   })
 
@@ -86,24 +178,25 @@ describe('Target Scope policy', () => {
     },
   ])('excludes the Student from a different $type Target Scope', (targetScope) => {
     expect(
-      studentAffiliationIncludesTargetScope(affiliation, targetScope),
+      targetScopeReadAccessIncludes(
+        createTargetScopePolicy(affiliation).ownReadAccess,
+        targetScope,
+      ),
     ).toBe(false)
   })
 
-  it('allows Named Attribution only for a current Target Scope member', () => {
+  it('makes current membership available to Named Attribution reads', () => {
     expect(
-      studentCanViewTargetScopeNamedAttribution(affiliation, {
-        type: 'track',
-        schoolYear: 2026,
-        trackId: 'track-1',
-      }),
+      targetScopeReadAccessIncludes(
+        createTargetScopePolicy(affiliation).ownReadAccess,
+        { type: 'track', schoolYear: 2026, trackId: 'track-1' },
+      ),
     ).toBe(true)
     expect(
-      studentCanViewTargetScopeNamedAttribution(affiliation, {
-        type: 'track',
-        schoolYear: 2026,
-        trackId: 'track-2',
-      }),
+      targetScopeReadAccessIncludes(
+        createTargetScopePolicy(affiliation).ownReadAccess,
+        { type: 'track', schoolYear: 2026, trackId: 'track-2' },
+      ),
     ).toBe(false)
   })
 

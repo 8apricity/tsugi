@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createInMemoryPersistenceAdapters } from '../persistence'
 import type { ReadyStudentOperationalContext } from '../studentOperationalContext'
 import { createDirectChangeApplication } from './application'
+import { createTargetScopePolicy } from '../targetScopePolicy'
 import {
   expectChangeSourceIsolationContract,
   expectDirectChangeApplicationContract,
@@ -135,8 +136,9 @@ describe('DirectChangeApplication', () => {
     })
 
     await expect(
-      persistence.dailyPlan.listActiveNotesForStudent(
-        context.studentAffiliation,
+      persistence.dailyPlan.listActiveNotes(
+        createTargetScopePolicy(context.studentAffiliation).ownReadAccess,
+        '2026-07-31',
         '2026-07-31',
       ),
     ).resolves.toEqual([
@@ -237,8 +239,9 @@ describe('DirectChangeApplication', () => {
       ],
     })
     await expect(
-      persistence.dailyPlan.listActiveTasksForStudent(
-        context.studentAffiliation,
+      persistence.dailyPlan.listActiveTasks(
+        createTargetScopePolicy(context.studentAffiliation).ownReadAccess,
+        '2026-07-31',
         '2026-07-31',
       ),
     ).resolves.toEqual([
@@ -248,8 +251,9 @@ describe('DirectChangeApplication', () => {
       }),
     ])
     await expect(
-      persistence.dailyPlan.listActiveNotesForStudent(
-        context.studentAffiliation,
+      persistence.dailyPlan.listActiveNotes(
+        createTargetScopePolicy(context.studentAffiliation).ownReadAccess,
+        '2026-07-31',
         '2026-07-31',
       ),
     ).resolves.toEqual([
@@ -308,8 +312,9 @@ describe('DirectChangeApplication', () => {
       sourceIds: [updateSourceId],
     })
     await expect(
-      persistence.dailyPlan.listActiveNotesForStudent(
-        context.studentAffiliation,
+      persistence.dailyPlan.listActiveNotes(
+        createTargetScopePolicy(context.studentAffiliation).ownReadAccess,
+        '2026-07-31',
         '2026-07-31',
       ),
     ).resolves.toEqual([])
@@ -360,7 +365,10 @@ describe('DirectChangeApplication', () => {
     })).resolves.toMatchObject({ status: 'applied' })
 
     await expect(
-      persistence.editHistory.listNoteEditHistory(noteSourceId),
+      persistence.editHistory.listNoteEditHistory(
+        noteSourceId,
+        createTargetScopePolicy(context.studentAffiliation).ownReadAccess,
+      ),
     ).resolves.toEqual([
       expect.objectContaining({
         changeKind: 'add',

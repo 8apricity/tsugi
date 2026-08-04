@@ -8,6 +8,7 @@ import {
   type ChangeSource,
 } from '../sharedInformationChange/atomicProgram'
 import { createDirectChangeApplication } from './application'
+import { createTargetScopePolicy } from '../targetScopePolicy'
 
 const taskId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const taskNoteId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -127,7 +128,10 @@ export async function expectDirectChangeApplicationContract(
     changes: [{ sourceId: removalId, sharedInformationItemId: taskId }],
   })
   await expect(
-    persistence.editHistory.listNoteEditHistory(taskNoteId),
+    persistence.editHistory.listNoteEditHistory(
+      taskNoteId,
+      createTargetScopePolicy(context.studentAffiliation).ownReadAccess,
+    ),
   ).resolves.toEqual([
     expect.objectContaining({
       changeKind: 'add',
@@ -227,7 +231,10 @@ export async function expectChangeSourceIsolationContract(
   })
 
   await expect(
-    persistence.editHistory.listNoteEditHistory('proposal-note-item'),
+    persistence.editHistory.listNoteEditHistory(
+      'proposal-note-item',
+      createTargetScopePolicy(context.studentAffiliation).ownReadAccess,
+    ),
   ).resolves.toEqual([
     expect.objectContaining({
       sharedInformationChangeId:
@@ -237,7 +244,10 @@ export async function expectChangeSourceIsolationContract(
     }),
   ])
   await expect(
-    persistence.editHistory.listNoteEditHistory('direct-note-item'),
+    persistence.editHistory.listNoteEditHistory(
+      'direct-note-item',
+      createTargetScopePolicy(context.studentAffiliation).ownReadAccess,
+    ),
   ).resolves.toEqual([
     expect.objectContaining({
       sharedInformationChangeId: `${sharedSourceId}:change`,

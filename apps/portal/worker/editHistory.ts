@@ -25,11 +25,11 @@ import type {
   TaskHistorySnapshot,
 } from '../shared/taskEditHistory'
 import { resolveStudentOperationalContext } from './studentOperationalContext'
-import { targetScopeValue } from './targetScopeBoundary'
 import {
+  createTargetScopePolicy,
   isTargetScopeType,
-  studentCanViewTargetScopeNamedAttribution,
-  targetScopeForStudentAffiliation,
+  targetScopeValue,
+  type OwnTargetScopeAccess,
 } from './targetScopePolicy'
 import { isValidSchoolDate } from './timetable'
 
@@ -84,15 +84,12 @@ export async function readTimetableChangeHistory({
   ) {
     return { status: 'invalid-selection' as const }
   }
-  const targetScope = targetScopeForStudentAffiliation(
-    access.affiliation,
-    targetScopeType,
-  )
+  const targetScope = access.scopePolicy.creatorTargetScope(targetScopeType)
   const changes = await historyStore.listTimetableChangeHistory({
     targetScope,
     changeDate,
     periodNumber: selectedPeriod,
-  })
+  }, access.scopePolicy.ownReadAccess)
   const entries = reconstructTimetableTransitions(changes, {
     targetScopeValue: targetScopeValue(targetScope),
     targetScopeType: targetScope.type,
@@ -131,8 +128,8 @@ export async function readTaskEditHistory({
     studentAccountStore,
     dailyPlanStore,
     sharedInformationItemId,
-    loadChanges: () =>
-      historyStore.listTaskEditHistory(sharedInformationItemId),
+    loadChanges: (scopeAccess) =>
+      historyStore.listTaskEditHistory(sharedInformationItemId, scopeAccess),
     toEntry: ({ change, before, after }) => {
       const entry = {
         sharedInformationChangeId: change.sharedInformationChangeId,
@@ -183,8 +180,8 @@ export async function readNoteEditHistory({
     studentAccountStore,
     dailyPlanStore,
     sharedInformationItemId,
-    loadChanges: () =>
-      historyStore.listNoteEditHistory(sharedInformationItemId),
+    loadChanges: (scopeAccess) =>
+      historyStore.listNoteEditHistory(sharedInformationItemId, scopeAccess),
     immutableKey: (change) =>
       `${scopeKey(change.targetScope)}:${
         noteRelatedContextKey(change.relatedContext)
@@ -237,18 +234,11 @@ export async function readSharedInformationChangeDetail({
 
   const identity = await historyStore.findSharedInformationChange(
     sharedInformationChangeId,
+    access.scopePolicy.ownReadAccess,
   )
   if (!identity) {
     return { status: 'not-found' as const }
   }
-  const canView = (change: {
-    targetScope: HistoricalTaskChange['targetScope']
-  }) =>
-    studentCanViewTargetScopeNamedAttribution(
-      access.affiliation,
-      change.targetScope,
-    )
-
   switch (identity.kind) {
     case 'timetable_change':
       return readTimetableSharedInformationChangeDetail({
@@ -256,8 +246,8 @@ export async function readSharedInformationChangeDetail({
         sharedInformationItemId: identity.sharedInformationItemId,
         changes: await historyStore.listTimetableChangeItemHistory(
           identity.sharedInformationItemId,
+          access.scopePolicy.ownReadAccess,
         ),
-        canView,
       })
     case 'task':
       return readItemSharedInformationChangeDetail<
@@ -268,8 +258,8 @@ export async function readSharedInformationChangeDetail({
         sharedInformationItemId: identity.sharedInformationItemId,
         changes: await historyStore.listTaskEditHistory(
           identity.sharedInformationItemId,
+          access.scopePolicy.ownReadAccess,
         ),
-        canView,
         toDetail: (common) => ({ ...common, kind: 'task' }),
       })
     case 'note':
@@ -281,8 +271,8 @@ export async function readSharedInformationChangeDetail({
         sharedInformationItemId: identity.sharedInformationItemId,
         changes: await historyStore.listNoteEditHistory(
           identity.sharedInformationItemId,
+          access.scopePolicy.ownReadAccess,
         ),
-        canView,
         immutableKey: (change) =>
           `${scopeKey(change.targetScope)}:${
             noteRelatedContextKey(change.relatedContext)
@@ -298,20 +288,14 @@ export async function readSharedInformationChangeDetail({
   }
 }
 
-type CanViewHistoricalChange = (change: {
-  targetScope: HistoricalTaskChange['targetScope']
-}) => boolean
-
 function readTimetableSharedInformationChangeDetail({
   sharedInformationChangeId,
   sharedInformationItemId,
   changes,
-  canView,
 }: {
   sharedInformationChangeId: string
   sharedInformationItemId: string
   changes: HistoricalTimetableChange[]
-  canView: CanViewHistoricalChange
 }) {
   if (
     changes.some((change) =>
@@ -322,7 +306,7 @@ function readTimetableSharedInformationChangeDetail({
     (change) =>
       change.sharedInformationChangeId === sharedInformationChangeId,
   )
-  if (!selected || !canView(selected)) {
+  if (!selected) {
     return { status: 'not-found' as const }
   }
   const entries = reconstructTimetableTransitions(changes, {
@@ -383,14 +367,12 @@ function readItemSharedInformationChangeDetail<
   sharedInformationChangeId,
   sharedInformationItemId,
   changes,
-  canView,
   immutableKey,
   toDetail,
 }: {
   sharedInformationChangeId: string
   sharedInformationItemId: string
   changes: TChange[]
-  canView: CanViewHistoricalChange
   immutableKey?: (change: TChange) => string
   toDetail: (
     common: ItemChangeDetailCommon<TSnapshot>,
@@ -401,7 +383,7 @@ function readItemSharedInformationChangeDetail<
     (change) =>
       change.sharedInformationChangeId === sharedInformationChangeId,
   )
-  if (!selected || !canView(selected)) {
+  if (!selected) {
     return { status: 'not-found' as const }
   }
   const transitions = reconstructItemTransitions<TSnapshot, TChange>(
@@ -475,7 +457,7 @@ async function readItemEditHistory<
   toResponse,
 }: HistoryAccess & {
   sharedInformationItemId: string
-  loadChanges: () => Promise<TChange[]>
+  loadChanges: (scopeAccess: OwnTargetScopeAccess) => Promise<TChange[]>
   immutableKey?: (change: TChange) => string
   toEntry: (
     transition: ItemHistoryTransition<TSnapshot, TChange>,
@@ -490,15 +472,9 @@ async function readItemEditHistory<
   })
   if (access.status !== 'ready') return access
 
-  const changes = await loadChanges()
+  const changes = await loadChanges(access.scopePolicy.ownReadAccess)
   const selected = changes[0]
-  if (
-    !selected ||
-    !studentCanViewTargetScopeNamedAttribution(
-      access.affiliation,
-      selected.targetScope,
-    )
-  ) {
+  if (!selected) {
     return { status: 'not-found' as const }
   }
   const transitions = reconstructItemTransitions<TSnapshot, TChange>(
@@ -702,6 +678,6 @@ async function currentHistoryAccess({
   return {
     status: 'ready' as const,
     schoolYear: context.currentSchoolYear,
-    affiliation: context.studentAffiliation,
+    scopePolicy: createTargetScopePolicy(context.studentAffiliation),
   }
 }

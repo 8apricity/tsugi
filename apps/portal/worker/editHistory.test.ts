@@ -553,10 +553,13 @@ describe('Edit History', () => {
       },
     ]
     const historyStore: EditHistoryStore = {
-      findSharedInformationChange: async () => ({
-        kind: 'task',
-        sharedInformationItemId: taskId,
-      }),
+      findSharedInformationChange: async (changeId) =>
+        changeId === 'outside-change'
+          ? null
+          : {
+              kind: 'task',
+              sharedInformationItemId: taskId,
+            },
       listTaskEditHistory: async () => changes,
       listNoteEditHistory: async () => [],
       listTimetableChangeHistory: async () => [],

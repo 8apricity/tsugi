@@ -9,20 +9,20 @@ import {
 import type {
   DailyPlanStore,
   PeriodStandardTimetableEntry,
-  StudentAffiliation,
 } from './persistence'
 import { weekdayForSchoolDate } from './timetable'
+import type { TargetScopePolicy } from './targetScopePolicy'
 
 export type TimetableProjectionStore = Pick<
   DailyPlanStore,
   | 'listStandardTimetableEntriesForWeekday'
   | 'findStandardTimetableEntryForFloatingReferenceLabelId'
-  | 'listActiveTimetableChangesForStudent'
+  | 'listActiveTimetableChanges'
 >
 
 export interface TimetableProjectionModule {
   project(input: {
-    affiliation: StudentAffiliation
+    scopePolicy: TargetScopePolicy
     schoolDates: readonly string[]
   }): Promise<TimetableProjection[]>
 }
@@ -33,14 +33,15 @@ export function createTimetableProjectionModule({
   store: TimetableProjectionStore
 }): TimetableProjectionModule {
   return {
-    async project({ affiliation, schoolDates }) {
+    async project({ scopePolicy, schoolDates }) {
+      const affiliation = scopePolicy.studentAffiliation
       const dates = [...new Set(schoolDates)].sort()
       if (dates.length === 0) return []
 
       const requestedDateSet = new Set(dates)
       const activeChanges = (
-        await store.listActiveTimetableChangesForStudent(
-          affiliation,
+        await store.listActiveTimetableChanges(
+          scopePolicy.ownReadAccess,
           dates[0],
           dates[dates.length - 1],
         )

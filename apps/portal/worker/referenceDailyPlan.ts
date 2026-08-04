@@ -1,21 +1,22 @@
 import type {
   DailyPlanStore,
   StudentAccountAccessStore,
-  TargetScope,
 } from './persistence'
 import {
   resolveStudentOperationalContext,
   type StudentOperationalContextResult,
 } from './studentOperationalContext'
-import { studentAffiliationIncludesTargetScope } from './targetScopePolicy'
+import {
+  createTargetScopePolicy,
+  type ReferenceTargetScope,
+  type ReferenceTargetScopeAccess,
+} from './targetScopePolicy'
 import { isValidSchoolDate } from './timetable'
 import type {
   ReferenceDailyPlanContent,
   ReferenceDailyPlanNote,
   ReferenceScopeOption,
 } from '../shared/referenceDailyPlan'
-
-type ReferenceTargetScope = Exclude<TargetScope, { type: 'student' }>
 
 export type ReferenceDailyPlanResult =
   | {
@@ -59,14 +60,20 @@ export async function readReferenceDailyPlan({
     store,
   })
   if (selection.status !== 'ready') return selection
-  const { referenceScope, schoolDate: selectedSchoolDate } = selection
-
-  const tasks = await store.listActiveTasksForTargetScope(
+  const {
     referenceScope,
+    referenceScopeAccess,
+    schoolDate: selectedSchoolDate,
+  } = selection
+
+  const tasks = await store.listActiveTasks(
+    referenceScopeAccess,
+    selectedSchoolDate,
     selectedSchoolDate,
   )
-  const activeNotes = await store.listActiveNotesForTargetScope(
-    referenceScope,
+  const activeNotes = await store.listActiveNotes(
+    referenceScopeAccess,
+    selectedSchoolDate,
     selectedSchoolDate,
   )
   return {
@@ -99,7 +106,7 @@ export async function readReferenceDailyPlan({
 }
 
 function toReferenceTaskFields(
-  task: Awaited<ReturnType<DailyPlanStore['listActiveTasksForTargetScope']>>[number],
+  task: Awaited<ReturnType<DailyPlanStore['listActiveTasks']>>[number],
   targetScopeType: ReferenceTargetScope['type'],
 ) {
   return {
@@ -149,12 +156,15 @@ export async function readReferenceTasks({
     store,
   })
   if (selection.status !== 'ready') return selection
-  const tasks = await store.listActiveTasksForTargetScope(
-    selection.referenceScope,
+  const tasks = await store.listActiveTasks(
+    selection.referenceScopeAccess,
+    selection.schoolDate,
     selection.schoolDate,
   )
   return {
-    ...selection,
+    status: 'ready',
+    schoolDate: selection.schoolDate,
+    referenceScope: selection.referenceScope,
     tasks: tasks.map((task) => ({
       taskId: task.sourceId,
       ...toReferenceTaskFields(task, selection.referenceScope.type),
@@ -220,47 +230,36 @@ export async function readReferenceScopeOptions({
   })
   if (context.status !== 'ready') return context
 
-  const schoolYear = context.currentSchoolYear.schoolYear
-  const classes = await store.listClassesForSchoolYear(schoolYear)
-  const tracks = await store.listTracksForSchoolYear(schoolYear)
-  const classById = new Map(classes.map((schoolClass) => [
-    schoolClass.classId,
-    schoolClass,
-  ]))
-  const grades = [...new Set(classes.map((schoolClass) => schoolClass.grade))]
-    .sort((left, right) => left - right)
-    .filter((grade) => grade !== context.studentAffiliation.grade)
-    .map((grade): ReferenceScopeOption => ({
-      type: 'grade',
-      value: String(grade),
-      label: `${grade}年`,
-    }))
-  const classOptions = classes
-    .filter((schoolClass) =>
-      schoolClass.classId !== context.studentAffiliation.classId)
-    .map((schoolClass): ReferenceScopeOption => ({
-      type: 'class',
-      value: schoolClass.classId,
-      label: `${schoolClass.grade}年${schoolClass.classNumber}組`,
-    }))
-  const trackOptions = tracks
-    .filter((track) => track.trackId !== context.studentAffiliation.trackId)
-    .flatMap((track): ReferenceScopeOption[] => {
-      const schoolClass = classById.get(track.classId)
-      return schoolClass
-        ? [{
-            type: 'track',
-            value: track.trackId,
-            label: `${schoolClass.grade}年${schoolClass.classNumber}組 ${track.trackName}`,
-          }]
-        : []
-    })
-
-  return { status: 'ready', options: [...grades, ...classOptions, ...trackOptions] }
+  const choices = await createTargetScopePolicy(context.studentAffiliation)
+    .listReferenceScopes(store)
+  return {
+    status: 'ready',
+    options: choices.map((choice): ReferenceScopeOption => {
+      if (!('classNumber' in choice)) {
+        return {
+          type: 'grade',
+          value: String(choice.targetScope.grade),
+          label: `${choice.targetScope.grade}年`,
+        }
+      }
+      if (!('trackName' in choice)) {
+        return {
+          type: 'class',
+          value: choice.targetScope.classId,
+          label: `${choice.grade}年${choice.classNumber}組`,
+        }
+      }
+      return {
+        type: 'track',
+        value: choice.targetScope.trackId,
+        label: `${choice.grade}年${choice.classNumber}組 ${choice.trackName}`,
+      }
+    }),
+  }
 }
 
 function toReferenceNote(
-  note: Awaited<ReturnType<DailyPlanStore['listActiveNotesForTargetScope']>>[number],
+  note: Awaited<ReturnType<DailyPlanStore['listActiveNotes']>>[number],
 ): ReferenceDailyPlanNote {
   return {
     noteId: note.sharedInformationItemId,
@@ -285,6 +284,7 @@ type ReferenceRequestSelection =
       status: 'ready'
       schoolDate: string
       referenceScope: ReferenceTargetScope
+      referenceScopeAccess: ReferenceTargetScopeAccess
     }
   | Exclude<ReferenceDailyPlanResult, { status: 'ready' }>
 
@@ -321,55 +321,16 @@ async function resolveReferenceRequest({
     return { status: 'invalid-date' }
   }
 
-  const referenceScope = await resolveReferenceScope({
-    scopeType,
-    scopeValue,
-    schoolYear: context.currentSchoolYear.schoolYear,
-    store,
-  })
-  if (
-    referenceScope === null ||
-    studentAffiliationIncludesTargetScope(
-      context.studentAffiliation,
-      referenceScope,
-    )
-  ) {
+  const referenceScopeAccess = await createTargetScopePolicy(
+    context.studentAffiliation,
+  ).resolveReferenceScope({ type: scopeType, value: scopeValue }, store)
+  if (referenceScopeAccess === null) {
     return { status: 'invalid-reference-scope' }
   }
-  return { status: 'ready', schoolDate, referenceScope }
-}
-
-async function resolveReferenceScope({
-  scopeType,
-  scopeValue,
-  schoolYear,
-  store,
-}: {
-  scopeType: string | null
-  scopeValue: string | null
-  schoolYear: number
-  store: DailyPlanStore
-}): Promise<ReferenceTargetScope | null> {
-  if (!scopeValue) return null
-  if (scopeType === 'grade') {
-    const grade = Number(scopeValue)
-    const classes = await store.listClassesForSchoolYear(schoolYear)
-    return Number.isInteger(grade) && classes.some((item) => item.grade === grade)
-      ? { type: 'grade', schoolYear, grade }
-      : null
+  return {
+    status: 'ready',
+    schoolDate,
+    referenceScope: referenceScopeAccess.targetScope,
+    referenceScopeAccess,
   }
-  if (scopeType === 'class') {
-    const schoolClass = await store.findSchoolYearClassById(scopeValue, schoolYear)
-    return schoolClass ? { type: 'class', schoolYear, classId: scopeValue } : null
-  }
-  if (scopeType === 'track') {
-    const track = await store.findTrackById(scopeValue)
-    const schoolClass = track
-      ? await store.findSchoolYearClassById(track.classId, schoolYear)
-      : null
-    return track && schoolClass
-      ? { type: 'track', schoolYear, trackId: scopeValue }
-      : null
-  }
-  return null
 }
